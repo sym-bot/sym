@@ -96,7 +96,7 @@ The scheduling agent holds the queue — not because SYM told it to, but because
 
 ## Configuration
 
-SYM's coupling engine decides what gets shared between agents. These parameters control that decision. Get them right and the mesh works autonomously. Get them wrong and agents either share everything (noise) or nothing (isolation).
+SYM decides what gets shared between agents. These parameters control that decision. Get them right and the mesh works autonomously. Get them wrong and agents either share everything (noise) or nothing (isolation).
 
 ### Quick Start: Pick Your Profile
 
@@ -155,7 +155,7 @@ Energy and mood are **9.5x** more relevant cross-domain than domain-specific kno
 
 ### Drift Thresholds — What Gets Shared
 
-The coupling engine computes a `totalDrift` score (0–1) for each incoming memory. Three zones determine what happens:
+SYM computes a `totalDrift` score (0–1) for each incoming memory. Three zones determine what happens:
 
 | Zone | Drift | What happens | Confidence |
 |------|-------|-------------|------------|
