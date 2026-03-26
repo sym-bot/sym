@@ -94,6 +94,128 @@ The scheduling agent holds the queue — not because SYM told it to, but because
 
 **Autonomous, not automated.** The mesh gives every agent the full picture. Each agent acts through its own lens.
 
+## Configuration
+
+SYM's coupling engine decides what gets shared between agents. These parameters control that decision. Get them right and the mesh works autonomously. Get them wrong and agents either share everything (noise) or nothing (isolation).
+
+### Quick Start: Pick Your Profile
+
+> **Too many options?** Tell your AI coding agent what your app does. It will read this reference and configure the right profile, field weights, and freshness window for your domain. You don't need to understand the parameters — your agent does.
+
+Each agent type has a pre-built configuration. Use the one that matches your domain:
+
+```javascript
+// Node.js — fitness agent
+const node = new SymNode({
+    name: 'my-fitness-app',
+    cognitiveProfile: 'Fitness agent that tracks workouts, heart rate, and energy levels',
+    svafFieldWeights: FIELD_WEIGHT_PROFILES.fitness,
+    svafFreshnessSeconds: 10800     // 3 hours
+});
+
+// Node.js — music agent
+const node = new SymNode({
+    name: 'my-music-app',
+    cognitiveProfile: 'Music agent that responds to mood and energy states',
+    svafFieldWeights: FIELD_WEIGHT_PROFILES.music,
+    svafFreshnessSeconds: 1800      // 30 minutes
+});
+```
+
+For Swift (iOS/macOS), see [`sym-swift`](https://github.com/sym-bot/sym-swift) — same parameters, same profiles.
+
+### Agent Profiles
+
+| Profile | Best for | Freshness | Why this freshness |
+|---------|----------|-----------|-------------------|
+| `music` | Music, ambience, soundscapes | 1,800s (30min) | Stale mood = wrong music. React fast. |
+| `coding` | Coding assistants, dev tools | 7,200s (2hr) | Session context matters. Yesterday's debugging doesn't. |
+| `fitness` | Fitness, health, movement | 10,800s (3hr) | Sedentary detection needs hours of accumulated context. |
+| `messaging` | Chat, notifications, social | 3,600s (1hr) | Recent conversation context. Older messages lose relevance. |
+| `knowledge` | News feeds, research, digests | 86,400s (24hr) | Daily cycle. Today's news is relevant until tomorrow's arrives. |
+| `uniform` | General purpose, prototyping | 1,800s (30min) | No field preference. Good starting point. |
+
+### What Each Field Weight Controls
+
+Every memory on the mesh is decomposed into 7 fields. Field weights determine which fields matter most to YOUR agent when evaluating incoming memories:
+
+| Field | What it captures | Fast-coupling |
+|-------|-----------------|---------------|
+| `energy` | Fatigue, arousal, physical state | Yes — all agents care |
+| `mood` | Emotional/cognitive state | Yes — crosses all domains |
+| `activity` | What the user is doing | |
+| `intent` | What the user needs | |
+| `context` | Time, environment, situation | |
+| `urgency` | How time-sensitive | |
+| `domain` | Agent-specific expertise | No — stays sovereign |
+
+Energy and mood are **9.5x** more relevant cross-domain than domain-specific knowledge. This is learned, not hardcoded — the neural SVAF model independently discovered that `energy` (0.412) and `mood` (0.408) gate values are 9.5x higher than `domain` (0.043). The heuristic profiles reflect this.
+
+**Example:** A fitness app with `fitness` weights (`energy: 2.0, mood: 1.5`) amplifies energy drift 2x. If an incoming memory about "user exhausted" has high energy-field drift from the fitness app's local context, that drift is double-weighted in the acceptance decision. The fitness app is selective about energy signals because that's its core domain.
+
+### Drift Thresholds — What Gets Shared
+
+The coupling engine computes a `totalDrift` score (0–1) for each incoming memory. Three zones determine what happens:
+
+| Zone | Drift | What happens | Confidence |
+|------|-------|-------------|------------|
+| **Aligned** | ≤ 0.25 | Memory accepted and fused | Full |
+| **Guarded** | 0.25 – 0.50 | Memory accepted, lower confidence | Attenuated |
+| **Rejected** | > 0.50 | Memory discarded | — |
+
+Defaults work for most apps. Override only if you have a specific reason:
+
+```javascript
+// More selective — only accept closely aligned memories
+const node = new SymNode({
+    svafStableThreshold: 0.15,    // Tighter aligned zone
+    svafGuardedThreshold: 0.35    // Tighter overall acceptance
+});
+
+// More permissive — accept a wider range of signals
+const node = new SymNode({
+    svafStableThreshold: 0.35,    // Wider aligned zone
+    svafGuardedThreshold: 0.65    // Accept more signals
+});
+```
+
+### Mood vs Memory — Two Separate Gates
+
+Mood and memory use different acceptance paths:
+
+| Signal type | Gate | Default threshold | Why |
+|-------------|------|------------------|-----|
+| **Mood** | Kuramoto coupling drift | 0.8 (permissive) | Mood crosses all domain boundaries. A fitness app should hear "user is tired" from a coding assistant. |
+| **Memory** | SVAF per-field drift | 0.5 (selective) | Memories are domain-specific. A fitness app doesn't need coding debug logs. |
+
+```javascript
+// Make mood more selective (only closely related agents)
+const node = new SymNode({ moodThreshold: 0.5 });
+
+// Accept all moods unconditionally
+const node = new SymNode({ moodThreshold: 1.0 });
+```
+
+### The Drift Formula
+
+For those who want to understand the math:
+
+```
+totalDrift = (1 - temporalLambda) × fieldDrift + temporalLambda × temporalDrift
+
+where:
+  fieldDrift    = weighted average of per-field cosine distances (how different the content is)
+  temporalDrift = 1 - exp(-ageSeconds / freshnessSeconds) (how stale the signal is)
+  temporalLambda = mixing weight (default 0.3 = 70% content, 30% time)
+```
+
+At default settings (`temporalLambda: 0.3`, `freshnessSeconds: 1800`):
+- A 1-minute-old signal adds ~0.01 temporal drift — negligible
+- A 30-minute-old signal adds ~0.19 temporal drift — noticeable
+- A 2-hour-old signal adds ~0.29 temporal drift — likely pushes over threshold
+
+Increase `freshnessSeconds` for long-running sessions. Increase `temporalLambda` if recency matters more than content similarity for your domain.
+
 ## iOS / macOS Apps
 
 If your user wants to add their iOS or macOS app to the mesh, check out [`sym-swift`](https://github.com/sym-bot/sym-swift). That README has everything you need — add the package, wire in a service class, and the app joins the mesh alongside your other agents.
