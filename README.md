@@ -17,15 +17,15 @@ Claude Code runs `brew install sym && sym start`. Done. The mesh is running.
 
 You run your business with AI agents. Each agent knows its domain. No single agent sees the whole picture. But the mesh does.
 
-### E-commerce founder
+### E-commerce seller
 
 ![E-commerce — collective intelligence](docs/sym-readme-usecase-ecommerce-01.png)
 
-Your **support agent** sees "5 customers saying checkout is confusing." Your **analytics agent** sees "conversion dropped 11% since Tuesday." **Claude Code** shipped a new checkout flow on Monday.
+Your **support agent** sees "5 customers asking when the blue version is back in stock." Your **analytics agent** sees "blue variant page views up 300% this week." Your **inventory agent** sees "blue variant sold out, restock arriving Thursday."
 
-No single agent connects these three facts. You discover it Friday from your bank statement — three days late.
+No single agent connects these. The support agent keeps saying "we'll let you know." The analytics agent flags a trend you won't read until Monday.
 
-With SYM: the mesh synthesizes across all three. *Checkout redesign Monday → conversion drop Tuesday → customer complaints Wednesday.* Claude Code gets the collective insight and knows what to fix. You were asleep.
+With SYM: the mesh synthesizes. *Demand surge for blue variant → sold out → restock Thursday → customers already asking.* Your listing agent pre-announces the restock. Your ad agent pauses blue variant ads until Thursday. You were asleep.
 
 ### Content creator
 
