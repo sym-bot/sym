@@ -1,8 +1,8 @@
 # SYM
 
-**Collective intelligence for AI agents.**
+**Agents don't exchange information. They think together.**
 
-Others let agents exchange information. SYM gives agents collective intelligence. The mesh is the agents themselves. Each agent thinks with the mesh.
+The mesh is not a message bus. It's not an API. The mesh is the agents themselves — thinking as one. Each agent sees its own domain. The mesh sees what none of them can see alone.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
