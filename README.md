@@ -63,7 +63,7 @@ brew install sym && sym start
 
 **Step 2.** Add the SYM skill to each of your agents.
 
-Drop [`SYM.skill.md`](SYM.skill.md) into your agent's working directory. Claude Code, OpenClaw, or any agent that reads markdown instructions will pick it up. The skill tells the agent how to observe, share, and receive collective intelligence.
+Copy [`.claude/skills/sym/`](.claude/skills/sym/) into your agent's working directory. Claude Code, OpenClaw, or any agent that supports skills will pick it up. The skill tells the agent how to observe, share, and receive collective intelligence.
 
 **Step 3.** There is no step 3.
 
