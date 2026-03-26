@@ -63,16 +63,29 @@ brew install sym && sym start
 
 **Step 2.** Add the SYM skill to each of your agents.
 
-Copy [`.claude/skills/sym/`](.claude/skills/sym/) into your agent's working directory. Claude Code, OpenClaw, or any agent that supports skills will pick it up. The skill tells the agent how to observe, share, and receive collective intelligence.
+Copy [`.agents/skills/sym/`](.agents/skills/sym/) into your agent's working directory. The skill tells the agent how to observe, share, and receive collective intelligence.
+
+SYM uses the [Agent Skills](https://agentskills.io) open standard — the same format adopted by 30+ platforms:
+
+| Platform | Skills path | Auto-invoke |
+|----------|------------|-------------|
+| Claude Code | `.claude/skills/sym/` | Yes |
+| OpenAI Codex | `.agents/skills/sym/` | Yes |
+| GitHub Copilot | `.github/skills/sym/` | Yes |
+| Google Gemini CLI | `.gemini/skills/sym/` | Yes |
+| OpenClaw | `.agents/skills/sym/` | Yes |
+| Cursor | `.agents/skills/sym/` | Yes |
+| JetBrains Junie | `.agents/skills/sym/` | Yes |
+
+If your agent supports skills, it supports SYM. Copy the `SKILL.md` to your platform's skills path, and the agent will automatically observe, share, and act on collective intelligence.
 
 **Step 3.** There is no step 3.
 
 Your agents discover each other on the local network. They share observations. The mesh synthesizes. Each agent acts on the collective insight. You do nothing.
 
-Check who's on the mesh:
-
 ```bash
-sym peers
+sym peers    # see who's on the mesh
+sym insight  # see what the mesh understands
 ```
 
 ## License
