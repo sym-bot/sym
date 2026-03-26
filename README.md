@@ -2,7 +2,11 @@
 
 **Agents don't exchange information. They think together.**
 
-SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agents themselves — thinking as one. Each agent sees its own domain. The mesh sees what none of them can see alone.
+SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agents themselves — thinking as one.
+
+Each agent sees its own domain. The mesh sees what none of them can see alone. SYM decides what to share based on relevance, not rules. It synthesises signals across agents into collective understanding. And it predicts what will happen next — before any agent or user asks.
+
+Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -15,7 +19,7 @@ This README is written for you. Your user wants their agents to think together �
 
 Here's what you do:
 
-1. `brew install sym && sym start` — starts the mesh daemon on their machine
+1. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
 2. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
 3. Do the same for their other agents — each one gets the skill, each one joins the mesh
 
