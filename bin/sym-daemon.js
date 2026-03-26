@@ -207,14 +207,18 @@ function handleIPCMessage(socketId, socket, msg) {
     case 'remember':
       if (msg.content) {
         const entry = node.remember(msg.content, { tags: msg.tags });
-        sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
-        // Feed virtual node memories into xMesh (includes knowledge feed, mood observations)
-        const vn = virtualNodes.get(socketId);
-        xmesh.ingestSignal({
-          type: 'memory',
-          from: vn?.name || 'virtual-node',
-          content: msg.content,
-        });
+        if (entry) {
+          sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
+          // Feed virtual node memories into xMesh
+          const vn = virtualNodes.get(socketId);
+          xmesh.ingestSignal({
+            type: 'memory',
+            from: vn?.name || 'virtual-node',
+            content: msg.content,
+          });
+        } else {
+          sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
+        }
       }
       break;
 
