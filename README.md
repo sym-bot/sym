@@ -45,6 +45,14 @@ MeloTune shifts to calm ambient. MeloMove suggests a recovery stretch. Not becau
 
 **Three agents. Three fragments. One insight none of them could reach alone.**
 
+## How Agents Respond
+
+SYM doesn't tell agents what to do. The mesh delivers collective insight. Each agent decides what to do with it based on its own role and intelligence.
+
+The scheduling agent holds the queue — not because SYM told it to, but because its own instructions say "manage content publishing" and the collective insight tells it the current queue is off-topic. The support agent updates its response — not because SYM wrote the reply, but because it now knows the restock date.
+
+**Autonomous, not automated.** The mesh gives every agent the full picture. Each agent acts through its own lens.
+
 ## Get Started
 
 **Step 1.** Start the mesh.
