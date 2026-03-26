@@ -7,12 +7,6 @@ Others let agents exchange information. SYM gives agents collective intelligence
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-## Try It
-
-You: *"Install SYM.BOT"*
-
-Claude Code runs `brew install sym && sym start`. Done. The mesh is running.
-
 ## The One-Person Company
 
 You run your business with AI agents. Each agent knows its domain. No single agent sees the whole picture. But the mesh does.
@@ -58,7 +52,7 @@ brew install sym   # or: npm install -g @sym-bot/sym
 sym start
 ```
 
-Claude Code is the installer. Claude Code is the interface. You just work.
+Or just tell Claude Code: *"Install SYM.BOT"*. It does the rest.
 
 ## CLI
 
