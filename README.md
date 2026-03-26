@@ -4,9 +4,9 @@
 
 SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agents themselves — thinking as one.
 
-Each agent sees its own domain. The mesh sees what none of them can see alone. SYM decides what to share based on relevance, not rules. It synthesises signals across agents into collective understanding. And it predicts what will happen next — before any agent or user asks.
+Two neural systems power the mesh. The first decides what's relevant — filtering signals between agents so they share what matters, not everything. The second synthesises all signals over time into collective intelligence and predicts what will happen next.
 
-Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
+Each agent sees its own domain. The mesh sees what none of them can see alone. Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
