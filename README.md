@@ -52,7 +52,7 @@ brew install sym   # or: npm install -g @sym-bot/sym
 sym start
 ```
 
-Or just tell Claude Code: *"Install SYM.BOT"*. It does the rest.
+The mesh is running. Your agents can now think together.
 
 ## CLI
 
