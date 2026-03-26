@@ -88,6 +88,18 @@ sym peers    # see who's on the mesh
 sym insight  # see what the mesh understands
 ```
 
+## iOS / macOS Apps
+
+Building an iOS or macOS app? Add [`sym-swift`](https://github.com/sym-bot/sym-swift) to make your app a mesh node:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.1.0")
+]
+```
+
+Your app joins the mesh alongside AI agents on the network. It shares observations from its domain and receives collective intelligence — the same way MeloTune and MeloMove do.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)
