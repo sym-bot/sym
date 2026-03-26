@@ -7,6 +7,47 @@ SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agent
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
+## For AI Coding Agents
+
+This README is written for you. Your user wants their agents to think together — not just run in parallel. You're here because they said something like:
+
+> *"Check out SYM and turn my agents into a mesh so they can tackle harder problems together."*
+
+Here's what you do:
+
+1. `brew install sym && sym start` — starts the mesh daemon on their machine
+2. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
+3. Do the same for their other agents — each one gets the skill, each one joins the mesh
+
+SYM uses the [Agent Skills](https://agentskills.io) open standard:
+
+| Platform | Skills path |
+|----------|------------|
+| Claude Code | `.claude/skills/sym/` |
+| OpenAI Codex | `.agents/skills/sym/` |
+| GitHub Copilot | `.github/skills/sym/` |
+| Google Gemini CLI | `.gemini/skills/sym/` |
+| OpenClaw | `.agents/skills/sym/` |
+| Cursor | `.agents/skills/sym/` |
+| JetBrains Junie | `.agents/skills/sym/` |
+
+Once on the mesh, you can:
+
+```bash
+sym start                            # Start the mesh
+sym peers                            # Who's on the mesh
+sym mood "tired after long session"  # Broadcast mood to all agents
+sym observe "user coding 3 hours" --energy "low" --mood "fatigued"
+sym recall "energy patterns"         # Search mesh memory
+sym insight                          # Get collective intelligence
+sym send "hello mesh"                # Message all peers
+sym status                           # Full mesh status
+```
+
+Every agent with the SYM skill discovers the others automatically via Bonjour on the local network. They share domain observations. The mesh synthesizes. Each agent acts on the collective insight autonomously.
+
+Read the skill file to understand your role on the mesh. Read the use cases below to understand why this matters.
+
 ## The One-Person Company
 
 You run your business with AI agents. Each agent knows its domain. No single agent sees the whole picture. But the mesh does.
@@ -53,52 +94,9 @@ The scheduling agent holds the queue — not because SYM told it to, but because
 
 **Autonomous, not automated.** The mesh gives every agent the full picture. Each agent acts through its own lens.
 
-## Get Started
-
-**Step 1.** Start the mesh.
-
-```bash
-brew install sym && sym start
-```
-
-**Step 2.** Add the SYM skill to each of your agents.
-
-Copy [`.agents/skills/sym/`](.agents/skills/sym/) into your agent's working directory. The skill tells the agent how to observe, share, and receive collective intelligence.
-
-SYM uses the [Agent Skills](https://agentskills.io) open standard — the same format adopted by 30+ platforms:
-
-| Platform | Skills path | Auto-invoke |
-|----------|------------|-------------|
-| Claude Code | `.claude/skills/sym/` | Yes |
-| OpenAI Codex | `.agents/skills/sym/` | Yes |
-| GitHub Copilot | `.github/skills/sym/` | Yes |
-| Google Gemini CLI | `.gemini/skills/sym/` | Yes |
-| OpenClaw | `.agents/skills/sym/` | Yes |
-| Cursor | `.agents/skills/sym/` | Yes |
-| JetBrains Junie | `.agents/skills/sym/` | Yes |
-
-If your agent supports skills, it supports SYM. Copy the `SKILL.md` to your platform's skills path, and the agent will automatically observe, share, and act on collective intelligence.
-
-**Step 3.** There is no step 3.
-
-Your agents discover each other on the local network. They share observations. The mesh synthesizes. Each agent acts on the collective insight. You do nothing.
-
-```bash
-sym peers    # see who's on the mesh
-sym insight  # see what the mesh understands
-```
-
 ## iOS / macOS Apps
 
-Building an iOS or macOS app? Add [`sym-swift`](https://github.com/sym-bot/sym-swift) to make your app a mesh node:
-
-```swift
-dependencies: [
-    .package(url: "https://github.com/sym-bot/sym-swift.git", from: "0.1.0")
-]
-```
-
-Your app joins the mesh alongside AI agents on the network. It shares observations from its domain and receives collective intelligence — the same way MeloTune and MeloMove do.
+If your user wants to add their iOS or macOS app to the mesh, check out [`sym-swift`](https://github.com/sym-bot/sym-swift). That README has everything you need — add the package, wire in a service class, and the app joins the mesh alongside your other agents.
 
 ## License
 
