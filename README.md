@@ -4,7 +4,7 @@
 
 SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agents themselves — thinking as one.
 
-Two neural systems power the mesh. The first decides what's relevant — filtering signals between agents so they share what matters, not everything. The second synthesises all signals over time into collective intelligence and predicts what will happen next.
+Two neural systems power each agent on the mesh. The first decides what's relevant — filtering incoming signals per semantic field so agents share what matters, not everything. The second is the agent's own Liquid Neural Network, evolving cognitive state from its own observations and mesh signals. Collective intelligence emerges from coupling these independent cognitive states — not from a central model.
 
 Each agent sees its own domain. The mesh sees what none of them can see alone. Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
 
