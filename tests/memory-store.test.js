@@ -41,7 +41,7 @@ describe('MemoryStore', () => {
 
   it('should store CMB when provided', () => {
     const { createCMB } = require('@sym-bot/core');
-    const cmb = createCMB('user tired and frustrated', 'test-agent', ['mood']);
+    const cmb = createCMB({ rawText: 'user tired and frustrated', createdBy: 'test-agent' });
     const entry = store.write('user tired and frustrated', { cmb });
 
     assert.ok(entry.cmb, 'should store CMB');
@@ -75,7 +75,7 @@ describe('MemoryStore', () => {
 
     for (const cmb of cmbs) {
       assert.ok(cmb.fields, 'each CMB should have fields');
-      assert.ok(cmb.source, 'each CMB should have source');
+      assert.ok(cmb.createdBy, 'each CMB should have createdBy');
     }
   });
 
