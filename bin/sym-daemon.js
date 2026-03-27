@@ -97,8 +97,8 @@ const node = new SymNode({
 const xmesh = new XMesh({
   log,
   onInsight: (insight) => {
-    // Broadcast xMesh insight to ALL mesh peers (including iOS apps)
-    // Broadcast via proper MMP xmesh-insight frame
+    // Share this agent's cognitive state with mesh peers via xmesh-insight frame
+    // Each peer processes it through their own LNN as an inbound CMB flow
     node.broadcastInsight(insight);
     log(`xMesh: insight broadcast to mesh`);
   },
