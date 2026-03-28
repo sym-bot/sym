@@ -38,7 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { SymNode } = require('../lib/node');
-const { XMesh } = require('@sym-bot/core');
+// XMesh is created inside SymNode — no separate import needed
 
 // ── Global error handlers ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
@@ -101,17 +101,8 @@ const node = new SymNode({
   silent: false,
 });
 
-// ── xMesh Intelligence Layer ──────────────────────────────────
-
-const xmesh = new XMesh({
-  log,
-  onInsight: (insight) => {
-    // Share this agent's cognitive state with mesh peers via xmesh-insight frame
-    // Each peer processes it through their own LNN as an inbound CMB flow
-    node.broadcastInsight(insight);
-    log(`xMesh: insight broadcast to mesh`);
-  },
-});
+// xMesh is created inside SymNode — access via node._xmesh
+// No separate xMesh instance needed in the daemon.
 
 // ── IPC Server (Unix Socket) ───────────────────────────────────
 
@@ -198,7 +189,7 @@ function handleIPCMessage(socketId, socket, msg) {
         sendIPC(socket, { type: 'result', action: 'mood', peers: node.peers().length });
         // Feed virtual node moods into xMesh
         const vnMood = virtualNodes.get(socketId);
-        xmesh.ingestSignal({
+        node._xmesh.ingestSignal({
           type: 'mood',
           from: vnMood?.name || 'virtual-node',
           content: msg.mood,
@@ -218,13 +209,7 @@ function handleIPCMessage(socketId, socket, msg) {
         const entry = node.remember(msg.content, { tags: msg.tags });
         if (entry) {
           sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
-          // Feed virtual node memories into xMesh
-          const vn = virtualNodes.get(socketId);
-          xmesh.ingestSignal({
-            type: 'memory',
-            from: vn?.name || 'virtual-node',
-            content: msg.content,
-          });
+          // xMesh signal already fed inside node.remember() — no double ingestion
         } else {
           sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
         }
@@ -261,7 +246,7 @@ function handleIPCMessage(socketId, socket, msg) {
       sendIPC(socket, {
         type: 'result',
         action: 'xmesh-context',
-        context: xmesh.getContext({ timeWindow: msg.timeWindow }),
+        context: node._xmesh.getContext({ timeWindow: msg.timeWindow }),
       });
       break;
 
@@ -269,7 +254,7 @@ function handleIPCMessage(socketId, socket, msg) {
       sendIPC(socket, {
         type: 'result',
         action: 'xmesh-search',
-        insights: xmesh.searchInsights(msg.query),
+        insights: node._xmesh.searchInsights(msg.query),
       });
       break;
 
@@ -300,7 +285,7 @@ function forwardEventsToVirtualNodes() {
     broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
 
     // Feed messages (including Telegram) into xMesh
-    xmesh.ingestSignal({ type: 'message', from, content });
+    node._xmesh.ingestSignal({ type: 'message', from, content });
 
     // Wake sleeping peers that might need this message.
     // The daemon acts as wake proxy — it has APNs keys and gossiped wake channels.
@@ -314,7 +299,7 @@ function forwardEventsToVirtualNodes() {
 
   node.on('mood-accepted', (data) => {
     // Feed into xMesh intelligence layer
-    xmesh.ingestSignal({
+    node._xmesh.ingestSignal({
       type: 'mood',
       from: data.from || data.fromName || 'unknown',
       content: data.mood,
@@ -335,7 +320,7 @@ function forwardEventsToVirtualNodes() {
 
   node.on('memory-received', ({ from, entry, decision }) => {
     // Feed into xMesh intelligence layer
-    xmesh.ingestSignal({
+    node._xmesh.ingestSignal({
       type: 'memory',
       from: from,
       content: entry.content,
