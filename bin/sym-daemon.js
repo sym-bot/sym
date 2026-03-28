@@ -254,7 +254,7 @@ function handleIPCMessage(socketId, socket, msg) {
       sendIPC(socket, {
         type: 'result',
         action: 'xmesh-search',
-        insights: node._xmesh.searchInsights(msg.query),
+        insights: node._xmesh.getInsights(msg.query),
       });
       break;
 
