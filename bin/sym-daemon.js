@@ -356,12 +356,8 @@ function broadcastToVirtualNodes(msg) {
 // ── launchd Install/Uninstall ──────────────────────────────────
 
 function launchAgentPlist() {
-  // Resolve node binary — prefer stable symlink over Cellar path
-  const nodePath = fs.existsSync('/opt/homebrew/bin/node')
-    ? '/opt/homebrew/bin/node'
-    : fs.existsSync('/usr/local/bin/node')
-      ? '/usr/local/bin/node'
-      : process.execPath;
+  // Resolve node binary — use the same node that ran the install command
+  const nodePath = process.execPath;
 
   const scriptPath = path.resolve(__dirname, 'sym-daemon.js');
   const symDir = path.resolve(__dirname, '..');
