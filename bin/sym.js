@@ -130,41 +130,35 @@ function cmdMood() {
 }
 
 function cmdObserve() {
-  const positional = [];
-  const fields = {};
-  const fieldNames = ['activity', 'energy', 'mood', 'intent', 'context', 'domain', 'urgency'];
-
-  for (let i = 1; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith('--') && fieldNames.includes(arg.slice(2))) {
-      const name = arg.slice(2);
-      fields[name] = args[++i] || '';
-    } else {
-      positional.push(arg);
-    }
-  }
-
+  const hasFieldsFlag = args.includes('--fields');
+  const positional = args.slice(1).filter(a => a !== '--fields');
   const content = positional.join(' ');
+
   if (!content) {
-    console.error('Usage: sym observe <text> [--activity ...] [--energy ...] ...');
+    console.error('Usage: sym observe <text> [--fields]');
+    console.error('  Without --fields: text is processed via heuristic CMB extraction');
+    console.error('  With --fields: text must be a JSON object with CAT7 fields (focus, issue, intent, motivation, commitment, perspective, mood)');
     process.exit(1);
   }
 
-  // Build tags from fields
   const tags = ['observation'];
-  if (fields.mood) tags.push('mood');
-  if (fields.energy) tags.push('energy');
+
+  if (hasFieldsFlag) {
+    // Structured CMB mode — content is a JSON object with CAT7 fields
+    try {
+      const cmb = JSON.parse(content);
+      if (cmb.mood) tags.push('mood');
+      if (cmb.focus) tags.push(cmb.focus.substring(0, 30));
+    } catch {
+      // Not valid JSON — treat as text with --fields hint
+    }
+  }
 
   const msg = {
     type: 'remember',
     content,
     tags: tags.join(', '),
   };
-
-  // If structured fields provided, prepend them to content as JSON metadata
-  if (Object.keys(fields).length > 0) {
-    msg.content = content + '\n[CMB: ' + JSON.stringify(fields) + ']';
-  }
 
   cmdIPC(msg, (res) => {
     console.log('Observation shared with mesh.');
@@ -365,19 +359,20 @@ ${bold('Usage:')}
   sym logs                           Tail daemon logs
   sym version                        Show version
 
-${bold('Observe fields:')}
-  --activity    What the user is doing
-  --energy      Energy/fatigue level
-  --mood        Emotional/cognitive state
-  --intent      What the user needs
-  --context     Temporal, environmental context
-  --domain      Domain-specific details
-  --urgency     Time-sensitivity
+${bold('CAT7 fields (--fields mode):')}
+  focus         What the text is centrally about
+  issue         Risks, gaps, open questions
+  intent        Desired change or purpose
+  motivation    Reasons, drivers, incentives
+  commitment    Who will do what, by when
+  perspective   Whose viewpoint, situational context
+  mood          Emotion (valence) + energy (arousal)
 
 ${bold('Examples:')}
   sym start
   sym mood "tired after long session"
-  sym observe "user coding for 3 hours" --energy "medium" --mood "focused"
+  sym observe "user coding for 3 hours" --focus "auth module" --mood '{"text":"focused","valence":0.3,"arousal":0.5}'
+  sym observe '{"focus":"debugging auth","issue":"exhausted","intent":"needs break","motivation":"prevent bugs","commitment":"coding session","perspective":"developer, afternoon","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}' --fields
   sym recall "energy patterns"
   sym insight
 `);

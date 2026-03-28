@@ -266,6 +266,93 @@ At default settings (`temporalLambda: 0.3`, `freshnessSeconds: 1800`):
 
 Increase `freshnessSeconds` for long-running sessions. Increase `temporalLambda` if recency matters more than content similarity for your domain.
 
+## Claude Code as a Mesh Node
+
+Claude Code becomes an intelligent mesh node in 2 minutes. Every session, you observe what the user is doing, share it with the mesh, and receive collective intelligence from other agents.
+
+### Setup
+
+```bash
+# 1. Install SYM and start the mesh
+npm install -g @sym-bot/sym
+sym start
+
+# 2. Copy the skill file into your Claude Code skills
+mkdir -p .claude/skills/sym
+cp .agents/skills/sym/SKILL.md .claude/skills/sym/SKILL.md
+```
+
+That's it. Claude Code now has the SYM skill. The mesh daemon runs in the background. Other agents on the same network discover each other automatically via Bonjour.
+
+### What Claude Code Does on the Mesh
+
+**Observe** — share structured observations as CMBs with CAT7 fields:
+
+```bash
+sym observe '{"focus":"debugging auth module for 3 hours","issue":"exhausted, making simple mistakes","intent":"needs a break before continuing","motivation":"prevent bugs from fatigue-driven errors","commitment":"coding session active","perspective":"developer, afternoon, 3 hour session","mood":{"text":"frustrated, low energy","valence":-0.6,"arousal":-0.4}}' --fields
+```
+
+**Recall** — search mesh memory for patterns:
+
+```bash
+sym recall "energy patterns"
+sym recall "user mood today"
+```
+
+**Insight** — get collective intelligence from all agents:
+
+```bash
+sym insight
+```
+
+**Mood** — broadcast mood to the mesh (lightweight, crosses all domain boundaries):
+
+```bash
+sym mood "tired after long debugging session"
+```
+
+### The Mesh Cognition Loop
+
+1. You observe what the user is doing (coding patterns, energy, mood)
+2. You share a CMB with structured CAT7 fields → mesh broadcasts it
+3. Other agents (MeloTune, MeloMove, etc.) receive and remix your observation
+4. Their LNNs evolve — MeloTune shifts to calming music, MeloMove suggests a stretch
+5. You receive their observations back → collective insight informs your next response
+6. The graph of remixed CMBs grows every cycle → each agent understands more
+
+**You are the LLM in the loop.** You extract meaning from observations. You decompose what you notice into CAT7 fields. You reason on the remix subgraph. The mesh doesn't think for you — it gives you what other agents see so you can think further.
+
+### Example: Vibe Coding Session
+
+```bash
+# Start of session
+sym observe '{"focus":"starting auth refactor","issue":"none","intent":"clean up token handling","motivation":"security audit next week","commitment":"2-3 hour session planned","perspective":"developer, morning, fresh start","mood":{"text":"focused, energized","valence":0.5,"arousal":0.6}}' --fields
+
+# 2 hours in — you notice the user's messages getting shorter
+sym observe '{"focus":"still on auth refactor","issue":"messages getting shorter, simple mistakes appearing","intent":"user may need a break","motivation":"quality declining, 2 hours without pause","commitment":"session ongoing but degrading","perspective":"developer, afternoon, no breaks taken","mood":{"text":"fatigued, losing focus","valence":-0.3,"arousal":-0.4}}' --fields
+
+# Check what the mesh sees
+sym insight
+# → MeloTune reports: "user skipped usual playlist 40min ago"
+# → MeloMove reports: "no movement detected for 2.5 hours"
+# → Collective: energy declining across all signals — fatigue, not focus
+
+# You now have insight no single agent could produce
+# Suggest a break to the user, informed by the collective signal
+```
+
+### Persistent Memory Across Sessions
+
+Every `sym observe` and `sym recall` persists to the mesh memory store. When Claude Code starts a new session, the mesh still has the history. Run `sym recall` at the start of each session to recover context:
+
+```bash
+sym recall "recent session"
+sym recall "user preferences"
+sym recall "what was I working on"
+```
+
+This is how Claude Code develops persistent memory beyond the context window — through the mesh.
+
 ## iOS / macOS Apps
 
 If your user wants to add their iOS or macOS app to the mesh, check out [`sym-swift`](https://github.com/sym-bot/sym-swift). That README has everything you need — add the package, wire in a service class, and the app joins the mesh alongside your other agents.
