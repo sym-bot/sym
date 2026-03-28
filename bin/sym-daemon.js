@@ -40,6 +40,15 @@ const os = require('os');
 const { SymNode } = require('../lib/node');
 const { XMesh } = require('@sym-bot/core');
 
+// ── Global error handlers ─────────────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error(`[${new Date().toISOString()}] [FATAL] Uncaught exception: ${err.stack || err.message}`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`[${new Date().toISOString()}] [ERROR] Unhandled rejection: ${reason}`);
+});
+
 // ── Configuration ──────────────────────────────────────────────
 
 const SOCKET_PATH = process.env.SYM_SOCKET || '/tmp/sym.sock';
@@ -297,7 +306,7 @@ function forwardEventsToVirtualNodes() {
     // The daemon acts as wake proxy — it has APNs keys and gossiped wake channels.
     // When a remote peer (Telegram bot) sends a message, and a local peer (MeloTune)
     // is sleeping, the daemon wakes it so the relay can deliver the message.
-    node._wakeSleepingPeers('message', {
+    node._wakeManager?.wakeSleepingPeers('message', {
       type: 'message', from: node._identity.nodeId, fromName: node.name,
       content, timestamp: Date.now(),
     });
@@ -314,7 +323,7 @@ function forwardEventsToVirtualNodes() {
 
     // Also wake on mood — daemon may receive mood from a remote peer
     // that a sleeping local peer should hear
-    node._wakeSleepingPeers('mood', {
+    node._wakeManager?.wakeSleepingPeers('mood', {
       type: 'mood', from: node._identity.nodeId, fromName: node.name,
       mood: data.mood, timestamp: Date.now(),
     });
