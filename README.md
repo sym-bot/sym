@@ -9,6 +9,7 @@ Two neural systems power each agent on the mesh. The first decides what's releva
 Each agent sees its own domain. The mesh sees what none of them can see alone. Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
+[![MMP Spec](https://img.shields.io/badge/MMP_Spec-v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 ## For AI Coding Agents
