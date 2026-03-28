@@ -36,8 +36,5 @@
   },
   "bundledDependencies": [
     "@sym-bot/core"
-  ],
-  "bundleDependencies": [
-    "@sym-bot/core"
   ]
 }
