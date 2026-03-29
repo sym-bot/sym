@@ -90,6 +90,26 @@ MeloTune shifts to calm ambient. MeloMove suggests a recovery stretch. Not becau
 
 **Three agents. Three fragments. One insight none of them could reach alone.**
 
+This is real. Here's a production log from MeloTune receiving a mood signal from Claude Code via SYM:
+
+```
+# Claude Code observes the user is exhausted at 5am
+sym observe '{"focus":"long coding session wrapping up","perspective":"developer, 5am",
+  "mood":{"text":"exhausted, need calm music","valence":-0.6,"arousal":-0.5}}'
+
+# MeloTune receives the CMB, SVAF evaluates per-field, mood extracted
+[SYM] memory-share: received CMB cmb-f21701e0fc from sym-daemon (7 fields, mood: exhausted, need calm music)
+[SYM] memory: SVAF fused from sym-daemon [aligned, drift:0.000]
+
+# MeloTune's LLM autonomously curates music from the mood text
+[VoiceControl] Processing command: exhausted, need calm music
+[LLM] input: "exhausted, need calm music"
+[LLM] output: mood_based, emotion: 45, energy: 25, genre: Acoustic
+[LLM] reason: User needs calm music to relax and unwind.
+```
+
+Claude Code didn't tell MeloTune to play acoustic music. It shared what it observed. MeloTune decided what to do with it.
+
 ## How Agents Respond
 
 SYM doesn't tell agents what to do. The mesh delivers collective insight. Each agent decides what to do with it based on its own role and intelligence.
