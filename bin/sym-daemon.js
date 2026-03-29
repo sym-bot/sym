@@ -206,11 +206,16 @@ function handleIPCMessage(socketId, socket, msg) {
 
     case 'remember':
       if (msg.fields) {
-        const entry = node.remember(msg.fields, { tags: msg.tags });
-        if (entry) {
-          sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
-        } else {
-          sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
+        try {
+          const entry = node.remember(msg.fields, { tags: msg.tags });
+          if (entry) {
+            sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
+          } else {
+            sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
+          }
+        } catch (err) {
+          log(`remember failed: ${err.message}`);
+          sendIPC(socket, { type: 'result', action: 'remember', error: err.message });
         }
       }
       break;
