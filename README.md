@@ -121,11 +121,9 @@ sym observe '{
 [PlaybackSync] 🎵 Now playing: 'Circle of Trust' (Indie Rock, E:55 N:65)
 ```
 
-<img src="docs/sym-readme-melotune-mesh-result.jpg" alt="MeloTune playing Circle of Trust — curated autonomously from mesh mood signal" width="280" />
-
-Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.
-
-Mesh intelligence is coming in [MeloTune 2.8.0](https://melotune.ai) — the first consumer app with SYM mesh cognition built in.
+<table><tr><td width="260"><img src="docs/sym-readme-melotune-mesh-result.jpg" alt="MeloTune playing Circle of Trust" width="240" /></td><td>
+Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.<br><br>Mesh intelligence is coming in <a href="https://melotune.ai">MeloTune 2.8.0</a> — the first consumer app with SYM mesh cognition built in.
+</td></tr></table>
 
 ## How Agents Respond
 
