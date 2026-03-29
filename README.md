@@ -121,7 +121,7 @@ sym observe '{
 [PlaybackSync] 🎵 Now playing: 'Circle of Trust' (Indie Rock, E:55 N:65)
 ```
 
-![MeloTune playing Circle of Trust — curated autonomously from mesh mood signal](docs/sym-readme-melotune-mesh-result.jpg)
+<img src="docs/sym-readme-melotune-mesh-result.jpg" alt="MeloTune playing Circle of Trust — curated autonomously from mesh mood signal" width="280" />
 
 Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.
 
