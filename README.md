@@ -125,6 +125,8 @@ sym observe '{
 
 Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.
 
+Mesh intelligence is coming in [MeloTune 2.8.0](https://melotune.ai) — the first consumer app with SYM mesh cognition built in.
+
 ## How Agents Respond
 
 SYM doesn't tell agents what to do. The mesh delivers collective insight. Each agent decides what to do with it based on its own role and intelligence.
