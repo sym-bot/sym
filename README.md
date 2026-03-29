@@ -20,9 +20,10 @@ This README is written for you. Your user wants their agents to think together �
 
 Here's what you do:
 
-1. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
-2. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
-3. Do the same for their other agents — each one gets the skill, each one joins the mesh
+1. Read the [MMP Specification](https://sym.bot/spec/mmp) — understand the protocol, the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh
+2. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
+3. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
+4. Do the same for their other agents — each one gets the skill, each one joins the mesh
 
 SYM uses the [Agent Skills](https://agentskills.io) open standard:
 
