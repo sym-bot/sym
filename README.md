@@ -177,6 +177,41 @@ Mood is the only fast-coupling field — affective state crosses all domain boun
 
 The fields are universal and immutable. Domain-specific interpretation happens in the field text, not the field name. A coding agent's `focus` is "debugging auth module." A legal agent's `focus` is "merger due diligence." Same field, different domain lens.
 
+### How Agents Extract CAT7 Fields
+
+The protocol does not parse raw text. The agent extracts fields — it IS the intelligence. How it does this depends on the agent type:
+
+| Agent type | How to extract | Example |
+|-----------|---------------|---------|
+| **AI coding agents** (Claude Code, Copilot, Cursor) | The agent IS the LLM — extract fields directly from observations | Install the [SYM skill](.agents/skills/sym/SKILL.md) — the agent knows what to do |
+| **Structured-data agents** (music player, fitness tracker, IoT) | Map domain data directly to CAT7 fields — no LLM needed | `focus: "workout completed"`, `commitment: "45min, 320 cal"`, `mood: {text: "energized", valence: 0.7, arousal: 0.6}` |
+| **Apps with unstructured text** (chat, notes, logs) | Call any LLM API with the prompt template below to extract fields | See prompt template |
+
+**LLM prompt template** — copy into your LLM API call for field extraction:
+
+```
+Extract CAT7 fields from this observation. Return JSON only.
+
+Fields:
+- focus: What this is centrally about (1 sentence)
+- issue: Risks, gaps, problems. "none" if none.
+- intent: Desired change or purpose. "observation" if purely informational.
+- motivation: Why this matters. Omit if unclear.
+- commitment: What has been confirmed or established. Omit if none.
+- perspective: Whose viewpoint, situational context (role, time, duration).
+- mood: { "text": "emotion keyword", "valence": -1 to 1, "arousal": -1 to 1 }
+  valence: negative(-1) to positive(+1). arousal: calm(-1) to activated(+1).
+
+Only include fields you can meaningfully extract. Omit rather than guess.
+
+Observation:
+{observation_text}
+
+JSON:
+```
+
+Once you have the JSON, call `sym observe` with it. The SDK creates the CMB, encodes the vectors, and broadcasts to the mesh.
+
 ### Custom Weights for Your Domain
 
 The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. The pattern:
