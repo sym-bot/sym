@@ -302,7 +302,7 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('mood-accepted', (data) => {
-    // xMesh ingestion happens via memory-share → SVAF path, not here.
+    // xMesh ingestion happens via cmb → SVAF path, not here.
     // Wake sleeping local peers so they can receive the mood.
     node._wakeManager?.wakeSleepingPeers('mood', {
       type: 'mood', from: node._identity.nodeId, fromName: node.name,
