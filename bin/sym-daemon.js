@@ -183,19 +183,8 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
     }
 
-    case 'mood':
-      if (msg.mood) {
-        node.broadcastMood(msg.mood, { context: msg.context });
-        sendIPC(socket, { type: 'result', action: 'mood', peers: node.peers().length });
-        // Feed virtual node moods into xMesh
-        const vnMood = virtualNodes.get(socketId);
-        node._xmesh.ingestSignal({
-          type: 'mood',
-          from: vnMood?.name || 'virtual-node',
-          content: msg.mood,
-        });
-      }
-      break;
+    // 'mood' is handled via 'remember' — mood text becomes a CMB with mood field.
+    // SVAF per-field gating on the receiver decides what passes through.
 
     case 'message':
       if (msg.content) {
@@ -205,11 +194,10 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'remember':
-      if (msg.content) {
-        const entry = node.remember(msg.content, { tags: msg.tags });
+      if (msg.fields) {
+        const entry = node.remember(msg.fields, { tags: msg.tags });
         if (entry) {
           sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
-          // xMesh signal already fed inside node.remember() — no double ingestion
         } else {
           sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
         }
@@ -298,16 +286,8 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('mood-accepted', (data) => {
-    // Feed into xMesh intelligence layer
-    node._xmesh.ingestSignal({
-      type: 'mood',
-      from: data.from || data.fromName || 'unknown',
-      content: data.mood,
-      drift: data.drift,
-    });
-
-    // Also wake on mood — daemon may receive mood from a remote peer
-    // that a sleeping local peer should hear
+    // xMesh ingestion happens via memory-share → SVAF path, not here.
+    // Wake sleeping local peers so they can receive the mood.
     node._wakeManager?.wakeSleepingPeers('mood', {
       type: 'mood', from: node._identity.nodeId, fromName: node.name,
       mood: data.mood, timestamp: Date.now(),
@@ -319,14 +299,7 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('memory-received', ({ from, entry, decision }) => {
-    // Feed into xMesh intelligence layer
-    node._xmesh.ingestSignal({
-      type: 'memory',
-      from: from,
-      content: entry.content,
-      decision: decision,
-    });
-
+    // xMesh ingestion already happens in frame-handler after SVAF evaluation.
     broadcastToVirtualNodes({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
   });
 }

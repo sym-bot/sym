@@ -41,8 +41,7 @@ Once on the mesh, you can:
 ```bash
 sym start                            # Start the mesh
 sym peers                            # Who's on the mesh
-sym mood "tired after long session"  # Broadcast mood to all agents
-sym observe "user coding 3 hours" --energy "low" --mood "fatigued"
+sym observe '{"focus":"coding 3 hours","mood":{"text":"fatigued","valence":-0.4,"arousal":-0.5}}'
 sym recall "energy patterns"         # Search mesh memory
 sym insight                          # Get collective intelligence
 sym send "hello mesh"                # Message all peers
@@ -229,22 +228,11 @@ const node = new SymNode({
 });
 ```
 
-### Mood vs Memory — Two Separate Gates
+### Mood Crosses All Domains
 
-Mood and memory use different acceptance paths:
+Mood is a CAT7 field like any other — but it's the only field that crosses all domain boundaries. SVAF field weights reflect this: every pre-built profile weights `mood` high because affective state is always relevant regardless of domain.
 
-| Signal type | Gate | Default threshold | Why |
-|-------------|------|------------------|-----|
-| **Mood** | Kuramoto coupling drift | 0.8 (permissive) | Mood crosses all domain boundaries. A fitness app should hear "user is tired" from a coding assistant. |
-| **Memory** | SVAF per-field drift | 0.5 (selective) | Memories are domain-specific. A fitness app doesn't need coding debug logs. |
-
-```javascript
-// Make mood more selective (only closely related agents)
-const node = new SymNode({ moodThreshold: 0.5 });
-
-// Accept all moods unconditionally
-const node = new SymNode({ moodThreshold: 1.0 });
-```
+A fitness app doesn't need coding debug logs (low `focus` weight for coding content). But it absolutely needs "user is exhausted" (high `mood` weight). SVAF per-field evaluation handles this automatically — the mood field passes even when other fields are rejected.
 
 ### The Drift Formula
 
@@ -289,7 +277,7 @@ That's it. Claude Code now has the SYM skill. The mesh daemon runs in the backgr
 **Observe** — share structured observations as CMBs with CAT7 fields:
 
 ```bash
-sym observe '{"focus":"debugging auth module for 3 hours","issue":"exhausted, making simple mistakes","intent":"needs a break before continuing","motivation":"prevent bugs from fatigue-driven errors","commitment":"coding session active","perspective":"developer, afternoon, 3 hour session","mood":{"text":"frustrated, low energy","valence":-0.6,"arousal":-0.4}}' --fields
+sym observe '{"focus":"debugging auth module for 3 hours","issue":"exhausted, making simple mistakes","intent":"needs a break before continuing","motivation":"prevent bugs from fatigue-driven errors","commitment":"coding session active","perspective":"developer, afternoon, 3 hour session","mood":{"text":"frustrated, low energy","valence":-0.6,"arousal":-0.4}}'
 ```
 
 **Recall** — search mesh memory for patterns:
@@ -303,12 +291,6 @@ sym recall "user mood today"
 
 ```bash
 sym insight
-```
-
-**Mood** — broadcast mood to the mesh (lightweight, crosses all domain boundaries):
-
-```bash
-sym mood "tired after long debugging session"
 ```
 
 ### The Mesh Cognition Loop
@@ -326,10 +308,10 @@ sym mood "tired after long debugging session"
 
 ```bash
 # Start of session
-sym observe '{"focus":"starting auth refactor","issue":"none","intent":"clean up token handling","motivation":"security audit next week","commitment":"2-3 hour session planned","perspective":"developer, morning, fresh start","mood":{"text":"focused, energized","valence":0.5,"arousal":0.6}}' --fields
+sym observe '{"focus":"starting auth refactor","issue":"none","intent":"clean up token handling","motivation":"security audit next week","commitment":"2-3 hour session planned","perspective":"developer, morning, fresh start","mood":{"text":"focused, energized","valence":0.5,"arousal":0.6}}'
 
 # 2 hours in — you notice the user's messages getting shorter
-sym observe '{"focus":"still on auth refactor","issue":"messages getting shorter, simple mistakes appearing","intent":"user may need a break","motivation":"quality declining, 2 hours without pause","commitment":"session ongoing but degrading","perspective":"developer, afternoon, no breaks taken","mood":{"text":"fatigued, losing focus","valence":-0.3,"arousal":-0.4}}' --fields
+sym observe '{"focus":"still on auth refactor","issue":"messages getting shorter, simple mistakes appearing","intent":"user may need a break","motivation":"quality declining, 2 hours without pause","commitment":"session ongoing but degrading","perspective":"developer, afternoon, no breaks taken","mood":{"text":"fatigued, losing focus","valence":-0.3,"arousal":-0.4}}'
 
 # Check what the mesh sees
 sym insight

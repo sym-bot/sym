@@ -44,7 +44,7 @@ sym observe '{
   "commitment": "coding session with Claude",
   "perspective": "developer, afternoon, 3 hour session",
   "mood": {"text": "frustrated, low energy", "valence": -0.6, "arousal": -0.4}
-}' --fields
+}'
 ```
 
 **Why you extract fields:** You understand context, nuance, and domain semantics. "User exhausted after 8 hours debugging" — only you know that the issue is fatigue, the intent is break needed, the motivation is error prevention. You are the intelligence. Extract it.
@@ -70,7 +70,7 @@ sym observe '{
   "commitment": "playing calm ambient for 30 minutes",
   "perspective": "music agent, responding to collective understanding",
   "mood": {"text": "calm, supportive", "valence": 0.3, "arousal": -0.3}
-}' --fields
+}'
 ```
 
 This is the synthesis loop. You observe → share → the mesh understands → you receive insight → you act → you share what you did → the mesh understands more. Intelligence compounds.

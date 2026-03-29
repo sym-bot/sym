@@ -12,8 +12,7 @@
  *   sym stop                          # Stop daemon
  *   sym status                        # Show mesh status
  *   sym peers                         # List connected peers
- *   sym mood <text>                   # Broadcast mood signal
- *   sym observe <text> [--fields]     # Share observation with CMB fields
+ *   sym observe <json>                # Share observation (CAT7 fields as JSON)
  *   sym recall <query>                # Search mesh memory
  *   sym insight                       # Get xMesh collective intelligence
  *   sym send <message>                # Send message to all peers
@@ -55,7 +54,7 @@ switch (command) {
   case 'stop':    cmdStop(); break;
   case 'status':  cmdIPC({ type: 'status' }, formatStatus); break;
   case 'peers':   cmdIPC({ type: 'peers' }, formatPeers); break;
-  case 'mood':    cmdMood(); break;
+  case 'mood':
   case 'observe': cmdObserve(); break;
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
@@ -118,50 +117,31 @@ function cmdStop() {
   }
 }
 
-function cmdMood() {
-  const text = args.slice(1).join(' ');
-  if (!text) {
-    console.error('Usage: sym mood <text>');
-    process.exit(1);
-  }
-  cmdIPC({ type: 'mood', mood: text }, (msg) => {
-    console.log(`Mood broadcast to ${msg.peers || 0} peer(s).`);
-  });
-}
 
 function cmdObserve() {
-  const hasFieldsFlag = args.includes('--fields');
-  const positional = args.slice(1).filter(a => a !== '--fields');
-  const content = positional.join(' ');
+  const content = args.slice(1).join(' ');
 
   if (!content) {
-    console.error('Usage: sym observe <text> [--fields]');
-    console.error('  Without --fields: text is processed via heuristic CMB extraction');
-    console.error('  With --fields: text must be a JSON object with CAT7 fields (focus, issue, intent, motivation, commitment, perspective, mood)');
+    console.error('Usage: sym observe \'{"focus":"...","issue":"...","intent":"...","motivation":"...","commitment":"...","perspective":"...","mood":{"text":"...","valence":0,"arousal":0}}\'');
+    console.error('  The calling agent (LLM) extracts CAT7 fields. The protocol does not parse raw text.');
     process.exit(1);
   }
 
-  const tags = ['observation'];
-
-  if (hasFieldsFlag) {
-    // Structured CMB mode — content is a JSON object with CAT7 fields
-    try {
-      const cmb = JSON.parse(content);
-      if (cmb.mood) tags.push('mood');
-      if (cmb.focus) tags.push(cmb.focus.substring(0, 30));
-    } catch {
-      // Not valid JSON — treat as text with --fields hint
-    }
+  let fields;
+  try {
+    fields = JSON.parse(content);
+  } catch {
+    console.error('Error: content must be a JSON object with CAT7 fields.');
+    console.error('  The agent LLM is responsible for extracting fields from observations.');
+    process.exit(1);
   }
 
-  const msg = {
-    type: 'remember',
-    content,
-    tags: tags.join(', '),
-  };
-
-  cmdIPC(msg, (res) => {
-    console.log('Observation shared with mesh.');
+  cmdIPC({ type: 'remember', fields }, (res) => {
+    if (res.duplicate) {
+      console.log('Already shared (duplicate CMB).');
+    } else {
+      console.log(`Shared: ${res.key || ''}`);
+    }
   });
 }
 
@@ -351,28 +331,25 @@ ${bold('Usage:')}
   sym stop                           Stop the mesh daemon
   sym status                         Show mesh status
   sym peers                          List connected peers
-  sym mood <text>                    Broadcast mood signal
-  sym observe <text> [--fields]      Share observation with CMB fields
+  sym observe <json>                 Share observation (CAT7 fields as JSON)
   sym recall <query>                 Search mesh memory
   sym insight                        Get collective intelligence
   sym send <message>                 Send message to all peers
   sym logs                           Tail daemon logs
   sym version                        Show version
 
-${bold('CAT7 fields (--fields mode):')}
-  focus         What the text is centrally about
+${bold('CAT7 fields:')}
+  focus         What the observation is centrally about
   issue         Risks, gaps, open questions
   intent        Desired change or purpose
   motivation    Reasons, drivers, incentives
   commitment    Who will do what, by when
   perspective   Whose viewpoint, situational context
-  mood          Emotion (valence) + energy (arousal)
+  mood          { text, valence (-1..1), arousal (-1..1) }
 
 ${bold('Examples:')}
   sym start
-  sym mood "tired after long session"
-  sym observe "user coding for 3 hours" --focus "auth module" --mood '{"text":"focused","valence":0.3,"arousal":0.5}'
-  sym observe '{"focus":"debugging auth","issue":"exhausted","intent":"needs break","motivation":"prevent bugs","commitment":"coding session","perspective":"developer, afternoon","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}' --fields
+  sym observe '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
   sym recall "energy patterns"
   sym insight
 `);
