@@ -1,6 +1,6 @@
 {
   "name": "@sym-bot/sym",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Infrastructure and protocol for multi-agent collective intelligence",
   "main": "lib/node.js",
   "bin": {
@@ -30,11 +30,16 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@sym-bot/core": "file:../sym-core",
+    "@sym-bot/core": "^0.1.0",
     "bonjour-service": "^1.3.0",
     "ws": "^8.20.0"
   },
-  "bundledDependencies": [
-    "@sym-bot/core"
+  "files": [
+    "bin/",
+    "lib/",
+    ".agents/",
+    ".claude/",
+    "LICENSE",
+    "README.md"
   ]
 }
