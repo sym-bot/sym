@@ -199,8 +199,10 @@ Fields:
 - motivation: Why this matters. Omit if unclear.
 - commitment: What has been confirmed or established. Omit if none.
 - perspective: Whose viewpoint, situational context (role, time, duration).
-- mood: { "text": "emotion keyword", "valence": -1 to 1, "arousal": -1 to 1 }
+- mood: { "text": "emotion keyword" }
+  Optionally include "valence" (-1 to 1) and "arousal" (-1 to 1) if confident.
   valence: negative(-1) to positive(+1). arousal: calm(-1) to activated(+1).
+  Omit valence/arousal if you would be guessing.
 
 Only include fields you can meaningfully extract. Omit rather than guess.
 
