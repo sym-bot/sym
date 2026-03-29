@@ -210,7 +210,7 @@ Observation:
 JSON:
 ```
 
-Once you have the JSON, call `sym observe` with it. The SDK creates the CMB, encodes the vectors, and broadcasts to the mesh.
+Once you have the JSON, call `sym observe` with it. The SDK creates the CMB, encodes the vectors, and broadcasts to the mesh. For the full CMB specification — why 7 fields, why these fields, how mood crosses all domain boundaries — see [CMB (Layer 3)](https://sym.bot/spec/mmp/cmb).
 
 ### Custom Weights for Your Domain
 
