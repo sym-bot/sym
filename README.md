@@ -214,7 +214,7 @@ Once you have the JSON, call `sym observe` with it. The SDK creates the CMB, enc
 
 ### Custom Weights for Your Domain
 
-The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. The pattern:
+The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. For all configuration defaults and thresholds, see [MMP Constants](https://sym.bot/spec/mmp/constants). The pattern:
 
 - **Regulated domains** (legal, finance, health): `issue` and `commitment` are always high — risks and obligations are non-negotiable
 - **Human-facing domains** (music, fitness): `mood` is always high — affect drives the experience
