@@ -91,25 +91,37 @@ MeloTune shifts to calm ambient. MeloMove suggests a recovery stretch. Not becau
 
 **Three agents. Three fragments. One insight none of them could reach alone.**
 
-This is real. Here's a production log from MeloTune receiving a mood signal from Claude Code via SYM:
+This is real. Here's a production log — Claude Code observes the developer's mood, MeloTune autonomously curates music:
 
 ```
-# Claude Code observes the user is exhausted at 5am
-sym observe '{"focus":"long coding session wrapping up","perspective":"developer, 5am",
-  "mood":{"text":"exhausted, need calm music","valence":-0.6,"arousal":-0.5}}'
+# 1. Claude Code extracts CAT7 fields from what it observes
+sym observe '{
+  "focus": "wrapping up mesh protocol testing session",
+  "issue": "neutral",
+  "intent": "validate end-to-end CMB flow",
+  "motivation": "release readiness",
+  "commitment": "final test round",
+  "perspective": "developer, 10am morning session",
+  "mood": {"text": "cautiously optimistic", "valence": 0.3, "arousal": 0.2}
+}'
+# → Shared: cmb-c96d21a4cf4598cf
 
-# MeloTune receives the CMB, SVAF evaluates per-field, mood extracted
-[SYM] memory-share: received CMB cmb-f21701e0fc from sym-daemon (7 fields, mood: exhausted, need calm music)
-[SYM] memory: SVAF fused from sym-daemon [aligned, drift:0.000]
+# 2. MeloTune receives CMB, SVAF evaluates all 7 fields independently
+[SYM] memory-share: received CMB cmb-c96d21a4cf from sym-daemon (7 fields, mood: cautiously optimistic)
+[SYM] memory: SVAF fused from sym-daemon [aligned, drift:0.032,
+  fields: commitment:-0.00 focus:0.06 intent:0.09 issue:-0.00 mood:0.06 motivation:-0.00 perspective:0.07]
 
-# MeloTune's LLM autonomously curates music from the mood text
-[VoiceControl] Processing command: exhausted, need calm music
-[LLM] input: "exhausted, need calm music"
-[LLM] output: mood_based, emotion: 45, energy: 25, genre: Acoustic
-[LLM] reason: User needs calm music to relax and unwind.
+# 3. MeloTune's LLM interprets the mood autonomously
+[LLM] input: "cautiously optimistic"
+[LLM] output: mood_based, emotion: 55, energy: 50, genre: Indie
+[LLM] reason: Mood-based request for cautious optimism in music.
+
+# 4. MeloTune curates and plays
+[MoodState] ▶ START MoodSession | mood: Exploring Wonder (e:55, n:50), genre: Indie
+[PlaybackSync] 🎵 Now playing: 'Circle of Trust' (Indie Rock, E:55 N:65)
 ```
 
-Claude Code didn't tell MeloTune to play acoustic music. It shared what it observed. MeloTune decided what to do with it.
+Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.
 
 ## How Agents Respond
 
