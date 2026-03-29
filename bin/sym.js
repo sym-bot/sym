@@ -145,11 +145,7 @@ function cmdObserve() {
 }
 
 function cmdRecall() {
-  const query = args.slice(1).join(' ');
-  if (!query) {
-    console.error('Usage: sym recall <query>');
-    process.exit(1);
-  }
+  const query = args.slice(1).join(' ') || '';
   cmdIPC({ type: 'recall', query }, (msg) => {
     const results = msg.results || [];
     if (results.length === 0) {
