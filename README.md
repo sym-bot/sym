@@ -188,7 +188,7 @@ Every CMB on the mesh is decomposed into 7 fields (CAT7). Field weights determin
 | `perspective` | Vantage | Whose viewpoint, situational context | |
 | `mood` | Affect | Emotion (valence) + energy (arousal) | Yes — crosses all domains |
 
-Mood is the only fast-coupling field — affective state crosses all domain boundaries. The neural SVAF model discovered this without being told: `mood` emerged as the highest gate value across all fields when trained with only a soft ordering constraint. The heuristic profiles reflect this.
+Mood is the only fast-coupling field — affective state crosses all domain boundaries. The neural SVAF model discovered this without being told: `mood` emerged as the highest gate value across all fields when trained with only a soft ordering constraint. The pre-built field weight profiles reflect this.
 
 The fields are universal and immutable. Domain-specific interpretation happens in the field text, not the field name. A coding agent's `focus` is "debugging auth module." A legal agent's `focus` is "merger due diligence." Same field, different domain lens.
 
