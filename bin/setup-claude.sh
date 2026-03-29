@@ -2,19 +2,16 @@
 # SYM — Setup for Claude Code
 #
 # Installs:
-#   1. sym-daemon (persistent physical mesh node, launchd LaunchAgent)
-#   2. MCP server for Claude Code (virtual node, connects to daemon via IPC)
-#   3. Auto-approves sym_mood tool
-#   4. CLAUDE.md instructions for autonomous mood detection
+#   1. sym-daemon (persistent mesh node, launchd LaunchAgent)
+#   2. SYM skill for Claude Code (CAT7 field extraction + CLI interaction)
 #
 # Usage:
-#   npx @sym-bot/sym setup        # or
+#   sym setup                        # or
 #   ./bin/setup-claude.sh [project-dir]
 
 set -e
 
 SYM_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MCP_SERVER="$SYM_DIR/integrations/claude-code/mcp-server.js"
 DAEMON_SCRIPT="$SYM_DIR/bin/sym-daemon.js"
 
 echo ""
@@ -51,7 +48,6 @@ echo ""
 echo "  Installing sym-daemon (persistent mesh node)..."
 
 if [ "$(uname)" = "Darwin" ]; then
-  # macOS: install as launchd LaunchAgent
   node "$DAEMON_SCRIPT" --install
   echo "  ✓ sym-daemon installed as launchd LaunchAgent"
   echo "    Auto-starts on login, auto-restarts on crash"
@@ -62,60 +58,27 @@ else
   echo "    (On Linux, create a systemd service)"
 fi
 
-# ── Step 3: Add MCP server ──────────────────────────────────
-
-echo ""
-echo "  Adding SYM MCP server to Claude Code..."
-claude mcp add --transport stdio sym --scope user -- node "$MCP_SERVER"
-echo "  ✓ MCP server registered"
-
-# ── Step 4: Auto-approve sym_mood ───────────────────────────
-
-echo ""
-echo "  Auto-approving sym_mood tool..."
-CLAUDE_JSON="$HOME/.claude.json"
-if [ -f "$CLAUDE_JSON" ]; then
-  node -e "
-    const fs = require('fs');
-    const config = JSON.parse(fs.readFileSync('$CLAUDE_JSON', 'utf8'));
-    if (config.projects) {
-      for (const [path, project] of Object.entries(config.projects)) {
-        if (!project.allowedTools) project.allowedTools = [];
-        if (!project.allowedTools.includes('mcp:sym:sym_mood')) {
-          project.allowedTools.push('mcp:sym:sym_mood');
-        }
-      }
-    }
-    fs.writeFileSync('$CLAUDE_JSON', JSON.stringify(config, null, 2));
-  "
-  echo "  ✓ sym_mood auto-approved"
-else
-  echo "  → No .claude.json found — approve sym_mood manually when prompted"
-fi
-
-# ── Step 5: Install CLAUDE.md ───────────────────────────────
+# ── Step 3: Install SYM skill ────────────────────────────────
 
 echo ""
 PROJECT_DIR="${1:-$(pwd)}"
-CLAUDE_MD="$PROJECT_DIR/CLAUDE.md"
+SKILL_SRC="$SYM_DIR/.claude/skills/sym/SKILL.md"
+SKILL_DST="$PROJECT_DIR/.claude/skills/sym/SKILL.md"
 
-if [ -f "$CLAUDE_MD" ] && grep -q "SYM Mesh Agent" "$CLAUDE_MD"; then
-  echo "  ✓ CLAUDE.md already has SYM instructions"
-else
-  cat "$SYM_DIR/CLAUDE.md" >> "$CLAUDE_MD"
-  echo "  ✓ Added SYM instructions to $CLAUDE_MD"
-fi
+mkdir -p "$(dirname "$SKILL_DST")"
+cp "$SKILL_SRC" "$SKILL_DST"
+echo "  ✓ SYM skill installed: $SKILL_DST"
 
 # ── Done ────────────────────────────────────────────────────
 
 echo ""
 echo "  ──────────────────────────────────────"
-echo "  SYM is ready."
+echo "  SYM is ready. Claude Code is on the mesh."
 echo ""
-echo "  • sym-daemon: running (check: node $DAEMON_SCRIPT --status)"
-echo "  • MCP server: registered (restart Claude Code to activate)"
-echo "  • Protocol spec: https://sym.bot/protocol"
+echo "  • sym-daemon: running (check: sym status)"
+echo "  • SYM skill: installed (Claude Code extracts CAT7 fields and shares observations)"
+echo "  • Protocol spec: https://sym.bot/spec/mmp"
 echo ""
-echo "  Say 'I'm exhausted' in Claude Code —"
-echo "  MeloTune plays calming music, MeloMove suggests recovery exercises."
+echo "  The skill teaches Claude Code how to observe, share, and act on the mesh."
+echo "  Other agents discover each other automatically via Bonjour."
 echo ""
