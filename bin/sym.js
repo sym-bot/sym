@@ -54,7 +54,6 @@ switch (command) {
   case 'stop':    cmdStop(); break;
   case 'status':  cmdIPC({ type: 'status' }, formatStatus); break;
   case 'peers':   cmdIPC({ type: 'peers' }, formatPeers); break;
-  case 'mood':
   case 'observe': cmdObserve(); break;
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;

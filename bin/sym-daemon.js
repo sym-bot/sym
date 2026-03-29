@@ -5,6 +5,11 @@
 // launchd may close stdout/stderr pipes during restart. Without this,
 // Node.js throws uncaught EPIPE and enters a crash loop with exponential
 // throttle, causing hours-long outages.
+/**
+ * Suppress EPIPE/EIO errors on stdout/stderr that occur when launchd
+ * closes pipes during restart (OpenClaw issue #4632).
+ * @param {stream.Writable} stream — process.stdout or process.stderr
+ */
 function suppressEpipe(stream) {
   stream.on('error', (err) => {
     if (err.code === 'EPIPE' || err.code === 'EIO') process.exit(0);
@@ -38,7 +43,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { SymNode } = require('../lib/node');
-// XMesh is created inside SymNode — no separate import needed
 
 // ── Global error handlers ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
@@ -101,15 +105,17 @@ const node = new SymNode({
   silent: false,
 });
 
-// xMesh is created inside SymNode — access via node._xmesh
-// No separate xMesh instance needed in the daemon.
-
 // ── IPC Server (Unix Socket) ───────────────────────────────────
 
 /** Connected virtual nodes. socketId → { socket, name, cognitiveProfile } */
 const virtualNodes = new Map();
 let nextSocketId = 1;
 
+/**
+ * Start the Unix socket IPC server for virtual node connections.
+ * See MMP v0.2.0 Section 13 (Application).
+ * @returns {net.Server}
+ */
 function startIPCServer() {
   // Clean up stale socket
   if (fs.existsSync(SOCKET_PATH)) {
@@ -165,6 +171,14 @@ function startIPCServer() {
   return server;
 }
 
+/**
+ * Handle a single IPC message from a virtual node.
+ * Routes to the appropriate SymNode method and sends result back.
+ *
+ * @param {number} socketId — virtual node socket identifier
+ * @param {net.Socket} socket — the IPC socket
+ * @param {object} msg — parsed JSON message
+ */
 function handleIPCMessage(socketId, socket, msg) {
   switch (msg.type) {
     case 'register': {
@@ -182,9 +196,6 @@ function handleIPCMessage(socketId, socket, msg) {
       log(`Virtual node registered: ${msg.name}`);
       break;
     }
-
-    // 'mood' is handled via 'remember' — mood text becomes a CMB with mood field.
-    // SVAF per-field gating on the receiver decides what passes through.
 
     case 'message':
       if (msg.content) {
@@ -251,6 +262,11 @@ function handleIPCMessage(socketId, socket, msg) {
   }
 }
 
+/**
+ * Send a newline-delimited JSON message over an IPC socket.
+ * @param {net.Socket} socket — IPC socket
+ * @param {object} msg — message to send
+ */
 function sendIPC(socket, msg) {
   try { socket.write(JSON.stringify(msg) + '\n'); } catch {}
 }
@@ -304,6 +320,10 @@ function forwardEventsToVirtualNodes() {
   });
 }
 
+/**
+ * Broadcast a message to all connected virtual nodes.
+ * @param {object} msg — message to broadcast
+ */
 function broadcastToVirtualNodes(msg) {
   const data = JSON.stringify(msg) + '\n';
   for (const [id, vn] of virtualNodes) {
@@ -313,6 +333,10 @@ function broadcastToVirtualNodes(msg) {
 
 // ── launchd Install/Uninstall ──────────────────────────────────
 
+/**
+ * Generate the launchd plist XML for the daemon LaunchAgent.
+ * @returns {string} plist XML content
+ */
 function launchAgentPlist() {
   // Resolve node binary — use the same node that ran the install command
   const nodePath = process.execPath;
@@ -360,6 +384,9 @@ function launchAgentPlist() {
 </plist>`;
 }
 
+/**
+ * Install the daemon as a macOS LaunchAgent and start it.
+ */
 function installLaunchAgent() {
   if (process.platform !== 'darwin') {
     console.error('--install is macOS only. On Linux, create a systemd service.');
@@ -386,6 +413,9 @@ function installLaunchAgent() {
   console.log('Check status: sym-daemon --status');
 }
 
+/**
+ * Remove the daemon LaunchAgent and clean up the socket.
+ */
 function uninstallLaunchAgent() {
   if (process.platform !== 'darwin') {
     console.error('--uninstall is macOS only.');
@@ -409,6 +439,9 @@ function uninstallLaunchAgent() {
   }
 }
 
+/**
+ * Connect to the daemon socket and print status, then exit.
+ */
 function showStatus() {
   if (!fs.existsSync(SOCKET_PATH)) {
     console.log('sym-daemon: not running (no socket)');
@@ -449,6 +482,10 @@ function showStatus() {
 
 // ── Logging ────────────────────────────────────────────────────
 
+/**
+ * Log a timestamped daemon message.
+ * @param {string} msg — message to log
+ */
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 19);
   console.log(`[${ts}] ${msg}`);
