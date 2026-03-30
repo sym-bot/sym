@@ -15,7 +15,9 @@ SYM is that protocol. Install it, start the daemon, and every agent on your mach
 
 ## Quick Start — Add Mesh to Your Existing Agents
 
-You don't rewrite your agents. You add one line to each.
+You don't rewrite your agents. You don't parse JSON. Your agent's LLM does the work.
+
+### For LLM-powered agents (OpenClaw, Claude Code, Copilot, Cursor, etc.)
 
 **Step 1: Start the mesh**
 ```bash
@@ -23,46 +25,70 @@ npm install -g @sym-bot/sym
 sym start
 ```
 
-**Step 2: Each agent shares what it observes**
-
-Your support agent (any language — just shell out):
+**Step 2: Install the SYM skill into your agent**
 ```bash
-sym observe '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA on page","mood":{"text":"frustrated customers","valence":-0.4,"arousal":0.5}}'
+# For OpenClaw / general agents:
+mkdir -p .agents/skills/sym
+cp node_modules/@sym-bot/sym/.agents/skills/sym/SKILL.md .agents/skills/sym/
+
+# For Claude Code:
+mkdir -p .claude/skills/sym
+cp node_modules/@sym-bot/sym/.agents/skills/sym/SKILL.md .claude/skills/sym/
 ```
 
-Your inventory agent:
+**Step 3: Talk to your agent normally. It joins the mesh automatically.**
+
+You say to your agent: *"The customer is upset about the blue variant being out of stock."*
+
+Your agent's LLM reads the SYM skill, decomposes your observation into 7 structured fields, and calls `sym observe` — you never see the JSON:
+
 ```bash
-sym observe '{"focus":"blue variant restock confirmed","commitment":"arriving Thursday","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
+# Your agent does this automatically:
+sym observe '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA","mood":{"text":"frustrated","valence":-0.4,"arousal":0.5}}'
 ```
 
-Your analytics agent:
+Another agent on the mesh — your inventory tracker — has already shared:
 ```bash
-sym observe '{"focus":"blue variant page views up 300% this week","motivation":"demand surge signal","mood":{"text":"opportunity","valence":0.5,"arousal":0.4}}'
+sym observe '{"focus":"blue variant restock confirmed","commitment":"arriving Thursday"}'
 ```
 
-**Step 3: Every agent sees what matters to *them***
+Your agent recalls the mesh:
 ```bash
 sym recall "blue variant"
-```
-```
-→ support agent: "5 customers asking about blue variant" (issue: out of stock)
-→ inventory agent: "blue variant restock confirmed" (commitment: arriving Thursday)
-→ analytics agent: "blue variant page views up 300%" (motivation: demand surge)
+→ "blue variant restock confirmed" (commitment: arriving Thursday)
 ```
 
-**Your listing agent now knows to pre-announce the restock.** Your ad agent knows to pause blue variant ads until Thursday. Your support agent knows to tell customers "Thursday." No agent told another what to do. Each one recalled the mesh and acted on what was relevant to its role.
+Now your support agent tells the customer: *"The blue variant arrives Thursday."* — informed by the inventory agent, through the mesh, without anyone writing integration code between them.
 
-**That's the mesh.** Three agents that couldn't communicate now share structured understanding — and each one automatically sees the fields that matter to its domain through [SVAF](https://sym.bot/research/svaf) per-field evaluation.
+**That's the mesh.** Your agents talk to you in natural language. The SYM skill teaches their LLM to decompose observations into structured fields and share them. Each agent sees only what's relevant to its role through [SVAF](https://sym.bot/research/svaf) per-field evaluation. No routing rules, no glue code, no group chat chaos.
 
-For Node.js agents, you can also join programmatically:
+| Platform | Skills path | Install |
+|----------|------------|---------|
+| OpenClaw | `.agents/skills/sym/` | Copy SKILL.md |
+| Claude Code | `.claude/skills/sym/` | Copy SKILL.md |
+| GitHub Copilot | `.github/skills/sym/` | Copy SKILL.md |
+| Google Gemini CLI | `.gemini/skills/sym/` | Copy SKILL.md |
+| Cursor | `.agents/skills/sym/` | Copy SKILL.md |
+| JetBrains Junie | `.agents/skills/sym/` | Copy SKILL.md |
+
+### For custom agents (Node.js, Python scripts, cron jobs)
+
+Agents without an LLM can join the mesh directly via CLI or SDK:
+
+```bash
+# CLI — any language, just shell out:
+sym observe '{"focus":"blue variant restocked","commitment":"arriving Thursday"}'
+sym recall "blue variant"
+```
+
 ```javascript
+// Node.js SDK:
 const { SymNode } = require('@sym-bot/sym');
-const node = new SymNode({ name: 'my-agent', cognitiveProfile: 'inventory tracker' });
+const node = new SymNode({ name: 'inventory-agent', cognitiveProfile: 'tracks stock levels' });
 await node.start();
 node.remember({ focus: 'blue variant restocked', commitment: 'arriving Thursday' });
 ```
 
-For AI coding agents (Claude Code, Copilot, Cursor), see [For AI Coding Agents](#for-ai-coding-agents).
 For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
 ## Ask the Mesh — Not One LLM, All of Them
