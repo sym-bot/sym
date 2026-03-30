@@ -41,7 +41,18 @@ describe('MemoryStore', () => {
 
   it('should store CMB when provided', () => {
     const { createCMB } = require('@sym-bot/core');
-    const cmb = createCMB({ rawText: 'user tired and frustrated', createdBy: 'test-agent' });
+    const cmb = createCMB({
+      fields: {
+        focus: 'debugging auth module',
+        issue: 'tired and frustrated',
+        intent: 'needs a break',
+        motivation: 'prevent errors from fatigue',
+        commitment: 'coding session',
+        perspective: 'developer, late afternoon',
+        mood: { text: 'frustrated', valence: -0.5, arousal: -0.3 },
+      },
+      createdBy: 'test-agent',
+    });
     const entry = store.write('user tired and frustrated', { cmb });
 
     assert.ok(entry.cmb, 'should store CMB');
