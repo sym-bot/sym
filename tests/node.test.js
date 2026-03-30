@@ -4,6 +4,7 @@ const { describe, it, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const { nodeDir } = require('../lib/config');
+const { NullDiscovery } = require('../lib/discovery');
 
 // Use unique names to avoid state conflicts
 const nodeName = `test-node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -11,7 +12,6 @@ const nodeName = `test-node-${Date.now()}-${Math.random().toString(36).slice(2, 
 describe('SymNode', () => {
   let SymNode;
 
-  // Dynamic require to avoid top-level import issues
   it('should load SymNode', () => {
     SymNode = require('../lib/node').SymNode;
     assert.ok(SymNode, 'SymNode should be exported');
@@ -28,12 +28,12 @@ describe('SymNode', () => {
     assert.strictEqual(node.nodeId.length, 36, 'nodeId should be full UUID');
   });
 
-  // Note: lifecycle tests use relayOnly to avoid bonjour-service UDP socket leak
-  // (known issue: bonjour-service .destroy() doesn't close its multicast socket,
-  // preventing clean Node.js process exit). Bonjour path is tested in local dev (macOS).
+  // Lifecycle tests inject NullDiscovery — no TCP server, no Bonjour, no child processes.
+  // This tests the node's business logic in isolation from networking.
+  // Bonjour integration is validated in local dev and e2e tests.
 
   it('should return full nodeId in status()', async () => {
-    const node = new SymNode({ name: nodeName, silent: true, relayOnly: true });
+    const node = new SymNode({ name: nodeName, silent: true, discovery: new NullDiscovery() });
     await node.start();
     const s = node.status();
     assert.strictEqual(s.nodeId, node.nodeId);
@@ -46,11 +46,17 @@ describe('SymNode', () => {
 
   it('should start and stop without error', async () => {
     const name = `test-lifecycle-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, relayOnly: true });
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     assert.strictEqual(node.status().running, true);
     await node.stop();
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('should use NullDiscovery when relayOnly is true', () => {
+    const node = new SymNode({ name: nodeName, silent: true, relayOnly: true });
+    // relayOnly creates NullDiscovery internally — no server, no discovery
+    assert.ok(node._discovery instanceof NullDiscovery);
   });
 
   it('should return empty peers when no connections', () => {
@@ -68,7 +74,7 @@ describe('SymNode', () => {
 
   it('should remember and recall', async () => {
     const name = `test-memory-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, relayOnly: true });
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
 
     const entry = node.remember({
