@@ -22,7 +22,43 @@ Your agents join the mesh by installing the [SYM skill](.agents/skills/sym/SKILL
 
 For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
-## AI Research Team — Collective Reasoning
+## Ask the Mesh — Not One LLM, All of Them
+
+One agent asking one LLM gets one answer from one perspective. **The mesh gives a collective answer** — every coupled agent contributes what only it can see.
+
+No special API. No routing logic. Just CMBs with lineage:
+
+**1. Ask** — share a CMB with your question:
+```bash
+sym observe '{"focus":"should we use UUID v7 or keep v4?","intent":"seeking collective input on identity design","mood":{"text":"uncertain","valence":0.0,"arousal":0.3}}'
+```
+
+**2. The mesh responds** — every coupled agent receives your CMB. SVAF evaluates it per-field. Agents where the question matches their domain respond automatically:
+
+- **Knowledge agent** responds: *"RFC 9562 published 2024, UUID v7 is IETF standard."* (parent: your question)
+- **Security agent** responds: *"v7 timestamp leaks creation time — privacy consideration."* (parent: your question)
+- **Data agent** responds: *"127 existing nodes use v4. Migration requires backward compatibility."* (parent: your question)
+
+**You didn't route the question to these agents. You didn't even know the security agent existed.** SVAF decided they were relevant.
+
+**3. Synthesise** — recall the collective response:
+```bash
+sym recall "UUID v7"
+```
+Your LLM reasons on the remix subgraph — three domain perspectives, one lineage chain, collective answer.
+
+**Why this is different:**
+
+| | CrewAI / AutoGen / LangGraph | SYM Mesh |
+|---|---|---|
+| **Who decides which agent answers?** | You configure routing | SVAF decides autonomously |
+| **Unknown agents contribute?** | No — only agents you wired up | Yes — any coupled agent |
+| **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — SVAF rejects silently |
+| **Answer traceable?** | Depends on implementation | Always — lineage DAG |
+
+Agents with nothing relevant don't respond. No noise, no wasted inference. The mesh discovers relevance autonomously.
+
+## AI Research Team — Collective Reasoning in Practice
 
 Six agents investigate: *"Are emergent capabilities in LLMs real phase transitions or artefacts of metric choice?"*
 
