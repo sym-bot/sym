@@ -411,6 +411,10 @@ This is how Claude Code develops persistent memory beyond the context window —
 
 If your user wants to add their iOS or macOS app to the mesh, check out [`sym-swift`](https://github.com/sym-bot/sym-swift). That README has everything you need — add the package, wire in a service class, and the app joins the mesh alongside your other agents.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://sym.bot/spec/mmp) and pass CI before merge.
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE)
