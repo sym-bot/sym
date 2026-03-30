@@ -28,8 +28,12 @@ describe('SymNode', () => {
     assert.strictEqual(node.nodeId.length, 36, 'nodeId should be full UUID');
   });
 
+  // Note: lifecycle tests use relayOnly to avoid bonjour-service UDP socket leak
+  // (known issue: bonjour-service .destroy() doesn't close its multicast socket,
+  // preventing clean Node.js process exit). Bonjour path is tested in local dev (macOS).
+
   it('should return full nodeId in status()', async () => {
-    const node = new SymNode({ name: nodeName, silent: true });
+    const node = new SymNode({ name: nodeName, silent: true, relayOnly: true });
     await node.start();
     const s = node.status();
     assert.strictEqual(s.nodeId, node.nodeId);
@@ -42,7 +46,7 @@ describe('SymNode', () => {
 
   it('should start and stop without error', async () => {
     const name = `test-lifecycle-${Date.now()}`;
-    const node = new SymNode({ name, silent: true });
+    const node = new SymNode({ name, silent: true, relayOnly: true });
     await node.start();
     assert.strictEqual(node.status().running, true);
     await node.stop();
@@ -64,7 +68,7 @@ describe('SymNode', () => {
 
   it('should remember and recall', async () => {
     const name = `test-memory-${Date.now()}`;
-    const node = new SymNode({ name, silent: true });
+    const node = new SymNode({ name, silent: true, relayOnly: true });
     await node.start();
 
     const entry = node.remember({
