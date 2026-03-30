@@ -33,7 +33,7 @@ No special API. No routing logic. Just CMBs with lineage:
 sym observe '{"focus":"should we use UUID v7 or keep v4?","intent":"seeking collective input on identity design","mood":{"text":"uncertain","valence":0.0,"arousal":0.3}}'
 ```
 
-**2. The mesh responds** — every coupled agent receives your CMB. [SVAF](https://sym.bot/research/svaf) evaluates it per-field. Agents where the question matches their domain respond automatically:
+**2. The mesh responds** — every coupled agent receives your CMB. [SVAF](https://sym.bot/research/svaf) (Symbolic-Vector Attention Fusion) — the per-field evaluation engine — evaluates each of your CMB's 7 fields independently against the receiving agent's domain weights. Agents where the question matches their domain respond automatically:
 
 - **Knowledge agent** responds: *"RFC 9562 published 2024, UUID v7 is IETF standard."* (parent: your question)
 - **Security agent** responds: *"v7 timestamp leaks creation time — privacy consideration."* (parent: your question)
