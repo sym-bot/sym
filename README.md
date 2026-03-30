@@ -93,30 +93,32 @@ For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
 ## Ask the Mesh — Not One LLM, All of Them
 
-One agent asking one LLM gets one answer from one perspective. **The mesh gives a collective answer** — every coupled agent contributes what only it can see.
+You ask one agent a question, you get one perspective. **Ask the mesh, and every agent that knows something relevant contributes — automatically.**
 
-No special API. No routing logic. Just CMBs with lineage:
+**1. You ask your agent a question in natural language:**
 
-**1. Ask** — share a CMB with your question:
-```bash
-sym observe '{"focus":"should we use UUID v7 or keep v4?","intent":"seeking collective input on identity design","mood":{"text":"uncertain","valence":0.0,"arousal":0.3}}'
-```
+> *"Should we use UUID v7 or keep v4 for backward compatibility?"*
 
-**2. The mesh responds** — every coupled agent receives your CMB. [SVAF](https://sym.bot/research/svaf) (Symbolic-Vector Attention Fusion) — the per-field evaluation engine — evaluates each of your CMB's 7 fields independently against the receiving agent's domain weights. Agents where the question matches their domain respond automatically:
+Your agent's LLM reads the SYM skill, decomposes your question into structured fields, and shares it to the mesh. You don't write JSON. You don't pick which agents to ask. You just ask.
 
-- **Knowledge agent** responds: *"RFC 9562 published 2024, UUID v7 is IETF standard."* (parent: your question)
-- **Security agent** responds: *"v7 timestamp leaks creation time — privacy consideration."* (parent: your question)
-- **Data agent** responds: *"127 existing nodes use v4. Migration requires backward compatibility."* (parent: your question)
+**2. The mesh figures out who knows something relevant:**
 
-**You didn't route the question to these agents. You didn't even know the security agent existed.** SVAF decided they were relevant.
+Your question lands on every agent on the mesh. Each agent's [SVAF](https://sym.bot/research/svaf) (per-field evaluation engine) checks: *"Does this question match what I know about?"* — not by keyword matching, but by evaluating each of 7 cognitive fields against the agent's own domain weights.
 
-**3. Synthesise** — recall the collective response:
-```bash
-sym recall "UUID v7"
-```
-Your LLM reasons on the remix subgraph — three domain perspectives, one lineage chain, collective answer.
+- Your **knowledge agent** sees the `focus` field ("UUID v7") matches its domain → responds: *"RFC 9562 published 2024, UUID v7 is IETF standard."*
+- Your **security agent** sees the `issue` field ("backward compatibility") matches its domain → responds: *"v7 timestamp leaks creation time — privacy consideration."*
+- Your **data agent** sees the `commitment` field (existing deployments) matches → responds: *"127 existing nodes use v4. Migration path needed."*
+- Your **fitness agent** sees nothing relevant → **stays silent.** SVAF rejected the question. No wasted tokens.
 
-**Why this is different:**
+**You didn't route the question to these agents. You didn't even know the security agent existed.** The mesh discovered who was relevant.
+
+**3. You get the collective answer:**
+
+> *"What did the mesh say about UUID v7?"*
+
+Your agent recalls the mesh and synthesises: three domain perspectives, each linked back to your question through lineage. Your agent's LLM reasons across all of them and gives you a collective answer that no single agent could produce alone.
+
+**Why this is different from multi-agent frameworks:**
 
 | | CrewAI / AutoGen / LangGraph | SYM Mesh |
 |---|---|---|
@@ -124,8 +126,6 @@ Your LLM reasons on the remix subgraph — three domain perspectives, one lineag
 | **Unknown agents contribute?** | No — only agents you wired up | Yes — any coupled agent |
 | **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — SVAF rejects silently |
 | **Answer traceable?** | Depends on implementation | Always — lineage DAG |
-
-Agents with nothing relevant don't respond. No noise, no wasted inference. The mesh discovers relevance autonomously.
 
 ## AI Research Team — How the Mesh Makes It Work
 
