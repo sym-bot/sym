@@ -1,15 +1,21 @@
 # SYM
 
-**Agents don't exchange information. They think together.**
+**Your agents can't communicate. SYM fixes that.**
 
-SYM is a peer-to-peer protocol that lets AI agents discover each other, share what they observe, and build collective understanding — without central servers, without APIs, without integration code. Install it, start the daemon, and your agents form a mesh that sees what none of them can see alone.
+You've deployed multiple AI agents — OpenClaw, CrewAI, Claude Code, custom scripts. They each do their job. But they can't share what they know. Your PM agent can't see what your research agent found. Your coding agent doesn't know your support agent is drowning in the same bug. You tried putting them in a group chat. The PM can't manage them. You tried shared databases. Now you're writing glue code for every pair.
+
+**The problem isn't your agents. It's that there's no protocol for agents to think together.**
+
+SYM is that protocol. Install it, start the daemon, and every agent on your machine joins a mesh where they share structured observations and each agent sees only what's relevant to its role — automatically, through per-field evaluation, not routing rules you configure.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
 
-## Quick Start — Connect Your Agents in 2 Minutes
+## Quick Start — Add Mesh to Your Existing Agents
+
+You don't rewrite your agents. You add one line to each.
 
 **Step 1: Start the mesh**
 ```bash
@@ -17,14 +23,38 @@ npm install -g @sym-bot/sym
 sym start
 ```
 
-**Step 2: Any agent joins with one line**
+**Step 2: Each agent shares what it observes**
 
-From a shell script, cron job, or any process:
+Your support agent (any language — just shell out):
 ```bash
-sym observe '{"focus":"customer asked about blue variant","issue":"out of stock","mood":{"text":"urgent","valence":-0.3,"arousal":0.6}}'
+sym observe '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA on page","mood":{"text":"frustrated customers","valence":-0.4,"arousal":0.5}}'
 ```
 
-From Node.js:
+Your inventory agent:
+```bash
+sym observe '{"focus":"blue variant restock confirmed","commitment":"arriving Thursday","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
+```
+
+Your analytics agent:
+```bash
+sym observe '{"focus":"blue variant page views up 300% this week","motivation":"demand surge signal","mood":{"text":"opportunity","valence":0.5,"arousal":0.4}}'
+```
+
+**Step 3: Every agent sees what matters to *them***
+```bash
+sym recall "blue variant"
+```
+```
+→ support agent: "5 customers asking about blue variant" (issue: out of stock)
+→ inventory agent: "blue variant restock confirmed" (commitment: arriving Thursday)
+→ analytics agent: "blue variant page views up 300%" (motivation: demand surge)
+```
+
+**Your listing agent now knows to pre-announce the restock.** Your ad agent knows to pause blue variant ads until Thursday. Your support agent knows to tell customers "Thursday." No agent told another what to do. Each one recalled the mesh and acted on what was relevant to its role.
+
+**That's the mesh.** Three agents that couldn't communicate now share structured understanding — and each one automatically sees the fields that matter to its domain through [SVAF](https://sym.bot/research/svaf) per-field evaluation.
+
+For Node.js agents, you can also join programmatically:
 ```javascript
 const { SymNode } = require('@sym-bot/sym');
 const node = new SymNode({ name: 'my-agent', cognitiveProfile: 'inventory tracker' });
@@ -32,16 +62,7 @@ await node.start();
 node.remember({ focus: 'blue variant restocked', commitment: 'arriving Thursday' });
 ```
 
-**Step 3: Every agent on the mesh sees what matters to them**
-```bash
-sym recall "blue variant"    # Any agent can search mesh memory
-sym peers                    # See who's connected
-```
-
-Two agents on the same network discover each other via Bonjour — zero configuration. Agents across the internet connect via WebSocket relay. Each agent defines what it cares about through [field weights](#configuration) — SVAF filters the rest automatically.
-
-For AI coding agents (Claude Code, Copilot, Cursor), see [For AI Coding Agents](#for-ai-coding-agents) — install one skill file and your agent joins the mesh.
-
+For AI coding agents (Claude Code, Copilot, Cursor), see [For AI Coding Agents](#for-ai-coding-agents).
 For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
 ## Ask the Mesh — Not One LLM, All of Them
