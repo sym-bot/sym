@@ -74,25 +74,26 @@ describe('validateName', () => {
 });
 
 describe('generateSigningKeyPair', () => {
-  it('should return 32-byte public and private keys', () => {
+  it('should return 32-byte raw Buffer keys', () => {
     const kp = generateSigningKeyPair();
-    const pub = Buffer.from(kp.publicKey, 'base64url');
-    const priv = Buffer.from(kp.privateKey, 'base64url');
-    assert.strictEqual(pub.length, 32);
-    assert.strictEqual(priv.length, 32);
+    assert.ok(Buffer.isBuffer(kp.publicKey), 'publicKey should be Buffer');
+    assert.ok(Buffer.isBuffer(kp.privateKey), 'privateKey should be Buffer');
+    assert.strictEqual(kp.publicKey.length, 32);
+    assert.strictEqual(kp.privateKey.length, 32);
   });
 
   it('should produce different keys each call', () => {
     const a = generateSigningKeyPair();
     const b = generateSigningKeyPair();
-    assert.notStrictEqual(a.publicKey, b.publicKey);
+    assert.ok(!a.publicKey.equals(b.publicKey), 'different calls should produce different keys');
   });
 
-  it('should use base64url encoding (no +/= chars)', () => {
+  it('should produce base64url-safe strings when encoded', () => {
     const kp = generateSigningKeyPair();
-    assert.ok(!kp.publicKey.includes('+'), 'should not contain +');
-    assert.ok(!kp.publicKey.includes('='), 'should not contain =');
-    assert.ok(!kp.publicKey.includes('/'), 'should not contain /');
+    const encoded = kp.publicKey.toString('base64url');
+    assert.ok(!encoded.includes('+'), 'base64url should not contain +');
+    assert.ok(!encoded.includes('='), 'base64url should not contain =');
+    assert.ok(!encoded.includes('/'), 'base64url should not contain /');
   });
 });
 
