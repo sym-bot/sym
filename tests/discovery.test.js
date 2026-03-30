@@ -26,12 +26,12 @@ describe('NullDiscovery', () => {
 
 describe('BonjourDiscovery', () => {
   it('should be constructable', () => {
-    const d = new BonjourDiscovery();
+    const d = new BonjourDiscovery({ mdns: false });
     assert.ok(d instanceof Discovery);
   });
 
   it('should start a TCP server and return a port', async () => {
-    const d = new BonjourDiscovery();
+    const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     const port = await d.start(identity, () => {});
     assert.ok(port > 0, `should get a real port, got ${port}`);
@@ -39,7 +39,7 @@ describe('BonjourDiscovery', () => {
   });
 
   it('should emit inbound-connection on valid handshake', async () => {
-    const d = new BonjourDiscovery();
+    const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     const port = await d.start(identity, () => {});
 
@@ -67,7 +67,7 @@ describe('BonjourDiscovery', () => {
   });
 
   it('should reject non-handshake first frames', async () => {
-    const d = new BonjourDiscovery();
+    const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     const port = await d.start(identity, () => {});
 
@@ -88,7 +88,7 @@ describe('BonjourDiscovery', () => {
   });
 
   it('should stop cleanly', async () => {
-    const d = new BonjourDiscovery();
+    const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     await d.start(identity, () => {});
     await d.stop();
