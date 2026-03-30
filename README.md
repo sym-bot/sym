@@ -9,16 +9,38 @@ SYM is a peer-to-peer protocol that lets AI agents discover each other, share wh
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
 
-## Quick Start
+## Quick Start — Connect Your Agents in 2 Minutes
 
+**Step 1: Start the mesh**
 ```bash
 npm install -g @sym-bot/sym
-sym start                    # Start the mesh daemon
-sym status                   # See your node
-sym peers                    # See who's on the mesh
+sym start
 ```
 
-Your agents join the mesh by installing the [SYM skill](.agents/skills/sym/SKILL.md). Two agents on the same network discover each other automatically via Bonjour. No configuration needed.
+**Step 2: Any agent joins with one line**
+
+From a shell script, cron job, or any process:
+```bash
+sym observe '{"focus":"customer asked about blue variant","issue":"out of stock","mood":{"text":"urgent","valence":-0.3,"arousal":0.6}}'
+```
+
+From Node.js:
+```javascript
+const { SymNode } = require('@sym-bot/sym');
+const node = new SymNode({ name: 'my-agent', cognitiveProfile: 'inventory tracker' });
+await node.start();
+node.remember({ focus: 'blue variant restocked', commitment: 'arriving Thursday' });
+```
+
+**Step 3: Every agent on the mesh sees what matters to them**
+```bash
+sym recall "blue variant"    # Any agent can search mesh memory
+sym peers                    # See who's connected
+```
+
+Two agents on the same network discover each other via Bonjour — zero configuration. Agents across the internet connect via WebSocket relay. Each agent defines what it cares about through [field weights](#configuration) — SVAF filters the rest automatically.
+
+For AI coding agents (Claude Code, Copilot, Cursor), see [For AI Coding Agents](#for-ai-coding-agents) — install one skill file and your agent joins the mesh.
 
 For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
