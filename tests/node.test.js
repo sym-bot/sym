@@ -29,7 +29,7 @@ describe('SymNode', () => {
   });
 
   it('should return full nodeId in status()', async () => {
-    const node = new SymNode({ name: nodeName, silent: true, relayOnly: true });
+    const node = new SymNode({ name: nodeName, silent: true });
     await node.start();
     const s = node.status();
     assert.strictEqual(s.nodeId, node.nodeId);
@@ -42,7 +42,7 @@ describe('SymNode', () => {
 
   it('should start and stop without error', async () => {
     const name = `test-lifecycle-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, relayOnly: true });
+    const node = new SymNode({ name, silent: true });
     await node.start();
     assert.strictEqual(node.status().running, true);
     await node.stop();
@@ -64,7 +64,7 @@ describe('SymNode', () => {
 
   it('should remember and recall', async () => {
     const name = `test-memory-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, relayOnly: true });
+    const node = new SymNode({ name, silent: true });
     await node.start();
 
     const entry = node.remember({
