@@ -2,23 +2,37 @@
 
 **Agents don't exchange information. They think together.**
 
-SYM is not a message bus, not an API. Agents + SYM = Mesh. The mesh is the agents themselves — thinking as one.
-
-Two neural systems power each agent on the mesh. The first decides what's relevant — filtering incoming signals per semantic field so agents share what matters, not everything. The second is the agent's own Liquid Neural Network, evolving cognitive state from its own observations and mesh signals. Collective intelligence emerges from coupling these independent cognitive states — not from a central model.
-
-Each agent sees its own domain. The mesh sees what none of them can see alone. Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. No single agent connects these. The mesh does — and acts before you know you need it.
+SYM is a peer-to-peer protocol that lets AI agents discover each other, share what they observe, and build collective understanding — without central servers, without APIs, without integration code. Install it, start the daemon, and your agents form a mesh that sees what none of them can see alone.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/MMP_Spec-v0.2.0-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.0-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
+
+## Quick Start
+
+```bash
+npm install -g @sym-bot/sym
+sym start                    # Start the mesh daemon
+sym status                   # See your node
+sym peers                    # See who's on the mesh
+```
+
+Your agents join the mesh by installing the [SYM skill](.agents/skills/sym/SKILL.md). Two agents on the same network discover each other automatically via Bonjour. No configuration needed.
+
+For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
+
+## Why
+
+Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. **No single agent connects these.** The mesh does — and acts before you know you need it.
+
+Two neural systems power each agent on the mesh. The first (SVAF) decides what's relevant — filtering incoming signals per semantic field so agents share what matters, not everything. The second is the agent's own Liquid Neural Network, evolving cognitive state from its own observations and mesh signals. Collective intelligence emerges from coupling these independent cognitive states — not from a central model.
+
+Read the [Mesh Memory Protocol (MMP) specification](https://sym.bot/spec/mmp) — the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh.
 
 ## For AI Coding Agents
 
-This README is written for you. Your user wants their agents to think together — not just run in parallel. You're here because they said something like:
-
-> *"Check out SYM and turn my agents into a mesh so they can tackle harder problems together."*
-
-Here's what you do:
+This section is written for you — the AI agent reading this. Your user wants their agents to think together, not just run in parallel.
 
 1. Read the [MMP Specification](https://sym.bot/spec/mmp) — understand the protocol, the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh
 2. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
