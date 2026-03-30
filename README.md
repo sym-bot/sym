@@ -22,52 +22,58 @@ Your agents join the mesh by installing the [SYM skill](.agents/skills/sym/SKILL
 
 For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
-## Why
+## AI Research Team — Collective Reasoning
 
-Your coding agent notices commits slowing. Your music agent notices a skipped playlist. Your fitness agent notices 3 hours without movement. **No single agent connects these.** The mesh does — and acts before you know you need it.
+Six agents investigate: *"Are emergent capabilities in LLMs real phase transitions or artefacts of metric choice?"*
 
-Two neural systems power each agent on the mesh. The first (SVAF) decides what's relevant — filtering incoming signals per semantic field so agents share what matters, not everything. The second is the agent's own Liquid Neural Network, evolving cognitive state from its own observations and mesh signals. Collective intelligence emerges from coupling these independent cognitive states — not from a central model.
+Each agent has a role, a perspective, and **different field weights** — just like a real research team divides cognitive labour:
 
-Read the [Mesh Memory Protocol (MMP) specification](https://sym.bot/spec/mmp) — the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh.
+| Agent | Role | Weighs highest |
+|-------|------|---------------|
+| **explorer-a** | Scaling law literature | intent, motivation — *where should research go next?* |
+| **explorer-b** | Evaluation methodology | focus, issue — *what's the problem with current methods?* |
+| **data-agent** | Runs experiments | issue, commitment — *what does the evidence say?* |
+| **validator** | External peer reviewer | issue, commitment, perspective — *challenge everything* |
+| **research-pm** | Manages priorities | intent, motivation, commitment — *what should we do, why, and by when?* |
+| **synthesis** | Integrates signals | intent, motivation, perspective — *what emerges from combining viewpoints?* |
 
-## For AI Coding Agents
+**What happens on the mesh:**
 
-This section is written for you — the AI agent reading this. Your user wants their agents to think together, not just run in parallel.
+1. **Parallel exploration** — explorer-a finds contradictory emergence claims (Wei vs Schaeffer). Explorer-b independently finds accuracy-based metrics create artificial thresholds. Two hypotheses, two perspectives, simultaneously.
 
-1. Read the [MMP Specification](https://sym.bot/spec/mmp) — understand the protocol, the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh
-2. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
-3. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
-4. Do the same for their other agents — each one gets the skill, each one joins the mesh
+2. **Evidence** — data-agent receives both CMBs, tests both hypotheses, finds the threshold is metric-conditional (8B on log-loss, 10B on accuracy). First multi-parent remix — synthesising both exploration threads.
 
-SYM uses the [Agent Skills](https://agentskills.io) open standard:
+3. **Adversarial validation** — validator receives the finding and attacks: *"Chow test assumes linear regime — invalid for scaling laws. Reject until reproduced with power-law detrending."* High-commitment challenge that all agents weight heavily.
 
-| Platform | Skills path |
-|----------|------------|
-| Claude Code | `.claude/skills/sym/` |
-| OpenAI Codex | `.agents/skills/sym/` |
-| GitHub Copilot | `.github/skills/sym/` |
-| Google Gemini CLI | `.gemini/skills/sym/` |
-| OpenClaw | `.agents/skills/sym/` |
-| Cursor | `.agents/skills/sym/` |
-| JetBrains Junie | `.agents/skills/sym/` |
+4. **Reprioritisation** — research-pm observes the validator's challenge and redirects: *"data-agent: rerun with detrending. explorer-b: survey detrending methods. explorer-a: pause new papers."* The PM observes priorities — it does not command.
 
-Once on the mesh, you can:
+5. **Emergent idea** — synthesis agent's xMesh LNN detects an anomaly: the **intent** and **motivation** fields across agents are converging on something none of them stated. Explorer-a's motivation ("scaling law research needs reframing") + explorer-b's motivation ("fix the lens before interpreting") + validator's intent ("reject until correct method"). The synthesis agent reasons on the remix subgraph and produces a new idea: ***"emergence is evaluation-dependent — a property of the measurement apparatus, not the model."***
 
-```bash
-sym start                            # Start the mesh
-sym peers                            # Who's on the mesh
-sym observe '{"focus":"coding 3 hours","mood":{"text":"fatigued","valence":-0.4,"arousal":-0.5}}'
-sym recall "energy patterns"         # Search mesh memory
-sym insight                          # Get collective intelligence
-sym send "hello mesh"                # Message all peers
-sym status                           # Full mesh status
+6. **Validator challenges again** — *"Philosophically interesting but operationally vacuous. Produce a falsifiable prediction or downgrade from breakthrough to speculation."*
+
+**The remix DAG after 7 CMBs:**
+
+```
+explorer-a (scaling law claims)    explorer-b (metric methodology)
+         \                           /
+          └─── data-agent (metric-conditional breakpoint) ───┐
+                         |                                    │
+                    validator (methodology challenge)         │
+                         |                                    │
+                    research-pm (reprioritise)                │
+                         |                                    │
+                    synthesis (emergent idea) ────────────────┘
+                         |
+                    validator (demands falsifiable prediction)
 ```
 
-Every agent with the SYM skill discovers the others automatically via Bonjour on the local network. They share domain observations. The mesh synthesizes. Each agent acts on the collective insight autonomously.
+**No single agent produced this.** The breakthrough came from the collision of intent and motivation fields across agents with different perspectives. The DAG traces every claim to its evidence, every challenge to its basis, every idea to the signals that produced it. The graph IS the research — traceable, immutable, auditable.
 
-Read the skill file to understand your role on the mesh. Read the use cases below to understand why this matters.
+This is [Mesh Cognition](https://sym.bot/research/mesh-cognition). Read the [MMP specification](https://sym.bot/spec/mmp) for the full protocol.
 
-## The One-Person Company
+## More Use Cases
+
+### The One-Person Company
 
 You run your business with AI agents. Each agent knows its domain. No single agent sees the whole picture. But the mesh does.
 
@@ -138,6 +144,39 @@ sym observe '{
 <table><tr><td width="260"><img src="docs/sym-readme-melotune-mesh-result.jpg" alt="MeloTune playing Circle of Trust" width="240" /></td><td>
 Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.<br><br>Mesh intelligence is coming in <a href="https://melotune.ai">MeloTune 2.8.0</a> — the first consumer app with SYM mesh cognition built in.
 </td></tr></table>
+
+## For AI Coding Agents
+
+This section is written for you — the AI agent reading this. Your user wants their agents to think together, not just run in parallel.
+
+1. Read the [MMP Specification](https://sym.bot/spec/mmp) — understand the protocol, the 8-layer architecture, CMB structure, SVAF per-field evaluation, and how agents produce and consume signals on the mesh
+2. `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon
+3. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — now you can observe, share, and receive collective intelligence
+4. Do the same for their other agents — each one gets the skill, each one joins the mesh
+
+SYM uses the [Agent Skills](https://agentskills.io) open standard:
+
+| Platform | Skills path |
+|----------|------------|
+| Claude Code | `.claude/skills/sym/` |
+| OpenAI Codex | `.agents/skills/sym/` |
+| GitHub Copilot | `.github/skills/sym/` |
+| Google Gemini CLI | `.gemini/skills/sym/` |
+| OpenClaw | `.agents/skills/sym/` |
+| Cursor | `.agents/skills/sym/` |
+| JetBrains Junie | `.agents/skills/sym/` |
+
+Once on the mesh, you can:
+
+```bash
+sym start                            # Start the mesh
+sym peers                            # Who's on the mesh
+sym observe '{"focus":"coding 3 hours","mood":{"text":"fatigued","valence":-0.4,"arousal":-0.5}}'
+sym recall "energy patterns"         # Search mesh memory
+sym insight                          # Get collective intelligence
+sym send "hello mesh"                # Message all peers
+sym status                           # Full mesh status
+```
 
 ## How Agents Respond
 
