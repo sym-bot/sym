@@ -99,6 +99,46 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should emit cmb-accepted when receiveFromPeer stores a CMB', async () => {
+    const name = `test-cmb-accepted-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    // Track emitted events
+    const accepted = [];
+    node.on('cmb-accepted', (entry) => accepted.push(entry));
+
+    // Simulate a peer CMB being accepted via the store proxy
+    // (In production, frame-handler.js calls this after SVAF accepts)
+    const peerEntry = {
+      content: 'test signal from peer agent',
+      source: 'test-peer',
+      timestamp: Date.now(),
+      cmb: {
+        key: `cmb-test-${Date.now()}`,
+        fields: {
+          focus: { text: 'test signal' },
+          mood: { text: 'neutral', valence: 0, arousal: 0 },
+        },
+      },
+    };
+
+    const stored = node._store.receiveFromPeer('peer-123', peerEntry);
+    assert.ok(stored, 'receiveFromPeer should return stored entry');
+    assert.strictEqual(accepted.length, 1, 'should emit exactly one cmb-accepted event');
+    assert.strictEqual(accepted[0].content, 'test signal from peer agent');
+    assert.strictEqual(accepted[0].peerId, 'peer-123');
+    assert.ok(accepted[0].key, 'accepted entry should have key');
+
+    // Duplicate should NOT emit
+    const dup = node._store.receiveFromPeer('peer-456', peerEntry);
+    assert.strictEqual(dup, null, 'duplicate should return null');
+    assert.strictEqual(accepted.length, 1, 'should NOT emit for duplicate');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   after(() => {
     fs.rmSync(nodeDir(nodeName), { recursive: true, force: true });
   });
