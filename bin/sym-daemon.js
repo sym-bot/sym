@@ -237,6 +237,10 @@ function handleIPCMessage(socketId, socket, msg) {
       sendIPC(socket, { type: 'result', action: 'peers', peers: node.peers() });
       break;
 
+    case 'metrics':
+      sendIPC(socket, { type: 'result', action: 'metrics', metrics: node.metrics() });
+      break;
+
     case 'status':
       sendIPC(socket, {
         type: 'result',

@@ -55,6 +55,7 @@ switch (command) {
   case 'stop':    cmdStop(); break;
   case 'status':  cmdIPC({ type: 'status' }, jsonFlag ? formatJSON : formatStatus); break;
   case 'peers':   cmdIPC({ type: 'peers' }, jsonFlag ? formatJSON : formatPeers); break;
+  case 'metrics': cmdIPC({ type: 'metrics' }, jsonFlag ? formatJSON : formatMetrics); break;
   case 'observe': cmdObserve(); break;
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
@@ -215,6 +216,26 @@ function formatPeers(msg) {
   }
 }
 
+function formatMetrics(msg) {
+  const m = msg.metrics || {};
+  console.log('Mesh Metrics:\n');
+  console.log(`  CMBs produced:    ${m.cmbProduced || 0}`);
+  console.log(`  CMBs accepted:    ${m.cmbAccepted || 0}`);
+  console.log(`  Remixes produced: ${m.remixProduced || 0}`);
+  console.log(`  Remixes rejected: ${m.remixRejected || 0}`);
+  console.log(`  Peers joined:     ${m.peersJoined || 0}`);
+  console.log(`  Peers left:       ${m.peersLeft || 0}`);
+  console.log(`  Recalls:          ${m.recalls || 0}`);
+  console.log(`  LLM calls:        ${m.llmCalls || 0}`);
+  console.log(`  LLM tokens in:    ${(m.llmTokensIn || 0).toLocaleString()}`);
+  console.log(`  LLM tokens out:   ${(m.llmTokensOut || 0).toLocaleString()}`);
+  console.log(`  LLM model:        ${m.llmModel || 'none'}`);
+  console.log(`  LLM cost:         $${(m.llmCostUSD || 0).toFixed(6)}`);
+  const uptimeH = Math.floor((m.uptimeMs || 0) / 3600000);
+  const uptimeM = Math.floor(((m.uptimeMs || 0) % 3600000) / 60000);
+  console.log(`  Uptime:           ${uptimeH}h ${uptimeM}m`);
+}
+
 function formatInsight(msg) {
   const ctx = msg.context || {};
   if (!ctx.trajectory && !ctx.anomaly && !ctx.insights) {
@@ -333,6 +354,7 @@ ${bold('Usage:')}
   sym stop                           Stop the mesh daemon
   sym status                         Show mesh status
   sym peers                          List connected peers
+  sym metrics                        Show protocol metrics and LLM cost
   sym observe <json>                 Share observation (CAT7 fields as JSON)
   sym recall <query>                 Search mesh memory
   sym insight                        Get collective intelligence
