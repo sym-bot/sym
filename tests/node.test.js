@@ -262,6 +262,88 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should support multi-transport per peer (MMP Section 4.6)', async () => {
+    const name = `test-multi-transport-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    const events = [];
+    node.on('peer-joined', (e) => events.push({ type: 'joined', ...e }));
+    node.on('peer-left', (e) => events.push({ type: 'left', ...e }));
+
+    // Mock transports with close event support
+    function mockTransport() {
+      const listeners = {};
+      return {
+        on: (event, fn) => { listeners[event] = fn; },
+        send: () => {},
+        close: () => { if (listeners.close) listeners.close(); },
+        _triggerClose: () => { if (listeners.close) listeners.close(); },
+      };
+    }
+
+    // First transport: relay
+    const relayTransport = mockTransport();
+    const peer = node._createPeer(relayTransport, 'peer-abc', 'test-peer', true, 'relay');
+    node._addPeer(peer);
+
+    assert.ok(node._peers.has('peer-abc'), 'peer should exist');
+    assert.strictEqual(peer.transports.size, 1, 'should have 1 transport');
+
+    // Second transport: bonjour (same peer, different transport type)
+    const bonjourTransport = mockTransport();
+    const peer2 = node._createPeer(bonjourTransport, 'peer-abc', 'test-peer', false, 'bonjour');
+    // _createPeer returns existing peer when peer already exists
+    assert.strictEqual(peer2, peer, 'should return existing peer');
+    assert.strictEqual(peer.transports.size, 2, 'should have 2 transports');
+
+    // Active transport should be bonjour (higher priority)
+    assert.strictEqual(node._bestTransport(peer), bonjourTransport, 'bonjour should be preferred');
+
+    // Close relay — peer should NOT be removed (bonjour still active)
+    relayTransport._triggerClose();
+    assert.ok(node._peers.has('peer-abc'), 'peer should still exist after relay close');
+    assert.strictEqual(peer.transports.size, 1, 'should have 1 transport remaining');
+    assert.strictEqual(events.filter(e => e.type === 'left').length, 0, 'should NOT emit peer-left');
+
+    // Close bonjour — peer SHOULD be removed (all transports closed)
+    bonjourTransport._triggerClose();
+    assert.ok(!node._peers.has('peer-abc'), 'peer should be removed after all transports close');
+    assert.strictEqual(events.filter(e => e.type === 'left').length, 1, 'should emit peer-left');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('should prefer LAN transport over relay (MMP Section 4.6 priority)', async () => {
+    const name = `test-transport-priority-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    function mockTransport() {
+      const listeners = {};
+      return {
+        on: (event, fn) => { listeners[event] = fn; },
+        send: () => {},
+        close: () => { if (listeners.close) listeners.close(); },
+      };
+    }
+
+    // Connect via relay first
+    const relay = mockTransport();
+    const peer = node._createPeer(relay, 'peer-xyz', 'priority-test', true, 'relay');
+    node._addPeer(peer);
+    assert.strictEqual(peer.transport, relay, 'initial transport should be relay');
+
+    // Add bonjour — should become preferred
+    const bonjour = mockTransport();
+    node._createPeer(bonjour, 'peer-xyz', 'priority-test', false, 'bonjour');
+    assert.strictEqual(node._bestTransport(peer), bonjour, 'bonjour should be preferred over relay');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   after(() => {
     fs.rmSync(nodeDir(nodeName), { recursive: true, force: true });
   });
