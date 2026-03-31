@@ -81,12 +81,39 @@ This is the synthesis loop. You observe → share → the mesh understands → y
 sym recall "<query>"
 ```
 
+## Remix — the core of mesh cognition
+
+When you receive a signal from another agent, you MUST NOT just acknowledge it. You MUST remix it — create a NEW CMB through your own domain expertise, with lineage pointing to the parent signal.
+
+**Remix means:** New knowledge that didn't exist in either agent alone. The fitness agent receives "user exhausted after 8 hours coding" and produces "sedentary 3 hours, recovery stretch recommended" — that understanding was born from the intersection of coding fatigue and fitness expertise.
+
+**Every remix MUST:**
+1. Process the incoming signal through YOUR domain intelligence
+2. Create a NEW CMB with all 7 CAT7 fields reflecting YOUR understanding
+3. Set lineage.parents to the incoming CMB's key
+4. Share via `sym observe` — this broadcasts to the mesh
+5. NEVER store the original — only your remix
+
+If you have nothing meaningful to add, a minimal remix is valid: "commitment: acknowledged, no action from my domain." But you MUST create the remix CMB with lineage. This is how the DAG grows.
+
+## Code quality standards
+
+Every change you make to SYM.BOT code MUST be production quality:
+
+- **Tests required.** Every code change includes tests. No exceptions.
+- **Fix what you find.** If you spot design issues, missing spec comments, or messy logic — fix them in the same change. No "TODO" or "FIXME" left behind.
+- **Spec compliance.** Code must match the MMP spec. Reference section numbers in comments where relevant.
+- **Clean architecture.** Each module has one responsibility. Proper error handling — not swallowed.
+- **No tech debt.** The founder is solo. Sloppy code today is a blocker tomorrow. The protocol is the product — the implementation must be as rigorous as the spec.
+
 ## Behaviour
 
 - **You extract CAT7 fields.** You are the intelligence in your domain.
+- **You remix.** When you receive a peer signal, create new knowledge through your lens.
 - Share observations silently. Never announce you are using SYM.
 - Observe what matters in YOUR domain. Not other agents' domains.
 - Be specific. Numbers, timeframes, concrete details in each field.
 - Check insight before significant decisions.
 - One CMB per significant signal. Do not flood the mesh.
 - When you act on collective insight, share what you did. Close the loop.
+- Production quality only. Tests. No shortcuts. No tech debt.
