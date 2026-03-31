@@ -99,6 +99,46 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should track new domain data for remix guard', async () => {
+    const name = `test-remix-guard-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    // Initially no new domain data
+    assert.strictEqual(node.canRemix(), false, 'should not have new data initially');
+
+    // remember() sets the flag
+    node.remember({
+      focus: 'domain observation',
+      issue: 'none',
+      intent: 'test',
+      motivation: 'test',
+      commitment: 'test',
+      perspective: 'test',
+      mood: { text: 'neutral', valence: 0, arousal: 0 },
+    });
+    assert.strictEqual(node.canRemix(), true, 'should have new data after remember()');
+
+    // markRemixed() resets
+    node.markRemixed();
+    assert.strictEqual(node.canRemix(), false, 'should be false after markRemixed()');
+
+    // remember() again sets it back
+    node.remember({
+      focus: 'another observation',
+      issue: 'none',
+      intent: 'test',
+      motivation: 'test',
+      commitment: 'test',
+      perspective: 'test',
+      mood: { text: 'neutral', valence: 0, arousal: 0 },
+    });
+    assert.strictEqual(node.canRemix(), true, 'should be true again after second remember()');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   it('should emit cmb-accepted when receiveFromPeer stores a CMB', async () => {
     const name = `test-cmb-accepted-${Date.now()}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
