@@ -262,6 +262,43 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should reset hasNewDomainData after remix (MMP Section 14.7)', async () => {
+    const name = `test-remix-reset-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    const fields = {
+      focus: 'observation', issue: 'none', intent: 'test', motivation: 'test',
+      commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 },
+    };
+
+    // Domain observation sets canRemix = true
+    node.remember(fields);
+    assert.strictEqual(node.canRemix(), true, 'domain observation should enable remix');
+
+    // Remix should succeed and RESET canRemix
+    const remix = node.remember(
+      { ...fields, focus: 'remix of peer signal' },
+      { parents: [{ key: 'cmb-parent-123', lineage: { ancestors: [] } }] }
+    );
+    assert.ok(remix, 'remix should succeed');
+    assert.strictEqual(node.canRemix(), false, 'remix should reset hasNewDomainData');
+
+    // Second remix without new domain data should be rejected
+    const rejected = node.remember(
+      { ...fields, focus: 'second remix attempt' },
+      { parents: [{ key: 'cmb-parent-456', lineage: { ancestors: [] } }] }
+    );
+    assert.strictEqual(rejected, null, 'second remix without new domain data should be rejected');
+
+    // New domain observation re-enables remix
+    node.remember({ ...fields, focus: 'fresh observation' });
+    assert.strictEqual(node.canRemix(), true, 'new observation should re-enable remix');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   it('should support multi-transport per peer (MMP Section 4.6)', async () => {
     const name = `test-multi-transport-${Date.now()}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
