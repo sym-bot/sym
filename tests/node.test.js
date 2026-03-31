@@ -99,6 +99,45 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should track protocol metrics', async () => {
+    const name = `test-metrics-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    const m0 = node.metrics();
+    assert.strictEqual(m0.cmbProduced, 0);
+    assert.strictEqual(m0.recalls, 0);
+    assert.ok(m0.startedAt > 0);
+    assert.ok(m0.uptimeMs >= 0);
+
+    // remember() increments cmbProduced
+    node.remember({
+      focus: 'test', issue: 'none', intent: 'test',
+      motivation: 'test', commitment: 'test', perspective: 'test',
+      mood: { text: 'neutral', valence: 0, arousal: 0 },
+    });
+    assert.strictEqual(node.metrics().cmbProduced, 1);
+
+    // recall() increments recalls
+    node.recall('test');
+    assert.strictEqual(node.metrics().recalls, 1);
+
+    // metric event emitted
+    let metricEvent = null;
+    node.on('metric', (m) => { metricEvent = m; });
+    node.remember({
+      focus: 'test2', issue: 'none', intent: 'test',
+      motivation: 'test', commitment: 'test', perspective: 'test',
+      mood: { text: 'neutral', valence: 0, arousal: 0 },
+    });
+    assert.ok(metricEvent, 'should emit metric event');
+    assert.strictEqual(metricEvent.type, 'cmb-produced');
+    assert.strictEqual(node.metrics().cmbProduced, 2);
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   it('should track new domain data for remix guard', async () => {
     const name = `test-remix-guard-${Date.now()}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
