@@ -36,6 +36,7 @@ const VERSION = require('../package.json').version;
 
 const args = process.argv.slice(2);
 const command = args[0];
+const jsonFlag = args.includes('--json');
 
 if (!command || command === '--help' || command === '-h') {
   printUsage();
@@ -52,8 +53,8 @@ if (command === '--version' || command === 'version') {
 switch (command) {
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
-  case 'status':  cmdIPC({ type: 'status' }, formatStatus); break;
-  case 'peers':   cmdIPC({ type: 'peers' }, formatPeers); break;
+  case 'status':  cmdIPC({ type: 'status' }, jsonFlag ? formatJSON : formatStatus); break;
+  case 'peers':   cmdIPC({ type: 'peers' }, jsonFlag ? formatJSON : formatPeers); break;
   case 'observe': cmdObserve(); break;
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
@@ -182,6 +183,12 @@ function cmdLogs() {
 }
 
 // ── Formatters ────────────────────────────────────────────────
+
+function formatJSON(msg) {
+  // Strip IPC wrapper, output clean JSON for programmatic consumers
+  const { type, action, ...data } = msg;
+  console.log(JSON.stringify(data));
+}
 
 function formatStatus(msg) {
   const s = msg.status || {};
