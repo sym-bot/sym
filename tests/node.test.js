@@ -134,6 +134,17 @@ describe('SymNode', () => {
     assert.strictEqual(metricEvent.type, 'cmb-produced');
     assert.strictEqual(node.metrics().cmbProduced, 2);
 
+    // reportLLMUsage() tracks LLM costs
+    node.reportLLMUsage(1000, 200, 'gpt-4o-mini');
+    const m = node.metrics();
+    assert.strictEqual(m.llmCalls, 1);
+    assert.strictEqual(m.llmTokensIn, 1000);
+    assert.strictEqual(m.llmTokensOut, 200);
+    assert.strictEqual(m.llmModel, 'gpt-4o-mini');
+    assert.ok(m.llmCostUSD > 0, 'should compute cost');
+    // gpt-4o-mini: 1000 * 0.15/1M + 200 * 0.60/1M = 0.00015 + 0.00012 = 0.00027
+    assert.ok(Math.abs(m.llmCostUSD - 0.00027) < 0.00001, `cost should be ~0.00027, got ${m.llmCostUSD}`);
+
     await node.stop();
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
