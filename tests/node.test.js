@@ -178,6 +178,39 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should reject remix when no new domain data (MMP Section 14.7)', async () => {
+    const name = `test-remix-enforce-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    // No domain data yet — remix should be rejected
+    const rejected = node.remember(
+      { focus: 'remix attempt', issue: 'none', intent: 'test', motivation: 'test',
+        commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
+      { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
+    );
+    assert.strictEqual(rejected, null, 'remix without domain data should return null');
+
+    // Produce domain observation — this sets canRemix = true
+    node.remember({
+      focus: 'domain observation', issue: 'none', intent: 'test', motivation: 'test',
+      commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 },
+    });
+    assert.strictEqual(node.canRemix(), true);
+
+    // Now remix should succeed
+    const accepted = node.remember(
+      { focus: 'valid remix', issue: 'none', intent: 'test', motivation: 'test',
+        commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
+      { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
+    );
+    assert.ok(accepted, 'remix with domain data should succeed');
+    assert.ok(accepted.key, 'remix should have key');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   it('should emit cmb-accepted when receiveFromPeer stores a CMB', async () => {
     const name = `test-cmb-accepted-${Date.now()}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
