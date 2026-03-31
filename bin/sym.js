@@ -28,7 +28,7 @@ const path = require('path');
 const os = require('os');
 const { execSync, spawn } = require('child_process');
 
-const SOCKET_PATH = process.env.SYM_SOCKET || '/tmp/sym.sock';
+const SOCKET_PATH = process.env.SYM_SOCKET || path.join(os.homedir(), '.sym', 'daemon.sock');
 const LOG_DIR = path.join(os.homedir(), 'Library', 'Logs', 'sym-daemon');
 const VERSION = require('../package.json').version;
 

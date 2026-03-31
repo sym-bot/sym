@@ -55,7 +55,8 @@ process.on('unhandledRejection', (reason) => {
 
 // ── Configuration ──────────────────────────────────────────────
 
-const SOCKET_PATH = process.env.SYM_SOCKET || '/tmp/sym.sock';
+const SYM_DIR = path.join(os.homedir(), '.sym');
+const SOCKET_PATH = process.env.SYM_SOCKET || path.join(SYM_DIR, 'daemon.sock');
 // Stable name: use SYM_NODE_NAME env, or 'sym-daemon' (not hostname — macOS
 // appends random suffixes to hostname on WiFi, causing new identity each restart)
 const NODE_NAME = process.env.SYM_NODE_NAME || 'sym-daemon';
@@ -117,6 +118,10 @@ let nextSocketId = 1;
  * @returns {net.Server}
  */
 function startIPCServer() {
+  // Ensure ~/.sym/ exists
+  if (!fs.existsSync(SYM_DIR)) {
+    fs.mkdirSync(SYM_DIR, { recursive: true });
+  }
   // Clean up stale socket
   if (fs.existsSync(SOCKET_PATH)) {
     try { fs.unlinkSync(SOCKET_PATH); } catch {}
