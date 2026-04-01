@@ -284,9 +284,21 @@ function handleIPCMessage(socketId, socket, msg) {
       }
       break;
 
-    case 'peers':
-      sendIPC(socket, { type: 'result', action: 'peers', peers: node.peers() });
+    case 'peers': {
+      // Include both mesh peers and hosted agents
+      const meshPeers = node.peers();
+      const hosted = Array.from(hostedAgents.values()).map(a => ({
+        id: a.nodeId?.slice(0, 8) || '',
+        name: a.name,
+        connected: true,
+        lastSeen: Date.now(),
+        coupling: 'hosted',
+        drift: 0,
+        source: 'ipc',
+      }));
+      sendIPC(socket, { type: 'result', action: 'peers', peers: [...meshPeers, ...hosted] });
       break;
+    }
 
     case 'metrics':
       sendIPC(socket, { type: 'result', action: 'metrics', metrics: node.metrics() });
@@ -298,6 +310,9 @@ function handleIPCMessage(socketId, socket, msg) {
         action: 'status',
         status: node.status(),
         virtualNodes: Array.from(virtualNodes.values()).map(v => v.name),
+        hostedAgents: Array.from(hostedAgents.values()).map(a => ({
+          nodeId: a.nodeId, name: a.name,
+        })),
       });
       break;
 
