@@ -110,8 +110,10 @@ const node = new SymNode({
 
 /** Connected virtual nodes. socketId → { socket, name, cognitiveProfile } */
 const virtualNodes = new Map();
-/** Hosted agents (Section 3.2 + 4.3). socketId → { socket, nodeId, name, publicKey } */
+/** Hosted agents (Section 3.2 + 4.3). socketId → { socket, nodeId, name, publicKey, activity } */
 const hostedAgents = new Map();
+/** Agent activity state. name → { status, timestamp } */
+const agentActivity = new Map();
 let nextSocketId = 1;
 
 /**
@@ -247,6 +249,12 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
     }
 
+    case 'agent-activity':
+      if (msg.name && msg.status) {
+        agentActivity.set(msg.name, { status: msg.status, timestamp: msg.timestamp || Date.now() });
+      }
+      break;
+
     case 'message':
       if (msg.content) {
         node.send(msg.content, msg.to ? { to: msg.to } : {});
@@ -289,15 +297,19 @@ function handleIPCMessage(socketId, socket, msg) {
       // stale mesh peers with the same name (e.g. ceo-ops reconnected as hosted).
       const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
       const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
-      const hosted = Array.from(hostedAgents.values()).map(a => ({
-        id: a.nodeId?.slice(0, 8) || '',
-        name: a.name,
-        connected: true,
-        lastSeen: Date.now(),
-        coupling: 'hosted',
-        drift: 0,
-        source: 'ipc',
-      }));
+      const hosted = Array.from(hostedAgents.values()).map(a => {
+        const act = agentActivity.get(a.name);
+        return {
+          id: a.nodeId?.slice(0, 8) || '',
+          name: a.name,
+          connected: true,
+          lastSeen: Date.now(),
+          coupling: 'hosted',
+          drift: 0,
+          source: 'ipc',
+          activity: act?.status || 'idle',
+        };
+      });
       sendIPC(socket, { type: 'result', action: 'peers', peers: [...meshPeers, ...hosted] });
       break;
     }
