@@ -285,8 +285,10 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'peers': {
-      // Include both mesh peers and hosted agents
-      const meshPeers = node.peers();
+      // Include mesh peers + hosted agents. Hosted takes priority over
+      // stale mesh peers with the same name (e.g. ceo-ops reconnected as hosted).
+      const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
+      const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
       const hosted = Array.from(hostedAgents.values()).map(a => ({
         id: a.nodeId?.slice(0, 8) || '',
         name: a.name,
