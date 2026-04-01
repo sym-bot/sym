@@ -204,7 +204,7 @@ function cmdTask() {
     });
   } else {
     // Default: list
-    cmdIPC({ type: 'task-list' }, (msg) => {
+    cmdIPC({ type: 'task-list' }, jsonFlag ? formatJSON : (msg) => {
       const tasks = msg.tasks || [];
       if (tasks.length === 0) { console.log('No tasks.'); return; }
       for (const t of tasks) {
