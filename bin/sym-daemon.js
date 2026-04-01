@@ -114,9 +114,29 @@ const virtualNodes = new Map();
 const hostedAgents = new Map();
 /** Agent activity state. name → { status, timestamp } */
 const agentActivity = new Map();
-/** Task board. id → { id, title, body, agent, status, priority, createdAt, updatedAt } */
+/** Task board — persisted to ~/.sym/tasks.json */
+const TASKS_PATH = path.join(SYM_DIR, 'tasks.json');
 const tasks = new Map();
 let nextTaskId = 1;
+
+function loadTasks() {
+  if (!fs.existsSync(TASKS_PATH)) return;
+  try {
+    const data = JSON.parse(fs.readFileSync(TASKS_PATH, 'utf8'));
+    for (const t of data.tasks || []) { tasks.set(t.id, t); }
+    nextTaskId = data.nextId || tasks.size + 1;
+  } catch {}
+}
+
+function saveTasks() {
+  try {
+    if (!fs.existsSync(SYM_DIR)) fs.mkdirSync(SYM_DIR, { recursive: true });
+    fs.writeFileSync(TASKS_PATH, JSON.stringify({
+      nextId: nextTaskId,
+      tasks: Array.from(tasks.values()),
+    }, null, 2));
+  } catch {}
+}
 let nextSocketId = 1;
 
 /**
@@ -273,6 +293,7 @@ function handleIPCMessage(socketId, socket, msg) {
         source: msg.source || 'manual',
       };
       tasks.set(id, task);
+      saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-create', task });
       broadcastToHostedAgents({ type: 'event', event: 'task-created', data: task });
       break;
@@ -287,6 +308,7 @@ function handleIPCMessage(socketId, socket, msg) {
       if (msg.title !== undefined) task.title = msg.title;
       if (msg.body !== undefined) task.body = msg.body;
       task.updatedAt = Date.now();
+      saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-update', task });
       broadcastToHostedAgents({ type: 'event', event: 'task-updated', data: task });
       break;
@@ -648,6 +670,9 @@ async function main() {
 
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
+
+  loadTasks();
+  log(`Loaded ${tasks.size} task(s)`);
 
   forwardEventsToVirtualNodes();
 
