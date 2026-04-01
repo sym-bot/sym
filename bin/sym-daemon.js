@@ -110,6 +110,8 @@ const node = new SymNode({
 
 /** Connected virtual nodes. socketId → { socket, name, cognitiveProfile } */
 const virtualNodes = new Map();
+/** Hosted agents (Section 3.2 + 4.3). socketId → { socket, nodeId, name, publicKey } */
+const hostedAgents = new Map();
 let nextSocketId = 1;
 
 /**
@@ -149,10 +151,9 @@ function startIPCServer() {
 
     socket.on('close', () => {
       const vn = virtualNodes.get(socketId);
-      if (vn) {
-        log(`Virtual node disconnected: ${vn.name}`);
-        virtualNodes.delete(socketId);
-      }
+      if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
+      const ha = hostedAgents.get(socketId);
+      if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
     });
 
     socket.on('error', (err) => {
@@ -160,6 +161,7 @@ function startIPCServer() {
         log(`IPC socket error: ${err.message}`);
       }
       virtualNodes.delete(socketId);
+      hostedAgents.delete(socketId);
     });
   });
 
@@ -202,6 +204,49 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
     }
 
+    // ── Hosted Agent Registration (Section 4.3.1) ──────────
+    case 'register-agent': {
+      if (!msg.nodeId || !msg.name) {
+        sendIPC(socket, { type: 'error', message: 'register-agent requires nodeId and name' });
+        break;
+      }
+      hostedAgents.set(socketId, {
+        socket,
+        nodeId: msg.nodeId,
+        name: msg.name,
+        publicKey: msg.publicKey || null,
+        svafFieldWeights: msg.svafFieldWeights || null,
+        svafFreshnessSeconds: msg.svafFreshnessSeconds || null,
+      });
+      sendIPC(socket, {
+        type: 'registered-agent',
+        nodeId: msg.nodeId,
+        daemonNodeId: node._identity?.nodeId,
+        relay: relayUrl,
+        peers: node.peers(),
+      });
+      log(`Hosted agent registered: ${msg.name} (${msg.nodeId.slice(0, 8)})`);
+      break;
+    }
+
+    // ── Hosted Agent Outbound CMB (Section 4.3.2) ─────────
+    case 'agent-cmb': {
+      // Hosted agent produced a CMB — broadcast to remote peers with agent's nodeId
+      if (!msg.cmb || !msg.from) break;
+      const frame = { type: 'cmb', timestamp: msg.timestamp || Date.now(), cmb: msg.cmb, from: msg.from, fromName: msg.fromName };
+      // Broadcast via all peer transports
+      for (const [, peer] of node._peers) {
+        peer.transport.send(frame);
+      }
+      // Also forward to other hosted agents (local mesh)
+      for (const [id, agent] of hostedAgents) {
+        if (id !== socketId) {
+          sendIPC(agent.socket, { type: 'event', event: 'frame-received', data: { peerId: msg.from, peerName: msg.fromName, frame } });
+        }
+      }
+      break;
+    }
+
     case 'message':
       if (msg.content) {
         node.send(msg.content, msg.to ? { to: msg.to } : {});
@@ -226,7 +271,8 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'recall': {
-      const results = node.recall(msg.query || '');
+      let results = node.recall(msg.query || '');
+      if (msg.limit && msg.limit > 0) results = results.slice(0, msg.limit);
       sendIPC(socket, { type: 'result', action: 'recall', results });
       break;
     }
@@ -283,6 +329,17 @@ function handleIPCMessage(socketId, socket, msg) {
  */
 function sendIPC(socket, msg) {
   try { socket.write(JSON.stringify(msg) + '\n'); } catch {}
+}
+
+/**
+ * Broadcast to all hosted agents (Section 4.3.2).
+ * Hosted agents receive raw frames — they run their own SVAF.
+ */
+function broadcastToHostedAgents(msg) {
+  const data = JSON.stringify(msg) + '\n';
+  for (const [id, agent] of hostedAgents) {
+    try { agent.socket.write(data); } catch { hostedAgents.delete(id); }
+  }
 }
 
 /** Forward mesh events to all registered virtual nodes. */
@@ -516,6 +573,17 @@ async function main() {
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
 
   forwardEventsToVirtualNodes();
+
+  // Section 4.3.2: forward raw frames to hosted agents (before SVAF evaluation)
+  node.on('frame-received', ({ peerId, peerName, frame }) => {
+    if (hostedAgents.size > 0) {
+      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: { peerId, peerName, frame } });
+    }
+  });
+
+  // Forward peer events to hosted agents
+  node.on('peer-joined', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data }));
+  node.on('peer-left', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-left', data }));
 
   const ipcServer = startIPCServer();
 

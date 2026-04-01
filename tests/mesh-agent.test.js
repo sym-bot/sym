@@ -62,19 +62,19 @@ describe('MeshAgent', () => {
       reason: async () => null,
       remix: async () => null,
     });
-    assert.ok(agent.node, 'should expose underlying SymNode');
-    assert.strictEqual(agent.node.name, 'test-agent');
+    // Node is created on start(), not in constructor (hosted vs standalone detection)
+    assert.strictEqual(agent.node, null, 'node is null before start()');
+    assert.strictEqual(agent.hosted, false, 'not hosted before start');
   });
 
-  it('should create node with cognitiveProfile default', () => {
+  it('should store name and options', () => {
     const agent = new MeshAgent({
       name: 'my-agent',
       fetchDomain: async () => null,
       reason: async () => null,
       remix: async () => null,
     });
-    // Default cognitiveProfile is "<name> mesh agent"
-    assert.ok(agent.node, 'node should exist');
+    assert.strictEqual(agent._name, 'my-agent');
   });
 
   it('should accept custom pollInterval', () => {
