@@ -334,6 +334,13 @@ function handleIPCMessage(socketId, socket, msg) {
       });
       break;
 
+    case 'catchup':
+      // Trigger all hosted agents to check their domains immediately
+      broadcastToHostedAgents({ type: 'event', event: 'catchup' });
+      sendIPC(socket, { type: 'result', action: 'catchup', agents: hostedAgents.size });
+      log(`Catchup triggered for ${hostedAgents.size} hosted agent(s)`);
+      break;
+
     default:
       log(`Unknown IPC message type: ${msg.type}`);
   }

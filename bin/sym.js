@@ -60,6 +60,7 @@ switch (command) {
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
   case 'send':    cmdSend(); break;
+  case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'logs':    cmdLogs(); break;
   default:
     console.error(`Unknown command: ${command}`);
@@ -147,8 +148,15 @@ function cmdObserve() {
 }
 
 function cmdRecall() {
-  const query = args.slice(1).join(' ') || '';
-  cmdIPC({ type: 'recall', query }, (msg) => {
+  const recallArgs = args.slice(1);
+  const limitIdx = recallArgs.indexOf('--limit');
+  let limit = 0;
+  if (limitIdx !== -1) {
+    limit = parseInt(recallArgs[limitIdx + 1]) || 0;
+    recallArgs.splice(limitIdx, 2);
+  }
+  const query = recallArgs.join(' ') || '';
+  cmdIPC({ type: 'recall', query, limit }, (msg) => {
     const results = msg.results || [];
     if (results.length === 0) {
       console.log('No memories found.');
