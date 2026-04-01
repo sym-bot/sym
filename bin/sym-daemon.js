@@ -605,6 +605,25 @@ async function main() {
     }
   });
 
+  // When daemon accepts a CMB (from peer or local observe), forward to hosted agents
+  // so they can ingest it into their local memory via their own SVAF
+  node.on('cmb-accepted', (entry) => {
+    if (hostedAgents.size > 0) {
+      // Wrap as a cmb frame so hosted agent's SVAF can evaluate it
+      const frame = {
+        type: 'cmb',
+        timestamp: entry.timestamp || entry.storedAt || Date.now(),
+        cmb: entry.cmb,
+        source: entry.source,
+      };
+      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: {
+        peerId: entry.peerId || entry.source || 'daemon',
+        peerName: entry.source || 'daemon',
+        frame,
+      }});
+    }
+  });
+
   // Forward peer events to hosted agents
   node.on('peer-joined', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data }));
   node.on('peer-left', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-left', data }));
