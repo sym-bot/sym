@@ -61,6 +61,7 @@ switch (command) {
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
   case 'send':    cmdSend(); break;
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
+  case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
   default:
     console.error(`Unknown command: ${command}`);
@@ -179,6 +180,38 @@ function cmdSend() {
   cmdIPC({ type: 'send', message }, (msg) => {
     console.log(`Message sent to ${msg.peers || 0} peer(s).`);
   });
+}
+
+function cmdTask() {
+  const sub = args[1]; // create, list, update, assign
+  if (sub === 'create') {
+    const title = args.slice(2).join(' ');
+    cmdIPC({ type: 'task-create', title, agent: 'unassigned' }, (msg) => {
+      console.log(`Task created: ${msg.task?.id} — "${msg.task?.title}"`);
+    });
+  } else if (sub === 'assign') {
+    const id = args[2];
+    const agent = args[3];
+    cmdIPC({ type: 'task-update', id, agent, status: 'assigned' }, (msg) => {
+      if (msg.error) { console.log(`Error: ${msg.error}`); return; }
+      console.log(`Task ${id} assigned to ${agent}`);
+    });
+  } else if (sub === 'done') {
+    const id = args[2];
+    cmdIPC({ type: 'task-update', id, status: 'done' }, (msg) => {
+      if (msg.error) { console.log(`Error: ${msg.error}`); return; }
+      console.log(`Task ${id} marked done`);
+    });
+  } else {
+    // Default: list
+    cmdIPC({ type: 'task-list' }, (msg) => {
+      const tasks = msg.tasks || [];
+      if (tasks.length === 0) { console.log('No tasks.'); return; }
+      for (const t of tasks) {
+        console.log(`  [${t.status}] ${t.id} → ${t.agent}: ${t.title}`);
+      }
+    });
+  }
 }
 
 function cmdLogs() {

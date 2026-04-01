@@ -114,6 +114,9 @@ const virtualNodes = new Map();
 const hostedAgents = new Map();
 /** Agent activity state. name → { status, timestamp } */
 const agentActivity = new Map();
+/** Task board. id → { id, title, body, agent, status, priority, createdAt, updatedAt } */
+const tasks = new Map();
+let nextTaskId = 1;
 let nextSocketId = 1;
 
 /**
@@ -253,6 +256,44 @@ function handleIPCMessage(socketId, socket, msg) {
       if (msg.name && msg.status) {
         agentActivity.set(msg.name, { status: msg.status, timestamp: msg.timestamp || Date.now() });
       }
+      break;
+
+    // ── Task Board ────────────────────────────────────
+    case 'task-create': {
+      const id = `task-${nextTaskId++}`;
+      const task = {
+        id,
+        title: msg.title || '',
+        body: msg.body || '',
+        agent: msg.agent || 'unassigned',
+        status: msg.status || 'backlog', // backlog, assigned, working, review, done
+        priority: msg.priority || 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        source: msg.source || 'manual',
+      };
+      tasks.set(id, task);
+      sendIPC(socket, { type: 'result', action: 'task-create', task });
+      broadcastToHostedAgents({ type: 'event', event: 'task-created', data: task });
+      break;
+    }
+
+    case 'task-update': {
+      const task = tasks.get(msg.id);
+      if (!task) { sendIPC(socket, { type: 'result', action: 'task-update', error: 'not found' }); break; }
+      if (msg.agent !== undefined) task.agent = msg.agent;
+      if (msg.status !== undefined) task.status = msg.status;
+      if (msg.priority !== undefined) task.priority = msg.priority;
+      if (msg.title !== undefined) task.title = msg.title;
+      if (msg.body !== undefined) task.body = msg.body;
+      task.updatedAt = Date.now();
+      sendIPC(socket, { type: 'result', action: 'task-update', task });
+      broadcastToHostedAgents({ type: 'event', event: 'task-updated', data: task });
+      break;
+    }
+
+    case 'task-list':
+      sendIPC(socket, { type: 'result', action: 'task-list', tasks: Array.from(tasks.values()) });
       break;
 
     case 'message':
