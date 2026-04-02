@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.22
+
+### Changed
+- **MeshAgent: every agent is a standalone peer node** (MMP v0.2.1). Removed hosted/daemon mode. Every `MeshAgent` creates its own `SymNode` with own identity, transport, coupling engine, and memory store. Coupling is per-node — agents that share another node's identity cannot have independent SVAF weights.
+- **`sym recall --json`** — new flag returns full entry objects (source, peerId, CMB fields, lineage) as JSON. Enables sym.day to get real source data from daemon memory.
+
+### Tests
+- 119 tests (was 100). MeshAgent test updated for standalone-only constructor.
+
 ## 0.3.21
 
 ### Added
