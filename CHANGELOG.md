@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.23
+
+### Added
+- **Handshake: `version` and `extensions` fields** per MMP v0.2.1 Section 5.2. Handshake now sends `version: "0.2.1"` and `extensions: []`.
+- **Error frame support** per MMP v0.2.1 Section 7.2. `sendError(peerId, code, message, detail)` sends protocol-level error frames. Codes 1xxx close connection; 2xxx informational.
+
+### Parity
+- 100% feature parity with sym-swift (Swift SDK). Both SDKs implement all 10 frame types, handshake with version/extensions/e2ePublicKey, error frames, multi-transport per peer, SVAF per-field evaluation, MD5 content-addressable CMB keys, lineage, remix guard, and metrics.
+
 ## 0.3.22
 
 ### Changed
