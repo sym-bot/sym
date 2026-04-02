@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.25
+
+### Changed
+- **sym-core 0.2.0** — semantic encoder for SVAF evaluation. Paraphrase similarity: 0.31 (n-gram) → 0.69 (semantic). Per-field evaluation quality bounded by encoder quality, not model capacity.
+
+## 0.3.24
+
+### Added
+- **Catchup via mesh broadcast.** Daemon broadcasts `"catchup"` message to all peers. `MeshAgent` listens for it and triggers immediate domain poll. Replaces the old hosted-agent-only catchup path.
+
 ## 0.3.23
 
 ### Added
