@@ -37,6 +37,8 @@ const VERSION = require('../package.json').version;
 const args = process.argv.slice(2);
 const command = args[0];
 const jsonFlag = args.includes('--json');
+const actorIdx = args.indexOf('--actor');
+const actorFlag = actorIdx >= 0 ? args[actorIdx + 1] : null;
 
 if (!command || command === '--help' || command === '-h') {
   printUsage();
@@ -149,7 +151,7 @@ function cmdObserve() {
 }
 
 function cmdRecall() {
-  const recallArgs = args.slice(1);
+  const recallArgs = args.slice(1).filter(a => a !== '--json');
   const limitIdx = recallArgs.indexOf('--limit');
   let limit = 0;
   if (limitIdx !== -1) {
@@ -159,6 +161,10 @@ function cmdRecall() {
   const query = recallArgs.join(' ') || '';
   cmdIPC({ type: 'recall', query, limit }, (msg) => {
     const results = msg.results || [];
+    if (jsonFlag) {
+      console.log(JSON.stringify({ results }));
+      return;
+    }
     if (results.length === 0) {
       console.log('No memories found.');
       return;
@@ -198,9 +204,18 @@ function cmdTask() {
     });
   } else if (sub === 'done') {
     const id = args[2];
-    cmdIPC({ type: 'task-update', id, status: 'done' }, (msg) => {
+    const actor = actorFlag || 'system';
+    cmdIPC({ type: 'task-update', id, status: 'done', actor }, (msg) => {
       if (msg.error) { console.log(`Error: ${msg.error}`); return; }
       console.log(`Task ${id} marked done`);
+    });
+  } else if (sub === 'move') {
+    const id = args[2];
+    const status = args[3];
+    const actor = actorFlag || 'system';
+    cmdIPC({ type: 'task-update', id, status, actor }, (msg) => {
+      if (msg.error) { console.log(`Error: ${msg.error}`); return; }
+      console.log(`Task ${id} moved to ${status}`);
     });
   } else {
     // Default: list
