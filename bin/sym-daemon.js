@@ -274,7 +274,34 @@ function handleIPCMessage(socketId, socket, msg) {
 
     case 'agent-activity':
       if (msg.name && msg.status) {
+        const prev = agentActivity.get(msg.name);
         agentActivity.set(msg.name, { status: msg.status, timestamp: msg.timestamp || Date.now() });
+
+        // Auto-progress tickets based on agent lifecycle
+        const agentTasks = Array.from(tasks.values()).filter(t => t.agent === msg.name && t.agent !== 'founder');
+        if (msg.status === 'reasoning' || msg.status === 'remixing') {
+          for (const t of agentTasks) {
+            if (t.status === 'assigned') {
+              if (!t.history) t.history = [];
+              t.history.push({ type: 'status', from: 'assigned', to: 'working', actor: msg.name, timestamp: Date.now() });
+              t.status = 'working';
+              t.updatedAt = Date.now();
+              log(`Task ${t.id} auto-progressed to working (${msg.name} reasoning)`);
+            }
+          }
+          saveTasks();
+        } else if (msg.status === 'idle' && prev && (prev.status === 'reasoning' || prev.status === 'remixing')) {
+          for (const t of agentTasks) {
+            if (t.status === 'working') {
+              if (!t.history) t.history = [];
+              t.history.push({ type: 'status', from: 'working', to: 'review', actor: msg.name, timestamp: Date.now() });
+              t.status = 'review';
+              t.updatedAt = Date.now();
+              log(`Task ${t.id} auto-progressed to review (${msg.name} completed)`);
+            }
+          }
+          saveTasks();
+        }
       }
       break;
 
@@ -302,12 +329,22 @@ function handleIPCMessage(socketId, socket, msg) {
     case 'task-update': {
       const task = tasks.get(msg.id);
       if (!task) { sendIPC(socket, { type: 'result', action: 'task-update', error: 'not found' }); break; }
-      if (msg.agent !== undefined) task.agent = msg.agent;
-      if (msg.status !== undefined) task.status = msg.status;
+      if (!task.history) task.history = [];
+      const now = Date.now();
+      const actor = msg.actor || 'system';
+
+      if (msg.status !== undefined && msg.status !== task.status) {
+        task.history.push({ type: 'status', from: task.status, to: msg.status, actor, timestamp: now });
+        task.status = msg.status;
+      }
+      if (msg.agent !== undefined && msg.agent !== task.agent) {
+        task.history.push({ type: 'assign', from: task.agent, to: msg.agent, actor, timestamp: now });
+        task.agent = msg.agent;
+      }
       if (msg.priority !== undefined) task.priority = msg.priority;
       if (msg.title !== undefined) task.title = msg.title;
       if (msg.body !== undefined) task.body = msg.body;
-      task.updatedAt = Date.now();
+      task.updatedAt = now;
       saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-update', task });
       broadcastToHostedAgents({ type: 'event', event: 'task-updated', data: task });
@@ -356,8 +393,6 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'peers': {
-      // Include mesh peers + hosted agents. Hosted takes priority over
-      // stale mesh peers with the same name (e.g. ceo-ops reconnected as hosted).
       const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
       const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
       const hosted = Array.from(hostedAgents.values()).map(a => {
@@ -371,6 +406,7 @@ function handleIPCMessage(socketId, socket, msg) {
           drift: 0,
           source: 'ipc',
           activity: act?.status || 'idle',
+          svafFieldWeights: a.svafFieldWeights || null,
         };
       });
       sendIPC(socket, { type: 'result', action: 'peers', peers: [...meshPeers, ...hosted] });
@@ -410,10 +446,10 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'catchup':
-      // Trigger all hosted agents to check their domains immediately
-      broadcastToHostedAgents({ type: 'event', event: 'catchup' });
-      sendIPC(socket, { type: 'result', action: 'catchup', agents: hostedAgents.size });
-      log(`Catchup triggered for ${hostedAgents.size} hosted agent(s)`);
+      // Broadcast catchup message to all standalone peer agents
+      node.send('catchup');
+      sendIPC(socket, { type: 'result', action: 'catchup', agents: node.peers().length });
+      log(`Catchup broadcast to ${node.peers().length} peer(s)`);
       break;
 
     default:
