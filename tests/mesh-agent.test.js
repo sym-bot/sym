@@ -62,9 +62,9 @@ describe('MeshAgent', () => {
       reason: async () => null,
       remix: async () => null,
     });
-    // Node is created on start(), not in constructor (hosted vs standalone detection)
-    assert.strictEqual(agent.node, null, 'node is null before start()');
-    assert.strictEqual(agent.hosted, false, 'not hosted before start');
+    // MMP v0.2.1: every agent is a full peer node — created in constructor
+    assert.ok(agent.node !== null, 'node created in constructor');
+    assert.strictEqual(agent.node.name, 'test-agent');
   });
 
   it('should store name and options', () => {
