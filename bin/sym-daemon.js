@@ -99,8 +99,8 @@ if (args.includes('--status')) {
 
 const node = new SymNode({
   name: NODE_NAME,
-  cognitiveProfile: `Physical mesh node for ${os.hostname()}. Routes frames between virtual nodes and the mesh.`,
-  svafFreshnessSeconds: 7200,  // 2 hours — current coding session context
+  cognitiveProfile: `Mesh hub for ${os.hostname()}. Forwards frames, stores CMBs for recall. No SVAF evaluation.`,
+  relayMode: true,  // Section 16.1: relay node — forward and store, skip Layer 4+
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,
