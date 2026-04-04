@@ -391,7 +391,19 @@ function handleIPCMessage(socketId, socket, msg) {
 
     case 'send':
       if (msg.message) {
+        // Send as both: transient message frame (real-time) + CMB (persistent, recallable).
+        // Message frame: immediate delivery to connected peers (MMP Section 7).
+        // CMB: stored in mesh memory, flows through SVAF, recallable via sym recall.
         node.send(msg.message);
+        node.remember({
+          focus: msg.message,
+          issue: 'none',
+          intent: 'inter-node message',
+          motivation: 'mesh communication',
+          commitment: msg.message.slice(0, 120),
+          perspective: `${node.name}, direct message`,
+          mood: { text: 'neutral', valence: 0, arousal: 0 },
+        });
         sendIPC(socket, { type: 'result', action: 'send', peers: node.peers().length });
       }
       break;
