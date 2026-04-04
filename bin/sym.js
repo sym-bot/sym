@@ -28,8 +28,9 @@ const path = require('path');
 const os = require('os');
 const { execSync, spawn } = require('child_process');
 
-const SOCKET_PATH = process.env.SYM_SOCKET || path.join(os.homedir(), '.sym', 'daemon.sock');
-const LOG_DIR = path.join(os.homedir(), 'Library', 'Logs', 'sym-daemon');
+const { getSocketPath, getLogDir } = require('../lib/platform');
+const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
+const LOG_DIR = getLogDir();
 const VERSION = require('../package.json').version;
 
 // ── Argument Parsing ──────────────────────────────────────────
@@ -390,6 +391,10 @@ function cmdIPC(msg, formatter) {
 }
 
 function isDaemonRunning() {
+  // fs.existsSync doesn't work for Windows named pipes (//./pipe/sym-daemon).
+  // On Windows, skip the pre-check — the IPC connection in cmdIPC will fail
+  // with a clear error if the daemon isn't actually running.
+  if (process.platform === 'win32') return true;
   return fs.existsSync(SOCKET_PATH);
 }
 
