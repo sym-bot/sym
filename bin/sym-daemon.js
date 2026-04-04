@@ -411,11 +411,12 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'listen':
+      // MMP Section 13.9: Local Event Interface.
       // Register this socket for real-time mesh events.
-      // Listener receives: cmb-accepted, message, peer-joined, peer-left
-      listeners.set(socketId, socket);
+      // Subscriber MAY declare field weights for domain-specific filtering.
+      listeners.set(socketId, { socket, fieldWeights: msg.fieldWeights || null });
       sendIPC(socket, { type: 'result', action: 'listen', status: 'subscribed' });
-      log(`Listener registered (socket ${socketId})`);
+      log(`Listener registered (socket ${socketId}${msg.fieldWeights ? ', with field weights' : ''})`);
       break;
 
     case 'peers': {
@@ -503,17 +504,43 @@ function broadcastToHostedAgents(msg) {
   }
 }
 
+// MMP Section 13.9.2: Subscriber Field Weights.
+// If subscriber declared field weights, evaluate CMB relevance before delivery.
+function shouldDeliverToListener(listener, msg) {
+  if (!listener.fieldWeights) return true; // no weights = receive everything
+  if (msg.event !== 'cmb-accepted') return true; // non-CMB events always delivered
+
+  const fields = msg.data?.fields;
+  if (!fields) return true;
+
+  // Weighted relevance: sum(α_f * hasContent_f) / sum(α_f)
+  // Deliver if any high-weight field has content
+  const weights = listener.fieldWeights;
+  let weightedScore = 0, totalWeight = 0;
+  for (const [field, weight] of Object.entries(weights)) {
+    totalWeight += weight;
+    const text = fields[field]?.text || '';
+    if (text && text !== 'none' && text !== 'neutral') {
+      weightedScore += weight;
+    }
+  }
+  // Deliver if weighted content coverage > 30% of total weight
+  return totalWeight > 0 && (weightedScore / totalWeight) > 0.3;
+}
+
 function broadcastToListeners(msg) {
-  const data = JSON.stringify(msg) + '\n';
-  for (const [id, socket] of listeners) {
-    try { socket.write(data); } catch { listeners.delete(id); }
+  for (const [id, listener] of listeners) {
+    if (!shouldDeliverToListener(listener, msg)) continue;
+    try {
+      listener.socket.write(JSON.stringify(msg) + '\n');
+    } catch { listeners.delete(id); }
   }
 }
 
 /** Forward mesh events to all registered virtual nodes. */
 function forwardEventsToVirtualNodes() {
   const events = [
-    ['mood-accepted', (d) => ({ type: 'event', event: 'mood-accepted', data: d })],
+    ['mood-delivered', (d) => ({ type: 'event', event: 'mood-delivered', data: d })],
     ['mood-rejected', (d) => ({ type: 'event', event: 'mood-rejected', data: d })],
     ['peer-joined', (d) => ({ type: 'event', event: 'peer-joined', data: d })],
     ['peer-left', (d) => ({ type: 'event', event: 'peer-left', data: d })],
@@ -541,7 +568,7 @@ function forwardEventsToVirtualNodes() {
     });
   });
 
-  node.on('mood-accepted', (data) => {
+  node.on('mood-delivered', (data) => {
     // xMesh ingestion happens via cmb → SVAF path, not here.
     // Wake sleeping local peers so they can receive the mood.
     node._wakeManager?.wakeSleepingPeers('mood', {
@@ -762,6 +789,7 @@ async function main() {
         key: entry.key,
         source: entry.source || entry.cmb?.createdBy || 'unknown',
         focus: entry.cmb?.fields?.focus?.text || entry.content || '',
+        fields: entry.cmb?.fields || null, // Section 13.9.2: needed for subscriber field weight filtering
         timestamp: entry.timestamp || Date.now(),
       },
     });
