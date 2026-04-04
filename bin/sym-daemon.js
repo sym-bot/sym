@@ -139,6 +139,7 @@ function saveTasks() {
   } catch {}
 }
 let nextSocketId = 1;
+const listeners = new Map(); // socketId → socket — real-time event subscribers
 
 /**
  * Start the Unix socket IPC server for virtual node connections.
@@ -180,6 +181,7 @@ function startIPCServer() {
       if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
       const ha = hostedAgents.get(socketId);
       if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
+      listeners.delete(socketId);
     });
 
     socket.on('error', (err) => {
@@ -408,6 +410,14 @@ function handleIPCMessage(socketId, socket, msg) {
       }
       break;
 
+    case 'listen':
+      // Register this socket for real-time mesh events.
+      // Listener receives: cmb-accepted, message, peer-joined, peer-left
+      listeners.set(socketId, socket);
+      sendIPC(socket, { type: 'result', action: 'listen', status: 'subscribed' });
+      log(`Listener registered (socket ${socketId})`);
+      break;
+
     case 'peers': {
       const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
       const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
@@ -493,6 +503,13 @@ function broadcastToHostedAgents(msg) {
   }
 }
 
+function broadcastToListeners(msg) {
+  const data = JSON.stringify(msg) + '\n';
+  for (const [id, socket] of listeners) {
+    try { socket.write(data); } catch { listeners.delete(id); }
+  }
+}
+
 /** Forward mesh events to all registered virtual nodes. */
 function forwardEventsToVirtualNodes() {
   const events = [
@@ -509,6 +526,7 @@ function forwardEventsToVirtualNodes() {
 
   node.on('message', (from, content) => {
     broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
+    broadcastToListeners({ type: 'event', event: 'message', data: { from, content, timestamp: Date.now() } });
 
     // Feed messages (including Telegram) into xMesh
     node._xmesh.ingestSignal({ type: 'message', from, content });
@@ -738,6 +756,15 @@ async function main() {
   // When daemon accepts a CMB (from peer or local observe), forward to hosted agents
   // so they can ingest it into their local memory via their own SVAF
   node.on('cmb-accepted', (entry) => {
+    broadcastToListeners({
+      type: 'event', event: 'cmb-accepted',
+      data: {
+        key: entry.key,
+        source: entry.source || entry.cmb?.createdBy || 'unknown',
+        focus: entry.cmb?.fields?.focus?.text || entry.content || '',
+        timestamp: entry.timestamp || Date.now(),
+      },
+    });
     if (hostedAgents.size > 0) {
       // Wrap as a cmb frame so hosted agent's SVAF can evaluate it
       const frame = {
@@ -755,8 +782,14 @@ async function main() {
   });
 
   // Forward peer events to hosted agents
-  node.on('peer-joined', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data }));
-  node.on('peer-left', (data) => broadcastToHostedAgents({ type: 'event', event: 'peer-left', data }));
+  node.on('peer-joined', (data) => {
+    broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data });
+    broadcastToListeners({ type: 'event', event: 'peer-joined', data: { name: data.name || 'unknown', peerId: data.peerId } });
+  });
+  node.on('peer-left', (data) => {
+    broadcastToHostedAgents({ type: 'event', event: 'peer-left', data });
+    broadcastToListeners({ type: 'event', event: 'peer-left', data: { name: data.name || 'unknown', peerId: data.peerId } });
+  });
 
   const ipcServer = startIPCServer();
 

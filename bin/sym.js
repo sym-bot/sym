@@ -63,6 +63,7 @@ switch (command) {
   case 'recall':  cmdRecall(); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
   case 'send':    cmdSend(); break;
+  case 'listen':  cmdListen(); break;
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
@@ -187,6 +188,55 @@ function cmdSend() {
   cmdIPC({ type: 'send', message }, (msg) => {
     console.log(`Message sent to ${msg.peers || 0} peer(s).`);
   });
+}
+
+function cmdListen() {
+  if (!isDaemonRunning()) {
+    console.error('sym-daemon is not running. Start it with: sym start');
+    process.exit(1);
+  }
+  const socket = net.createConnection(SOCKET_PATH, () => {
+    socket.write(JSON.stringify({ type: 'listen' }) + '\n');
+  });
+  let buffer = '';
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.action === 'listen') {
+          console.log('Listening for mesh events... (Ctrl+C to stop)');
+          continue;
+        }
+        if (msg.event === 'cmb-accepted') {
+          const d = msg.data;
+          console.log(`[${d.source}] ${d.focus}`);
+        } else if (msg.event === 'message') {
+          const d = msg.data;
+          console.log(`[message from ${d.from}] ${d.content}`);
+        } else if (msg.event === 'peer-joined') {
+          console.log(`[+] ${msg.data.name} joined`);
+        } else if (msg.event === 'peer-left') {
+          console.log(`[-] ${msg.data.name} left`);
+        } else if (jsonFlag) {
+          console.log(JSON.stringify(msg));
+        }
+      } catch {}
+    }
+  });
+  socket.on('error', (err) => {
+    console.error(`Connection error: ${err.message}`);
+    process.exit(1);
+  });
+  socket.on('close', () => {
+    console.log('Disconnected from daemon.');
+    process.exit(0);
+  });
+  process.on('SIGINT', () => { socket.destroy(); process.exit(0); });
 }
 
 function cmdTask() {
