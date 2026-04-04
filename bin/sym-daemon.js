@@ -56,18 +56,12 @@ process.on('unhandledRejection', (reason) => {
 // ── Configuration ──────────────────────────────────────────────
 
 const SYM_DIR = path.join(os.homedir(), '.sym');
-// Windows uses named pipes; Unix uses domain sockets.
-const DEFAULT_SOCKET = process.platform === 'win32'
-  ? '\\\\.\\pipe\\sym-daemon'
-  : path.join(SYM_DIR, 'daemon.sock');
-const SOCKET_PATH = process.env.SYM_SOCKET || DEFAULT_SOCKET;
+const { getSocketPath, getLogDir } = require('../lib/platform');
+const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or 'sym-daemon' (not hostname — macOS
 // appends random suffixes to hostname on WiFi, causing new identity each restart)
 const NODE_NAME = process.env.SYM_NODE_NAME || 'sym-daemon';
-// Cross-platform log directory
-const LOG_DIR = process.platform === 'win32'
-  ? path.join(os.homedir(), '.sym', 'logs')
-  : path.join(os.homedir(), 'Library', 'Logs', 'sym-daemon');
+const LOG_DIR = getLogDir('sym-daemon');
 
 // Load relay config from ~/.sym/relay.env if env vars not set
 if (!process.env.SYM_RELAY_URL) {
