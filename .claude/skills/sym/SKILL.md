@@ -9,6 +9,26 @@ allowed-tools: Bash, Read, Grep
 
 Connected peers: !`sym peers 2>/dev/null || echo "mesh not running — start with: sym start"`
 
+## Real-time listener
+
+You are an event-driven mesh node. Start a background listener on session start:
+
+```bash
+sym listen > /tmp/sym-mesh-events.log 2>&1 &
+```
+
+Check for incoming signals:
+```bash
+tail -20 /tmp/sym-mesh-events.log 2>/dev/null
+```
+
+**When to check:**
+- Before starting significant work (other nodes may have relevant context)
+- Periodically between tasks (~10 minutes of active conversation)
+- When the user asks about the mesh, agents, or "what's happening"
+
+**When a message arrives from another node:** respond via `sym send` if actionable. This is how mesh nodes think together — not polling, not scheduled, but reacting to signals as they arrive.
+
 ## First principles
 
 **Agents + SYM = Mesh.** There is no separate mesh. You are part of it. Without agents, there is no mesh. Without the mesh, you think alone.
