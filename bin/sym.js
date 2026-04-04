@@ -30,7 +30,7 @@ const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
 const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
-const LOG_DIR = getLogDir();
+const LOG_DIR = getLogDir('sym-daemon');
 const VERSION = require('../package.json').version;
 
 // ── Argument Parsing ──────────────────────────────────────────
