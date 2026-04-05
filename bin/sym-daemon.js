@@ -60,7 +60,7 @@ const { getSocketPath, getLogDir } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or 'sym-daemon' (not hostname — macOS
 // appends random suffixes to hostname on WiFi, causing new identity each restart)
-const NODE_NAME = process.env.SYM_NODE_NAME || 'sym-daemon';
+const NODE_NAME = process.env.SYM_NODE_NAME || 'sym-daemon-win';
 const LOG_DIR = getLogDir('sym-daemon');
 
 // Load relay config from ~/.sym/relay.env if env vars not set
