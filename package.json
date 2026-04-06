@@ -1,6 +1,6 @@
 {
   "name": "@sym-bot/sym",
-  "version": "0.3.52",
+  "version": "0.3.53",
   "description": "Infrastructure and protocol for multi-agent collective intelligence",
   "main": "lib/node.js",
   "bin": {
