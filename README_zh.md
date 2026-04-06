@@ -9,7 +9,7 @@
 SYM 就是这个协议。安装后启动 daemon，你机器上的每个 Agent 自动加入 mesh 网络。每个 Agent 通过 SVAF（逐字段评估）自主决定哪些信号与自己相关——不需要你配置路由规则，不需要写对接代码。
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
 [![English](https://img.shields.io/badge/lang-English-blue)](README.md)
