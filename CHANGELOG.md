@@ -1,5 +1,16 @@
 # Changelog
 
+> **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
+
+## 0.3.56
+
+### Changed
+- **CMB content key algorithm: MD5 → SHA256 (truncated to 32 hex chars).** `MemoryStore._cmbKey()` now uses `crypto.createHash('sha256').digest('hex').slice(0, 32)` for both the field-text and raw-content code paths. This duplicated CMB-key logic (separate from `@sym-bot/core` `cmb-encoder.js`) is now back in sync. Wire-breaking with respect to dedup against pre-0.3.56 stored CMBs. Coordinated with `@sym-bot/core` 0.3.28 and `sym-core-swift` 0.3.6.
+- **`@sym-bot/core` dependency bumped** to `^0.3.28`.
+
+### Fixed
+- Removed accidental self-dependency `@sym-bot/sym: ^0.3.43` from `package.json` `dependencies`. The package now declares only its real runtime deps (`@sym-bot/core`, `bonjour-service`, `ws`).
+
 ## 0.3.25
 
 ### Changed
