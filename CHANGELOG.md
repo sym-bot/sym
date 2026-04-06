@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.57
+
+### Changed
+- **`MemoryStore._cmbKey` now delegates to `@sym-bot/core` `cmbKey()`** instead of re-implementing the SHA256-truncate logic. Eliminates duplicated CMB key code that had drifted multiple times. Single source of truth lives in `sym-core/lib/cmb-encoder.js`. The raw-content fallback path remains a direct SHA256 (distinct input space, cannot collide with the field-keyed path).
+- **`@sym-bot/core` dependency bumped** to `^0.3.29` to pick up the new `cmbKey` export and the FNV-1a context encoder fix. The encoder fix restores cross-SDK n-gram embedding parity with `sym-core-swift` for the first time — see `@sym-bot/core` 0.3.29 changelog for the wire-impact details.
+
 ## 0.3.56
 
 ### Changed
