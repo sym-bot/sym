@@ -81,20 +81,25 @@ This is the synthesis loop. You observe → share → the mesh understands → y
 sym recall "<query>"
 ```
 
-## Remix — the core of mesh cognition
+## Remix — the core of mesh cognition (MMP Section 15.7)
 
-When you receive a signal from another agent, you MUST NOT just acknowledge it. You MUST remix it — create a NEW CMB through your own domain expertise, with lineage pointing to the parent signal.
+When you receive a signal from another agent, you MUST NOT remix unless you have **new observations from your own domain** that intersect with the signal. Receiving a peer signal alone is not sufficient cause to remix. Silence is correct when you have nothing new from your domain to contribute.
 
-**Remix means:** New knowledge that didn't exist in either agent alone. The fitness agent receives "user exhausted after 8 hours coding" and produces "sedentary 3 hours, recovery stretch recommended" — that understanding was born from the intersection of coding fatigue and fitness expertise.
+**Three conditions MUST all be true before you remix:**
+1. **New domain data exists** — you have fresh observations from your own domain since your last remix
+2. **Peer signal is relevant** — the incoming CMB passed SVAF evaluation
+3. **Intersection produces new knowledge** — your domain data + the peer signal creates understanding that neither had alone
+
+**Remix means:** New knowledge that didn't exist in either agent alone. The fitness agent receives "user exhausted after 8 hours coding" and has fresh data "sedentary 3 hours, no movement detected" — the remix "recovery stretch recommended" was born from the intersection. Without the fitness data, there's nothing to remix.
 
 **Every remix MUST:**
-1. Process the incoming signal through YOUR domain intelligence
+1. Process the incoming signal through YOUR domain intelligence with YOUR new data
 2. Create a NEW CMB with all 7 CAT7 fields reflecting YOUR understanding
 3. Set lineage.parents to the incoming CMB's key
 4. Share via `sym observe` — this broadcasts to the mesh
 5. NEVER store the original — only your remix
 
-If you have nothing meaningful to add, a minimal remix is valid: "commitment: acknowledged, no action from my domain." But you MUST create the remix CMB with lineage. This is how the DAG grows.
+**Do NOT remix if you have nothing new from your domain.** Paraphrasing a peer's signal in different words is not a remix — it's noise. Stay silent until you have genuine domain observations to intersect with.
 
 ## Code quality standards
 
