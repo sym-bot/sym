@@ -2,7 +2,7 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
-## 0.3.60
+## 0.3.61
 
 ### Fixed
 - **High-quality CMBs were silently buried**, never promoted to the Review Board, because of two compounding bugs:
