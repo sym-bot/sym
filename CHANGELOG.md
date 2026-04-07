@@ -2,6 +2,11 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.65
+
+### Fixed
+- `sym-daemon` default node name is now platform-scoped (`sym-daemon-mac` / `sym-daemon-win` / `sym-daemon-linux`) instead of the hardcoded `sym-daemon-win`. The hardcoded fallback caused Mac daemons to identify as `sym-daemon-win`, leading to identity collisions and stale `~/.sym/nodes/` directories on cross-platform development machines.
+
 ## 0.3.64
 
 ### Fixed

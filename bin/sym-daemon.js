@@ -58,9 +58,16 @@ process.on('unhandledRejection', (reason) => {
 const SYM_DIR = path.join(os.homedir(), '.sym');
 const { getSocketPath, getLogDir } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
-// Stable name: use SYM_NODE_NAME env, or 'sym-daemon' (not hostname — macOS
-// appends random suffixes to hostname on WiFi, causing new identity each restart)
-const NODE_NAME = process.env.SYM_NODE_NAME || 'sym-daemon-win';
+// Stable name: use SYM_NODE_NAME env, or platform-scoped default
+// (not hostname — macOS appends random suffixes to hostname on WiFi,
+// causing a new identity each restart). Platform suffix lets the
+// same role run on multiple devices without nodeId collisions.
+const PLATFORM_SUFFIX =
+  process.platform === 'darwin' ? 'mac'
+  : process.platform === 'win32' ? 'win'
+  : process.platform === 'linux' ? 'linux'
+  : process.platform;
+const NODE_NAME = process.env.SYM_NODE_NAME || `sym-daemon-${PLATFORM_SUFFIX}`;
 const LOG_DIR = getLogDir('sym-daemon');
 
 // Load relay config from ~/.sym/relay.env if env vars not set
