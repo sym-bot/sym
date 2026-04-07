@@ -2,6 +2,15 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.58
+
+### Added
+- **Claude Code CLI provider** (`provider: 'cli'`). Spawns `claude -p --output-format json` as a subprocess instead of hitting an HTTP API. Gives every agent the full Claude Code tool surface — Read, Write, Bash, Grep, WebFetch, Skill, etc. — and auto-loads `CLAUDE.md` / `.claude/settings.json` / project skills from the agent's working directory. Uses local Claude Code auth (no API key needed). Per-call options: `model` (opus/sonnet/haiku alias or full id), `addDirs`, `allowedTools`, `permissionMode` (default `bypassPermissions`), `maxBudget` (passed as `--max-budget-usd`), `timeoutMs`. Selectable via `provider: 'cli'` per call or `SYM_LLM_PROVIDER=cli` globally. See `lib/llm-cli.js`.
+- This is the path for the existing `addDirs` parameter that HTTP providers were silently ignoring — agents that already passed `addDirs: [...]` get directory access for free as soon as they switch provider.
+
+### Changed
+- `lib/llm-reason.js` `getProviderConfig` and `invoke` updated to dispatch `cli` / `anthropic` / `openai`. CLI provider skips the API-key check (uses local Claude Code auth) and skips `withRetry` (subprocess errors aren't typically transient).
+
 ## 0.3.57
 
 ### Changed
