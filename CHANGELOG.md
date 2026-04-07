@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.60
+
+### Fixed
+- **High-quality CMBs were silently buried**, never promoted to the Review Board, because of two compounding bugs:
+  1. `lib/llm-reason.js` appended a hardcoded "Return a JSON object with 7 CAT7 fields" suffix to every prompt, **with no mention of `_meta`**. This overrode any `_meta.founderAction` instructions the agent's role definition (SKILL.md) tried to convey, so the model emitted just the 7 fields and the founderAction signal was lost. Suffix now requests the optional `_meta` tag explicitly: `_meta:{founderAction, urgency, reason}` and instructs the model to set it per role rules.
+  2. `lib/mesh-agent.js` `detectFounderAction` (the fallback when `_meta` is missing) only scanned `intent + issue` and only matched a hedge-paraphrase vocabulary list (`prioritize`, `monitor`, `competitive`, etc.). Disciplined extraction prompts produce CMBs with concrete verbs like `fetch`, `flag`, `draft`, `endorser`, `arxiv`, `cite`, `respond`, `submit` — none of which were in the list, so high-quality CMBs failed to promote. Now scans `intent + issue + commitment + mood.text` (wider field surface) and the keyword list is expanded with concrete-action verbs, research vocabulary, and stakes-signalling affect words.
+
+Verified: a real research-win arxiv CMB ("Fetch full PDF today. Check author list for endorser candidates...") now correctly promotes via the keyword fallback path. Going forward, disciplined agents using the `_meta` schema in their prompt suffix will set founderAction explicitly and bypass the keyword fallback entirely.
+
+## 0.3.59
+
+### Fixed
+- **Windows terminal popups in CLI provider** (`lib/llm-cli.js`) — `claude` resolved to a `.cmd` shim that opened visible cmd.exe windows on every spawn. Now uses `platform.resolveClaudeCLI()` to get the node binary + `cli.js` path directly, plus `windowsHide: true` on the spawn options.
+- **Per-agent env vars not loaded at module-load time** (`lib/mesh-agent.js`) — agents read `SYM_RESEARCH_PROVIDER`, `SYM_COO_MODEL`, etc. at top-of-file constants before the `MeshAgent` constructor runs. Added a top-level `loadRelayEnv()` IIFE that loads `~/.sym/relay.env` when `mesh-agent.js` is first required, so per-agent env overrides resolve correctly.
+
 ## 0.3.58
 
 ### Added
