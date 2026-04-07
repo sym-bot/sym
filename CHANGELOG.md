@@ -2,12 +2,17 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.64
+
+### Fixed
+- Bumped `@sym-bot/core` to `^0.3.31` to restore `cmb-accepted` event emission in `cliHostMode`. Without this bump, `bin/sym-daemon.js`'s `cmb-accepted` listener never fires under `cliHostMode`, silently disabling `sym sub` IPC subscribers and the daemon→hosted-agent fanout path.
+
 ## 0.3.63
 
 ### Changed (BREAKING)
 - `sym-daemon` now uses `cliHostMode: true` (renamed from `relayMode`). Daemon no longer stores forwarded CMBs — eliminates ~5x duplication on multi-agent hosts.
 - `sym recall` is now federated: scans `~/.sym/nodes/*/meshmem/` directly, deduped by CMB key, sorted by recency. Works without the daemon. New `--node <name>` flag scopes the scan.
-- Requires `@sym-bot/core@^0.3.30`.
+- Requires `@sym-bot/core@^0.3.31` (originally shipped against 0.3.30; 0.3.30 had a regression — see sym-core CHANGELOG).
 
 ## 0.3.61
 
