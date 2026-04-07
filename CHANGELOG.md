@@ -2,6 +2,13 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.63
+
+### Changed (BREAKING)
+- `sym-daemon` now uses `cliHostMode: true` (renamed from `relayMode`). Daemon no longer stores forwarded CMBs — eliminates ~5x duplication on multi-agent hosts.
+- `sym recall` is now federated: scans `~/.sym/nodes/*/meshmem/` directly, deduped by CMB key, sorted by recency. Works without the daemon. New `--node <name>` flag scopes the scan.
+- Requires `@sym-bot/core@^0.3.30`.
+
 ## 0.3.61
 
 ### Fixed

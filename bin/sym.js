@@ -152,31 +152,91 @@ function cmdObserve() {
   });
 }
 
+/**
+ * Federated recall — scan all local node meshmem stores directly from
+ * the CLI process. The CLI-host daemon does not store CMBs (cliHostMode);
+ * each running agent stores its own copy. We dedupe by CMB key (each CMB
+ * has a unique content-addressable key, so the same CMB landing in 5
+ * agents collapses to 1 result).
+ *
+ * Works even when the daemon is down. No IPC dependency.
+ *
+ * Optional --node <name> filter scopes the scan to one node directory.
+ */
 function cmdRecall() {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+
   const recallArgs = args.slice(1).filter(a => a !== '--json');
   const limitIdx = recallArgs.indexOf('--limit');
-  let limit = 0;
+  let limit = 50;
   if (limitIdx !== -1) {
-    limit = parseInt(recallArgs[limitIdx + 1]) || 0;
+    limit = parseInt(recallArgs[limitIdx + 1]) || 50;
     recallArgs.splice(limitIdx, 2);
   }
-  const query = recallArgs.join(' ') || '';
-  cmdIPC({ type: 'recall', query, limit }, (msg) => {
-    const results = msg.results || [];
-    if (jsonFlag) {
-      console.log(JSON.stringify({ results }));
-      return;
+  const nodeIdx = recallArgs.indexOf('--node');
+  let nodeFilter = null;
+  if (nodeIdx !== -1) {
+    nodeFilter = recallArgs[nodeIdx + 1];
+    recallArgs.splice(nodeIdx, 2);
+  }
+  const query = recallArgs.join(' ').toLowerCase();
+
+  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  if (!fs.existsSync(nodesDir)) {
+    console.log('No memories found.');
+    return;
+  }
+
+  const nodeNames = nodeFilter
+    ? [nodeFilter]
+    : fs.readdirSync(nodesDir).filter(n => fs.statSync(path.join(nodesDir, n)).isDirectory());
+
+  const seen = new Map(); // cmbKey → entry
+  for (const nodeName of nodeNames) {
+    const memDir = path.join(nodesDir, nodeName, 'meshmem');
+    if (!fs.existsSync(memDir)) continue;
+    let files;
+    try { files = fs.readdirSync(memDir); } catch { continue; }
+    for (const file of files) {
+      if (!file.startsWith('cmb-') || !file.endsWith('.json')) continue;
+      const key = file.slice(0, -5);
+      if (seen.has(key)) continue;
+      try {
+        const raw = fs.readFileSync(path.join(memDir, file), 'utf8');
+        const entry = JSON.parse(raw);
+        const content = entry.content || '';
+        if (query && !content.toLowerCase().includes(query)) continue;
+        seen.set(key, {
+          key,
+          timestamp: entry.storedAt || entry.timestamp || 0,
+          content,
+          source: entry.source || (entry.cmb && entry.cmb.createdBy) || 'unknown',
+          tags: entry.tags,
+          _node: nodeName,
+        });
+      } catch {}
     }
-    if (results.length === 0) {
-      console.log('No memories found.');
-      return;
-    }
-    for (const r of results) {
-      const time = r.timestamp ? new Date(r.timestamp).toLocaleString() : '';
-      console.log(`  ${dim(time)}  ${r.content}`);
-      if (r.tags) console.log(`    ${dim('tags: ' + r.tags)}`);
-    }
-  });
+  }
+
+  const results = [...seen.values()]
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit);
+
+  if (jsonFlag) {
+    console.log(JSON.stringify({ results }));
+    return;
+  }
+  if (results.length === 0) {
+    console.log('No memories found.');
+    return;
+  }
+  for (const r of results) {
+    const time = r.timestamp ? new Date(r.timestamp).toLocaleString() : '';
+    console.log(`  ${dim(time)}  ${dim('[' + r._node + ']')} ${r.content}`);
+    if (r.tags) console.log(`    ${dim('tags: ' + r.tags)}`);
+  }
 }
 
 function cmdSend() {

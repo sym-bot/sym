@@ -100,8 +100,8 @@ if (args.includes('--status')) {
 
 const node = new SymNode({
   name: NODE_NAME,
-  cognitiveProfile: `Mesh hub for ${os.hostname()}. Forwards frames, stores CMBs for recall. No SVAF evaluation.`,
-  relayMode: true,  // Section 16.1: relay node — forward and store, skip Layer 4+
+  cognitiveProfile: `Local CLI-host for ${os.hostname()}. Hosts IPC surface for sym CLI. Forwards frames, no storage, no SVAF.`,
+  cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,
