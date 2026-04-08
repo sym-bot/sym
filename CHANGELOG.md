@@ -2,6 +2,36 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.66
+
+### Changed (MMP v0.2.2 spec conformance)
+
+- **`state-sync` frame is now deprecated.** CfC hidden states never cross
+  the wire under SVAF (Xu, 2026, *Symbolic-Vector Attention Fusion for
+  Collective Intelligence*, [arXiv:2604.03955](https://arxiv.org/abs/2604.03955),
+  §3.4). Cognitive coupling propagates as **CMBs** at SVAF Layer 4 only;
+  the per-agent CfC at Layer 6 stays private to each agent.
+- `_reencodeAndBroadcast()` updates the local CfC only; no `state-sync`
+  broadcast.
+- `updateContext(text)` updates the local CfC only; no `state-sync`
+  broadcast.
+- The per-handshake `state-sync` send is removed. Handshake exchanges
+  identity, version, and lifecycle role only; cognitive bootstrap
+  happens via the anchor CMB exchange that follows.
+- Coordinated with `@sym-bot/core` 0.3.32, which silently drops inbound
+  `state-sync` frames at the frame-handler with a deprecation log.
+- The wire format is preserved (the `state-sync` frame type is still
+  parseable for backward compatibility with v0.2.0 / v0.2.1 peers); only
+  the *send* paths are removed.
+
+### Migration
+
+If you previously listened for `coupling-decision` events driven by
+state-sync, switch to events emitted by the CMB pipeline
+(`memoryReceived`, `cmbAccepted`) and read `(valence, arousal)` from
+`cmb.fields.mood`. The mood field is delivered across domain boundaries
+even when SVAF rejects the rest of the CMB (MMP §9.3 protocol guarantee R5).
+
 ## 0.3.65
 
 ### Fixed
