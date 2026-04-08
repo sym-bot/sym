@@ -12,7 +12,10 @@
  *   sym stop                          # Stop daemon
  *   sym status                        # Show mesh status
  *   sym peers                         # List connected peers
- *   sym observe <json>                # Share observation (CAT7 fields as JSON)
+ *   sym observe [flags] <json>        # Share observation (CAT7 fields as JSON)
+ *                                     #   --standalone: daemon-less one-shot SymNode (auto-fallback if daemon is down)
+ *                                     #   --name <id>:  mesh identity for standalone mode (default: sym-cli)
+ *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
  *   sym recall <query>                # Search mesh memory
  *   sym insight                       # Get xMesh collective intelligence
  *   sym send <message>                # Send message to all peers
@@ -125,12 +128,51 @@ function cmdStop() {
 }
 
 
+/**
+ * Parse `sym observe` flags out of the positional args. Returns
+ * { positional, standalone, name, parents } where `positional` is
+ * the remaining non-flag args (the JSON payload).
+ *
+ * Flags:
+ *   --standalone          Force standalone (daemon-less) emission.
+ *                         Also automatically enabled when the daemon
+ *                         is not running, or when --parents is used.
+ *   --name <id>           Node name / mesh identity for standalone
+ *                         emission. Defaults to `sym-cli`. Claude Code
+ *                         users typically pass --name claude-code-mac
+ *                         (or claude-code-win) so their CMBs are
+ *                         attributable on the mesh grid.
+ *   --parents <keys>      Comma-separated parent CMB keys for remix
+ *                         lineage. Using this flag implies --standalone
+ *                         because the daemon IPC `remember` handler
+ *                         does not accept lineage parents.
+ */
+function parseObserveFlags(argv) {
+  const out = { positional: [], standalone: false, name: 'sym-cli', parents: [] };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--standalone') { out.standalone = true; }
+    else if (a === '--name') { out.name = argv[++i] || out.name; }
+    else if (a === '--parents') {
+      out.parents = (argv[++i] || '').split(',').map(s => s.trim()).filter(Boolean);
+      out.standalone = true;  // lineage requires the standalone SymNode path
+    }
+    else { out.positional.push(a); }
+  }
+  return out;
+}
+
 function cmdObserve() {
-  const content = args.slice(1).join(' ');
+  const parsed = parseObserveFlags(args);
+  const content = parsed.positional.join(' ');
 
   if (!content) {
-    console.error('Usage: sym observe \'{"focus":"...","issue":"...","intent":"...","motivation":"...","commitment":"...","perspective":"...","mood":{"text":"...","valence":0,"arousal":0}}\'');
+    console.error('Usage: sym observe [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
     console.error('  The calling agent (LLM) extracts CAT7 fields. The protocol does not parse raw text.');
+    console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
+    console.error('  --name:       mesh identity for standalone mode (default: sym-cli).');
+    console.error('                Claude Code users: --name claude-code-mac (or claude-code-win).');
+    console.error('  --parents:    comma-separated parent CMB keys for remix lineage. Implies --standalone.');
     process.exit(1);
   }
 
@@ -143,6 +185,22 @@ function cmdObserve() {
     process.exit(1);
   }
 
+  // Decide which path to use:
+  //   - Explicit --standalone  → standalone
+  //   - --parents supplied     → standalone (lineage not plumbed through daemon IPC)
+  //   - Daemon not running     → standalone (graceful fallback, not a failure)
+  //   - Otherwise              → daemon IPC (fast path, preserves local CfC state)
+  const useStandalone = parsed.standalone || !isDaemonRunning();
+
+  if (useStandalone) {
+    standaloneObserve(fields, { name: parsed.name, parents: parsed.parents })
+      .catch((err) => {
+        console.error('Standalone observe failed:', err.message || err);
+        process.exit(2);
+      });
+    return;
+  }
+
   cmdIPC({ type: 'remember', fields }, (res) => {
     if (res.duplicate) {
       console.log('Already shared (duplicate CMB).');
@@ -150,6 +208,129 @@ function cmdObserve() {
       console.log(`Shared: ${res.key || ''}`);
     }
   });
+}
+
+/**
+ * Daemon-less one-shot CMB emission. Spins up a fresh SymNode inside
+ * the CLI process, connects to the relay using credentials from
+ * ~/.sym/relay.env (or %USERPROFILE%\.sym\relay.env on Windows), emits
+ * one CMB with optional remix lineage, waits briefly for propagation,
+ * and disconnects.
+ *
+ * This is the same pattern persistent MeshAgent-based agents use
+ * (sym/lib/mesh-agent.js), just scoped to a single emission. It lets
+ * any user run `sym observe` without starting sym-daemon first — the
+ * daemon is an optimisation, not a requirement.
+ *
+ * Node identity is stable across invocations: the SymIdentity layer
+ * persists the keypair to ~/.sym/nodes/<name>/identity.json, so
+ * repeated calls with the same --name resolve to the same nodeId.
+ *
+ * Ships CAT7 field vectors via SymNode's internal encoder — the caller
+ * only needs to supply text (and valence/arousal for mood).
+ */
+async function standaloneObserve(fields, opts) {
+  const { SymNode } = require('..');
+
+  // Load relay credentials from ~/.sym/relay.env if the env vars are
+  // not already present. Same pattern as MeshAgent (sym/lib/mesh-agent.js:160).
+  if (!process.env.SYM_RELAY_URL || !process.env.SYM_RELAY_TOKEN) {
+    const envFile = path.join(os.homedir(), '.sym', 'relay.env');
+    if (fs.existsSync(envFile)) {
+      for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
+        const m = line.match(/^(\w+)=(.*)$/);
+        if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+      }
+    }
+  }
+  if (!process.env.SYM_RELAY_URL) {
+    throw new Error(`SYM_RELAY_URL not set (checked ~/.sym/relay.env)`);
+  }
+  if (!process.env.SYM_RELAY_TOKEN) {
+    throw new Error(`SYM_RELAY_TOKEN not set (checked ~/.sym/relay.env)`);
+  }
+
+  // Normalise CAT7 fields. Callers may pass scalar strings for the
+  // six non-mood fields (as the daemon-IPC path historically accepts),
+  // but the SymNode.remember() API expects { text, vector } objects —
+  // the vector is synthesised on the node side by the encoder, so we
+  // only need to lift scalar strings into { text } objects here.
+  const normaliseField = (v) => {
+    if (v == null) return undefined;
+    if (typeof v === 'string') return { text: v };
+    if (typeof v === 'object') return v;
+    return { text: String(v) };
+  };
+  const normalised = {};
+  for (const key of ['focus', 'issue', 'intent', 'motivation', 'commitment', 'perspective', 'mood']) {
+    const v = normaliseField(fields[key]);
+    if (v !== undefined) normalised[key] = v;
+  }
+  if (!normalised.mood || typeof normalised.mood.text !== 'string') {
+    throw new Error('fields.mood.text is required (MMP §9.3 protocol guarantee R5)');
+  }
+
+  const node = new SymNode({
+    name: opts.name,
+    cognitiveProfile:
+      `sym-cli one-shot observer (${process.platform}). Emits single CMBs ` +
+      'via `sym observe` without a persistent daemon. Identity is stable ' +
+      'across invocations via the cached keypair in ~/.sym/nodes/.',
+    svafFieldWeights: {
+      focus: 2.0, issue: 1.5, intent: 1.5,
+      motivation: 1.0, commitment: 1.2, perspective: 1.0, mood: 0.8,
+    },
+    svafFreshnessSeconds: 43200,
+    relay: process.env.SYM_RELAY_URL,
+    relayToken: process.env.SYM_RELAY_TOKEN,
+    lifecycleRole: 'observer',
+    silent: true,
+  });
+
+  try {
+    await node.start();
+  } catch (err) {
+    throw new Error(`node.start() failed: ${err.message}`);
+  }
+
+  // Let the handshake settle before emitting. Without this, fast-exit
+  // processes can tear down the socket before the relay queues the
+  // outbound CMB frame.
+  await new Promise((r) => setTimeout(r, 1500));
+
+  // Build parent CMB stubs for lineage. The remember() lineage logic
+  // (sym/lib/node.js:566-570) walks `.key` and `.lineage?.ancestors`
+  // on each parent, so a minimal `{ key, lineage: null }` stub is
+  // sufficient when the caller only has parent keys (not full CMBs).
+  const parentCMBs = (opts.parents || []).map((k) => ({ key: k, lineage: null }));
+
+  let entry;
+  try {
+    entry = node.remember(normalised, {
+      tags: [opts.name, 'sym-cli', 'standalone'],
+      parents: parentCMBs,
+    });
+  } catch (err) {
+    await node.stop().catch(() => {});
+    throw new Error(`node.remember() threw: ${err.message}`);
+  }
+
+  if (!entry) {
+    await node.stop().catch(() => {});
+    throw new Error('node.remember() returned null — remix rejected or store write failed');
+  }
+
+  // Give the relay a moment to broadcast the CMB to peers before we
+  // tear down the socket. Without this, peers can miss the envelope.
+  await new Promise((r) => setTimeout(r, 1500));
+
+  try {
+    await node.stop();
+  } catch {
+    // non-fatal
+  }
+
+  console.log(`Shared: ${entry.key}`);
 }
 
 /**
@@ -526,7 +707,8 @@ ${bold('Usage:')}
   sym status                         Show mesh status
   sym peers                          List connected peers
   sym metrics                        Show protocol metrics and LLM cost
-  sym observe <json>                 Share observation (CAT7 fields as JSON)
+  sym observe [flags] <json>         Share observation (CAT7 fields as JSON)
+                                     Flags: --standalone, --name <id>, --parents <keys>
   sym recall <query>                 Search mesh memory
   sym insight                        Get collective intelligence
   sym send <message>                 Send message to all peers
@@ -547,5 +729,17 @@ ${bold('Examples:')}
   sym observe '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
   sym recall "energy patterns"
   sym insight
+
+${bold('Daemon-less one-shot observations:')}
+  # Works even when sym-daemon is not running. Auto-enabled if the
+  # daemon is down; force with --standalone. Uses ~/.sym/relay.env
+  # for relay credentials. Identity is stable across invocations via
+  # the cached keypair in ~/.sym/nodes/<name>/.
+  sym observe --standalone --name claude-code-mac \\
+    '{"focus":"resolved 3 review board tickets","mood":{"text":"focused","valence":0.3,"arousal":0.2}}'
+
+  # Remix with lineage (resolve upstream tickets). --parents implies --standalone.
+  sym observe --name claude-code-mac --parents cmb-876bbd483a,cmb-c0d4332a \\
+    '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
 `);
 }

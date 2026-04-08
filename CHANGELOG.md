@@ -2,6 +2,46 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.67
+
+### Added
+
+- **`sym observe --standalone`** — daemon-less one-shot CMB emission.
+  Spins up a fresh `SymNode` inside the CLI process, reads relay
+  credentials from `~/.sym/relay.env`, emits one CMB, and disconnects.
+  Works even when `sym-daemon` is not running — the daemon becomes an
+  optimisation, not a requirement. Auto-enabled as a graceful fallback
+  whenever the daemon is down, so existing `sym observe` commands no
+  longer fail with "sym-daemon is not running."
+- **`sym observe --name <id>`** — set the mesh identity for
+  standalone-mode emissions. Defaults to `sym-cli`. Identity is stable
+  across invocations via the cached `SymIdentity` keypair in
+  `~/.sym/nodes/<name>/`, so repeated calls with the same name resolve
+  to the same `nodeId`. Claude Code users should pass
+  `--name claude-code-mac` (or `claude-code-win` / `claude-code-linux`)
+  so their CMBs are attributable on the mesh grid.
+- **`sym observe --parents <key1,key2>`** — comma-separated parent CMB
+  keys for remix lineage. Using this flag implies `--standalone` (the
+  daemon IPC `remember` handler does not accept lineage parents). Makes
+  it trivial to emit resolution CMBs that close upstream tickets on the
+  Review Board via the SVAF lineage graph.
+
+### Why
+
+Before this release, `sym observe` required `sym-daemon` to be running
+— any user who had stopped the daemon (or never started it) hit a hard
+failure. This was the main friction for Claude Code sessions that want
+to participate in the mesh as real peers without running a persistent
+background daemon. The daemon-less path makes the entire mesh emission
+surface usable out of the box after `npm install -g @sym-bot/sym`.
+
+### Migration
+
+No breaking changes. Existing `sym observe '<json>'` calls continue
+to work unchanged when the daemon is running (same IPC fast path).
+When the daemon is down, the CLI now falls back to standalone mode
+instead of failing.
+
 ## 0.3.66
 
 ### Changed (MMP v0.2.2 spec conformance)
