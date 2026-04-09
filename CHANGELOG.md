@@ -2,6 +2,60 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.78
+
+### Changed
+
+- Bump `@sym-bot/core` to 0.3.33. Migrates `@xenova/transformers` →
+  `@huggingface/transformers@^4.0.1`. Eliminates deprecated
+  `prebuild-install` and the EBUSY DLL lock on Windows.
+
+## 0.3.77
+
+### Fixed
+
+- **Clear socket timeout after TCP connect.** `_connectToPeer` set a
+  10-second `socket.setTimeout` as a connect timeout but never cleared
+  it after success. The timeout kept firing on the CONNECTED socket,
+  killing any LAN connection idle for >10 seconds. Connections now
+  stay open indefinitely after establishment.
+
+## 0.3.76
+
+### Fixed
+
+- **Fresh mDNS re-browse on reconnect timer.** The 15s reconnect timer
+  now restarts the bonjour-service browser (fresh mDNS query) instead
+  of retrying stale cached addresses/ports.
+- **On-demand reconnect on send failure.** `node.send()` triggers an
+  immediate `discovery.reconnect()` when delivery returns 0 peers,
+  instead of waiting for the next 15s timer tick.
+
+## 0.3.75
+
+### Added
+
+- **LAN reconnect timer.** Discovered peers are cached. Every 15 seconds,
+  `peer-found` is re-emitted for cached peers not currently connected.
+  Handles TCP drops without requiring a process restart.
+
+## 0.3.74
+
+### Fixed
+
+- **Removed leader-election gate from bonjour discovery.** Both sides
+  now emit `peer-found` and attempt to connect. The old gate (only
+  the lower nodeId initiates) was fragile: stale bonjour cache on the
+  initiator side → no connection, because the other side was gated.
+
+## 0.3.73
+
+### Fixed
+
+- **Prefer IPv4 in bonjour-service discovery.** `service.addresses`
+  from bonjour-service can include IPv6 link-local (`fe80::...`) which
+  requires a scope ID for TCP. Now picks the first IPv4 address.
+
 ## 0.3.72
 
 ### Fixed
