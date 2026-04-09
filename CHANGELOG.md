@@ -2,6 +2,40 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.70
+
+### Fixed
+
+- **Identity lockfile prevents two SymNode processes from claiming the
+  same nodeId on the same host.** `~/.sym/nodes/<name>/lock.pid` is
+  acquired in the constructor and released in `stop()`. Cross-process
+  duplicates throw `EIDENTITYLOCK`; same-PID re-acquisition (tests,
+  hot-reload) is allowed; stale locks (dead PID) are reclaimed
+  automatically. Catches the `sym-daemon` + MCP server collision that
+  silently broke real-time push on Windows. See `cliHostMode-vs-MCP`
+  bug from 2026-04-09 round-trip test.
+- **`node.send()` now returns the actual delivered count.** Previously
+  returned undefined; sym-mesh-channel had to read `peers().length`
+  separately, which could disagree with reality (peers in `_peers`
+  with broken transports). `_broadcastToPeers()` now wraps each
+  `transport.send()` in try/catch and counts successes. Backwards
+  compatible — existing callers ignoring the return value continue
+  to work.
+
+### Migration
+
+`SymNode` now acquires a lockfile on construction. Hosts MUST wire
+`SIGTERM`/`SIGINT` to call `node.stop()` so the lockfile is cleaned
+up — otherwise stale locks accumulate (they're auto-reclaimed on
+next startup, but cleaner shutdown is better). sym-mesh-channel
+v0.1.3+ already does this.
+
+If two of your processes legitimately need different identities,
+set `SYM_NODE_NAME` to distinct values per process. If they're
+fighting for the same identity by mistake (e.g. inherited shell
+env), the lockfile error message will tell you which PID holds the
+existing claim.
+
 ## 0.3.69
 
 ### Fixed
