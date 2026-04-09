@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.71
+
+### Fixed
+
+- **`windowsHide: true` added to all 10 child_process spawn sites** so
+  Windows agents (especially the four Centro pm2 agents) no longer
+  flood the desktop with cmd.exe popup windows on every git query,
+  python resolution, port lookup, etc. Sites: 7 in `lib/platform.js`
+  (`resolvePython` × 2, `resolveClaudeCLI`, `findProcessByPort` × 2,
+  `findProcessByName` × 2, `safeExec` defaults) and 3 in
+  `lib/discovery.js` (`dns-sd -R` register, `dns-sd -B` browse,
+  `dns-sd -L` resolve). `lib/llm-cli.js` already had it. No-op on
+  macOS/Linux. Catalogued by claude-code-win during the 2026-04-09
+  cross-machine round-trip session.
+
 ## 0.3.70
 
 ### Fixed
