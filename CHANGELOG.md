@@ -2,6 +2,37 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.69
+
+### Fixed
+
+- Excluded `*.bak`, `*.swp`, `.DS_Store` from published tarball via
+  `.npmignore`. 0.3.68 accidentally shipped local backup files. Same
+  code as 0.3.68; deprecate 0.3.68.
+
+## 0.3.68
+
+### Fixed
+
+- `RelayConnection` no longer silently reconnects on close code 4004
+  ("Replaced by new connection"). Logs FATAL, sets a hard-stop flag,
+  fires the new `identity-collision` event, and exits the close
+  handler. Breaks the duplicate-identity ping-pong loop. See `d6a17f6`.
+
+### Added
+
+- `identity-collision` event on `SymNode` — `{ nodeId, name, code }`.
+  Optional listener; default behavior is loud-log + stop reconnecting.
+  Hosts wanting hard-exit semantics should listen and call
+  `process.exit()` themselves.
+
+### Why
+
+Two processes holding the same nodeId would enter a 1s ping-pong loop
+on the relay, flooding peer-left/peer-joined events. MMP principle:
+identity is bound to a keypair, so two simultaneous holders is an
+error condition — refuse loudly instead of silently retrying.
+
 ## 0.3.67
 
 ### Added
