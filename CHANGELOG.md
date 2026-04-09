@@ -2,6 +2,25 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.80
+
+### Added
+
+- **`frame-handler.js` moved from `@sym-bot/core`.**  FrameHandler is
+  protocol plumbing — frame routing, store writes, event emission — and
+  belongs in the protocol/node package. Imports now resolve to the local
+  copy; `@sym-bot/core` retains a backward-compat re-export.
+- **Echo loop prevention (MMP Section 14).** `_handleMemoryShare()` now
+  checks whether incoming CMB lineage parents exist as local keys in the
+  memory store. If so, the CMB is a derivative of our own broadcast and
+  is silently dropped — preventing ping-pong between same-app peers.
+- **`MemoryStore.hasLocalKey(key)`** — returns true if a CMB key exists
+  in local (non-peer) entries. Used by the echo loop guard.
+
+### Changed
+
+- Bump `@sym-bot/core` dependency to `^0.3.35`.
+
 ## 0.3.78
 
 ### Changed
