@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.72
+
+### Fixed
+
+- **Cross-platform LAN discovery: use `bonjour-service` instead of
+  native `dns-sd` binary.** The macOS `dns-sd -L` resolve step uses
+  unicast DNS-SD queries that fail to resolve services advertised by
+  Windows' Bonjour implementation. Browse (multicast) works, but
+  resolve (unicast) returns empty — so Mac discovers Windows peers
+  but can't get their port, and the TCP connection never happens.
+  The `bonjour-service` npm package uses multicast for both browse
+  AND resolve, which works cross-platform. Verified Mac↔Windows on
+  the same wifi (2026-04-09). The `dns-sd` binary code path remains
+  in `lib/discovery.js` as dead code for reference but is no longer
+  called.
+
 ## 0.3.71
 
 ### Fixed
