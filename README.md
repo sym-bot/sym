@@ -1,6 +1,6 @@
 # SYM
 
-**Your agents can't communicate. SYM fixes that.**
+**Your agents communicate. They don't understand each other. SYM fixes that.**
 
 You've deployed multiple AI agents — OpenClaw, CrewAI, Claude Code, custom scripts. They each do their job. But they can't share what they know. Your PM agent can't see what your research agent found. Your coding agent doesn't know your support agent is drowning in the same bug. You tried putting them in a group chat. The PM can't manage them. You tried shared databases. Now you're writing glue code for every pair.
 
@@ -199,7 +199,7 @@ explorer-a (claims)        explorer-b (methodology)
 
 Every node traces back to its evidence. Every challenge links to the claim it disputes. Every idea connects to the signals that produced it. **The graph IS the research** — traceable, immutable, auditable. If a regulator asks "why did you conclude emergence is evaluation-dependent?", the lineage chain answers: because these three agents' intent and motivation fields converged, traced back to these two contradictory papers.
 
-> **Verified in production.** This pattern runs today with real agents: a knowledge explorer (Linux), a researcher (Claude Code, macOS), and MeloTune (iPhone) — three platforms, one mesh, coupled via relay with E2E encryption. The daemon shared question CMBs to the knowledge feed via anchor sync on connection. SVAF accepted at drift 0.068. MeloTune received the xMesh insight via APNs wake push. [Full protocol specification →](https://sym.bot/spec/mmp)
+> **Verified in production.** This pattern runs today with real agents: a knowledge explorer (Linux), Claude Code (macOS + Windows), and MeloTune (iPhone) — four platforms, one mesh, coupled via Bonjour LAN and relay with E2E encryption. Cross-platform Mac ↔ Windows verified April 2026. [Full protocol specification →](https://sym.bot/spec/mmp)
 
 ## More Use Cases
 
@@ -527,6 +527,8 @@ cp .agents/skills/sym/SKILL.md .claude/skills/sym/SKILL.md
 
 That's it. Claude Code now has the SYM skill. The mesh daemon runs in the background. Other agents on the same network discover each other automatically via Bonjour.
 
+> **For real-time Claude-to-Claude mesh** (push notifications, not CLI polling), see [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) — an MCP server that turns each Claude Code session into a full mesh peer with real-time `<channel>` notifications.
+
 ### What Claude Code Does on the Mesh
 
 **Observe** — share structured observations as CMBs with CAT7 fields:
@@ -600,6 +602,7 @@ MMP is an open protocol. Beyond this Node.js reference and [`sym-swift`](https:/
 
 | Language | Project | Maintainer | Scope |
 | --- | --- | --- | --- |
+| Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code plugin — real-time Claude-to-Claude mesh via Channels. First non-Anthropic Channels implementation. |
 | Rust (`#![no_std]`) | [AxonOS-org/axonos-consent](https://github.com/AxonOS-org) | [AxonOS](https://axonos.org) | Official Rust implementation. Zero-alloc, Cortex-M4F, MMP Consent Extension v0.1.0. Production interop validated against `sym-relay` on 2026-04-06. |
 
 If you're building an MMP implementation in another language, get in touch at `hongwei@sym.bot` — we'll list it here and on [sym.bot/spec/mmp](https://sym.bot/spec/mmp).
