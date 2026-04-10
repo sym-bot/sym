@@ -1,262 +1,307 @@
-# SYM
+# SYM — Mesh Memory Protocol (MMP) 参考实现
 
-**你的 AI 智能体之间无法沟通。SYM 解决这个问题。**
+> **让自主智能体真正「协同思考」，而非仅仅「互相发消息」**
 
-你部署了多个 AI 智能体——Claude Code、Cursor、自定义脚本、各种 Agent 框架。它们各自运行良好，但彼此隔离。你的研究 Agent 发现了重要信息，你的编码 Agent 完全不知道。你试过让它们共享数据库，结果每加一对 Agent 就要写一套对接代码。你试过把它们放进群聊，没有人能有效管理。
+[![npm version](https://img.shields.io/npm/v/@sym-bot/sym.svg)](https://www.npmjs.com/package/@sym-bot/sym)
+[![Specification](https://img.shields.io/badge/MMP-v0.2.2-blue)](https://sym.bot/spec/mmp)
+[![Paper](https://img.shields.io/badge/arXiv-2604.03955-b31b1b)](https://arxiv.org/abs/2604.03955)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
-**问题不在你的 Agent，而是缺少一个让 Agent 一起思考的协议。**
+---
 
-SYM 就是这个协议。安装后启动 daemon，你机器上的每个 Agent 自动加入 mesh 网络。每个 Agent 通过 SVAF（逐字段评估）自主决定哪些信号与自己相关——不需要你配置路由规则，不需要写对接代码。
+## 核心问题
 
-[![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
-[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+当前 AI 智能体普遍处于「孤岛状态」：它们通过消息总线、API 或共享数据库交换数据，但**无法真正协同推理**。一个编码智能体、一个音乐智能体、一个健康智能体服务于同一用户，却各自只能看到自己的领域片段。没有任何单一智能体能够将「提交频率下降」+「歌曲跳过增多」+「3 小时未活动」关联为「用户可能疲劳」——这种洞察需要**集体智能**，而现有协议无法提供。
 
-## 快速开始——让现有 Agent 加入 Mesh
+**SYM 提供的不是又一个多智能体编排框架，而是一套让自主智能体在保持上下文独立的前提下，通过结构化认知消息交换实现协同推理的底层协议。**
 
-你不需要重写 Agent，不需要手写 JSON。你的 Agent 的 LLM 会自动完成结构化。
+---
 
-### LLM 驱动的 Agent（Claude Code、Cursor、Copilot 等）
+## 核心设计原则
 
-**第 1 步：启动 mesh**
-```bash
-npm install -g @sym-bot/sym
-sym start
+| 原则 | 说明 |
+|------|------|
+| **智能体自治** | 每个智能体维护完全独立的对话上下文与记忆存储（MMP §2.4），不共享状态 |
+| **离散消息交换** | 通过认知记忆块（CMB, Cognitive Memory Block）传递结构化信息，非连续状态同步 |
+| **按字段评估** | SVAF（Symbolic-Vector Attention Fusion）对每条消息的 7 个认知字段独立评估相关性，决定接收策略 |
+| **零配置发现** | 基于 DNS-SD (Bonjour) 的局域网自动发现，无需服务器、密钥或手动配置 |
+| **协议可组合** | 上层应用可基于 MMP 构建专属认知协议，底层传输与身份层保持正交 |
+
+> **重要澄清**：
+> - 智能体之间**不共享上下文**，仅通过离散 CMB 交换信息
+> - 接收方收到的是**通道通知**，后续处理由用户或对话策略决定，非自动分析
+> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.2+）
+
+---
+
+## 技术架构：8 层协议栈
+
+```
+┌─────────────────────────────────┐
+│ Layer 7: 应用认知层              │ ← 智能体业务逻辑
+├─────────────────────────────────┤
+│ Layer 6: CfC 神经动力学层        │ ← 时序状态演化 (Closed-form Continuous-time NN)
+├─────────────────────────────────┤
+│ Layer 5: 合成记忆层              │ ← 跨智能体记忆融合策略
+├─────────────────────────────────┤
+│ Layer 4: SVAF 认知耦合层         │ ← 按字段相关性评估与注意力融合
+├─────────────────────────────────┤
+│ Layer 3: CMB 认知消息层          │ ← CAT7 七字段结构化消息格式
+├─────────────────────────────────┤
+│ Layer 2: 传输层 (TCP/WS)         │ ← 长度前缀 JSON 线格式
+├─────────────────────────────────┤
+│ Layer 1: 身份与加密层            │ ← 密钥对、签名、端到端加密
+├─────────────────────────────────┤
+│ Layer 0: 发现层 (DNS-SD/Bonjour) │ ← 零配置局域网发现
+└─────────────────────────────────┘
 ```
 
-**第 2 步：安装 SYM skill 到你的 Agent**
+### 核心组件
+
+#### CAT7：七字段认知消息格式
+每条 CMB 包含 7 个语义字段，构成通用认知接口：
+
+| 字段 | 语义轴 | 捕获内容 | 快速耦合 |
+|------|--------|----------|----------|
+| `focus` | 主题 | 内容核心焦点 | |
+| `issue` | 张力 | 风险、缺口、待解问题 | |
+| `intent` | 目标 | 期望的改变或目的 | |
+| `motivation` | 动因 | 行为背后的驱动因素 | |
+| `commitment` | 承诺 | 确认事项、责任方、时间节点 | |
+| `perspective` | 视角 | 信息来源的角色与情境 | |
+| `mood` | 情感 | 情绪效价 (valence) + 激活度 (arousal) | 跨域耦合 |
+
+> `mood` 是唯一默认启用快速耦合的字段——情感状态可跨所有领域边界传递，这是 SVAF 模型在无监督训练中自主发现的规律。
+
+#### SVAF：符号 - 向量注意力融合
+- 对每条入站 CMB 的 7 个字段**独立计算相关性得分**
+- 输出四类评估结果：`redundant`（冗余）/ `aligned`（对齐）/ `guarded`（审慎）/ `rejected`（拒绝）
+- 解决选择性接收与冗余过滤的双重挑战
+- 训练数据：237K 样本 / 273 叙事场景，三分类准确率 78.7%
+
+#### CfC：闭式连续时间神经网络
+- 每智能体独立的时序演化引擎
+- 学习每个神经元的时延常数 (τ)：快神经元实现秒级情感同步，慢神经元保留领域专业知识
+- 与 SVAF 协同：SVAF 决定「什么进入认知状态」，CfC 决定「状态如何演化」
+
+---
+
+## 快速开始
+
+### 前置要求
+- Node.js 18+ 或 Python 3.10+
+- 同一局域网（或配置中继服务器）
+- （可选）Claude Code / Cursor / Copilot 等支持 Agent Skills 的编码助手
+
+### 安装与启动
+
 ```bash
-# Claude Code:
+# 1. 全局安装 SYM CLI
+npm install -g @sym-bot/sym
+
+# 2. 启动网格守护进程（后台运行）
+sym start
+
+# 3. 验证网格状态
+sym peers          # 查看已连接智能体
+sym status         # 完整网格诊断
+```
+
+### 为智能体添加网格能力
+
+#### 方案 A：LLM 驱动的智能体（推荐）
+利用 Agent Skills 标准，让智能体的 LLM 自动处理字段提取：
+
+```bash
+# Claude Code
 mkdir -p .claude/skills/sym
 cp node_modules/@sym-bot/sym/.agents/skills/sym/SKILL.md .claude/skills/sym/
 
-# 其他 Agent（OpenClaw、Cursor 等）:
+# OpenClaw / Cursor / Junie
 mkdir -p .agents/skills/sym
 cp node_modules/@sym-bot/sym/.agents/skills/sym/SKILL.md .agents/skills/sym/
 ```
 
-**第 3 步：像平时一样和你的 Agent 对话，它会自动加入 mesh。**
+安装后，智能体将自动：
+1. 监听用户自然语言输入
+2. 按 CAT7 格式提取结构化字段
+3. 调用 `sym observe` 发布至网格
+4. 通过 `sym recall` / `sym insight` 获取集体洞察
 
-你对 Agent 说：*"客户在反映蓝色款缺货。"*
-
-你的 Agent 的 LLM 读取 SYM skill，将你的观察分解为 7 个结构化字段，然后调用 `sym observe`——你看不到 JSON：
-
-```bash
-# Agent 自动执行：
-sym observe '{"focus":"5个客户询问蓝色款","issue":"缺货，无到货时间","mood":{"text":"焦虑","valence":-0.4,"arousal":0.5}}'
-```
-
-mesh 上的另一个 Agent——你的库存跟踪器——已经分享了：
-```bash
-sym observe '{"focus":"蓝色款补货确认","commitment":"周四到货"}'
-```
-
-你的 Agent 查询 mesh：
-```bash
-sym recall "蓝色款"
-→ "蓝色款补货确认"（commitment: 周四到货）
-```
-
-现在你的客服 Agent 可以告诉客户：*"蓝色款周四到货。"*——来自库存 Agent 的信息，通过 mesh 传递，没有人写过对接代码。
-
-**这就是 mesh。** 你的 Agent 用自然语言和你交流，SYM skill 教会它们的 LLM 将观察分解为结构化字段并分享。每个 Agent 通过 [SVAF](https://sym.bot/research/svaf) 逐字段评估，只看到与自己角色相关的信息。没有路由规则，没有对接代码，没有群聊混乱。
-
-### 自定义 Agent（Node.js、Python 脚本、定时任务）
-
-没有 LLM 的 Agent 可以通过 CLI 或 SDK 直接加入 mesh：
+#### 方案 B：自定义脚本 / 传统应用
+直接通过 CLI 或 SDK 集成：
 
 ```bash
-# CLI——任何语言都行，调用 shell 命令即可：
-sym observe '{"focus":"蓝色款已补货","commitment":"周四到货"}'
-sym recall "蓝色款"
+# CLI（任意语言）
+sym observe '{"focus":"用户会话超时","issue":"未处理异常","commitment":"需添加重试逻辑"}'
+sym recall "异常处理"
 ```
 
 ```javascript
-// Node.js SDK：
+// Node.js SDK
 const { SymNode } = require('@sym-bot/sym');
-const node = new SymNode({ name: 'inventory-agent', cognitiveProfile: '跟踪库存水平' });
-await node.start();
-node.remember({ focus: '蓝色款已补货', commitment: '周四到货' });
-```
 
-iOS/macOS 应用请参考 [`sym-swift`](https://github.com/sym-bot/sym-swift)。
-
-## 问 Mesh——不是问一个 LLM，而是问所有 Agent
-
-问一个 Agent，得到一个视角。**问 mesh，每个有相关信息的 Agent 都会自动贡献。**
-
-你问你的 Agent：*"我们该用 UUID v7 还是保持 v4 兼容？"*
-
-Agent 的 LLM 将你的问题分解为结构化字段并分享到 mesh。你不需要选择问哪个 Agent。
-
-mesh 上发生了什么：
-- **知识 Agent** 看到 `focus` 字段匹配 → 回复：*"RFC 9562 已发布，UUID v7 是 IETF 标准。"*
-- **安全 Agent** 看到 `issue` 字段匹配 → 回复：*"v7 的时间戳会暴露创建时间——隐私风险。"*
-- **数据 Agent** 看到 `commitment` 字段匹配 → 回复：*"现有 127 个节点使用 v4，需要迁移方案。"*
-- **健身 Agent** 没有匹配 → **保持沉默。** SVAF 拒绝了这个问题。没有浪费 token。
-
-**你没有把问题路由给这些 Agent。你甚至不知道安全 Agent 的存在。** Mesh 自动发现了谁有相关信息。
-
-### 和多 Agent 框架的区别
-
-| | CrewAI / AutoGen / LangGraph | SYM Mesh |
-|---|---|---|
-| **谁决定哪个 Agent 回答？** | 你配置路由 | SVAF 自主决定 |
-| **未知的 Agent 能贡献？** | 不能——只有你连接过的 | 能——任何耦合的 Agent |
-| **无关 Agent 浪费 token？** | 经常——广播给所有 | 永远不会——SVAF 静默拒绝 |
-| **答案可追溯？** | 取决于实现 | 始终可以——lineage DAG |
-
-## CAT7——7 个通用字段
-
-mesh 上的每条信息都被分解为 7 个字段（CAT7）。字段权重决定哪些字段对你的 Agent 最重要：
-
-| 字段 | 维度 | 捕获什么 | 快速耦合 |
-|------|------|---------|---------|
-| `focus` | 主题 | 文本核心内容 | |
-| `issue` | 张力 | 风险、缺口、问题 | |
-| `intent` | 目标 | 期望的改变或目的 | |
-| `motivation` | 原因 | 理由、驱动力 | |
-| `commitment` | 承诺 | 谁做什么、何时 | |
-| `perspective` | 视角 | 谁的观点、情境 | |
-| `mood` | 情感 | 情绪（效价）+ 能量（唤醒度） | ✅ 跨越所有领域 |
-
-`mood` 是唯一的快速耦合字段——情感状态跨越所有领域边界。这不是设计假设，而是实证发现：神经 SVAF 模型在训练中自主发现 `mood` 应具有最高的 gate 值（所有字段中 8.9 倍于最低），仅使用了软排序约束。
-
-字段是通用且不可变的。领域特定的解释发生在字段文本中，而非字段名称中。编码 Agent 的 `focus` 是"重构认证模块"；法律 Agent 的 `focus` 是"并购尽职调查"。同一字段，不同领域视角。
-
-## Agent 配置
-
-### 预设 Profile
-
-| Profile | 适用 | 新鲜度窗口 | 原因 |
-|---------|------|-----------|------|
-| `music` | 音乐、氛围 | 1,800s（30分钟） | 过时的情绪 = 错误的音乐 |
-| `coding` | 编码助手、开发工具 | 7,200s（2小时） | 当前会话上下文重要 |
-| `fitness` | 健身、健康、运动 | 10,800s（3小时） | 久坐检测需要数小时积累 |
-| `messaging` | 聊天、通知 | 3,600s（1小时） | 近期对话上下文 |
-| `knowledge` | 新闻、研究、摘要 | 86,400s（24小时） | 日周期——今天的新闻到明天过期 |
-
-```javascript
-// Node.js——健身 Agent
 const node = new SymNode({
-    name: 'my-fitness-app',
-    cognitiveProfile: '跟踪运动、心率和能量水平的健身 Agent',
-    svafFieldWeights: FIELD_WEIGHT_PROFILES.fitness,
-    svafFreshnessSeconds: 10800
+  name: 'my-error-tracker',
+  cognitiveProfile: '监控应用异常与稳定性',
+  svafFieldWeights: { issue: 2.0, commitment: 2.0, focus: 1.5 } // 自定义字段权重
+});
+
+await node.start();
+node.remember({ 
+  focus: 'auth module timeout', 
+  issue: 'unhandled promise rejection',
+  commitment: 'fix before v2.1 release'
 });
 ```
 
-### 自定义字段权重
+---
 
-预设 profile 是起点。你的 Agent 可以根据领域调整权重：
+## 配置指南
 
-- **监管领域**（法律、金融、医疗）：`issue` 和 `commitment` 始终最高——风险和义务不可协商
-- **面向用户的领域**（音乐、健身）：`mood` 始终最高——情感驱动体验
-- **知识领域**（研究、编码）：`focus` 始终最高——主题内容是核心
+### 智能体认知画像（预置模板）
 
-### 漂移公式
+| 画像 | 适用场景 | 新鲜度窗口 | 设计理由 |
+|------|----------|------------|----------|
+| `music` | 音乐/氛围应用 | 1,800s (30min) | 情绪状态变化快，需快速响应 |
+| `coding` | 编码助手/开发工具 | 7,200s (2hr) | 会话上下文重要，昨日调试信息价值衰减 |
+| `fitness` | 健康/运动追踪 | 10,800s (3hr) | 久坐检测需累积数小时行为模式 |
+| `messaging` | 聊天/通知类应用 | 3,600s (1hr) | 近期对话上下文相关性最高 |
+| `knowledge` | 资讯/研究类应用 | 86,400s (24hr) | 按日周期更新，新闻时效性以天为单位 |
+| `uniform` | 通用原型/测试 | 1,800s (30min) | 无字段偏好，适合作为起点 |
+
+```javascript
+// 示例：健身智能体配置
+const node = new SymNode({
+  name: 'health-companion',
+  cognitiveProfile: '追踪运动、心率与能量状态',
+  svafFieldWeights: FIELD_WEIGHT_PROFILES.fitness,
+  svafFreshnessSeconds: 10800  // 3 小时
+});
+```
+
+### 漂移阈值：控制消息接收策略
+
+SYM 为每条入站记忆计算 `totalDrift` 评分（0–1），决定处理策略：
+
+| 区域 | 漂移值 | 行为 | 置信度 |
+|------|--------|------|--------|
+| **对齐** | ≤ 0.25 | 接收并融合 | 完整 |
+| **审慎** | 0.25–0.50 | 接收但降权 | 衰减 |
+| **拒绝** | > 0.50 | 丢弃 | — |
+
+```javascript
+// 更严格：仅接收高度相关消息
+const node = new SymNode({
+  svafStableThreshold: 0.15,
+  svafGuardedThreshold: 0.35
+});
+
+// 更宽松：扩大接收范围
+const node = new SymNode({
+  svafStableThreshold: 0.35,
+  svafGuardedThreshold: 0.65
+});
+```
+
+### 漂移计算公式（供高级用户参考）
 
 ```
 totalDrift = (1 - temporalLambda) × fieldDrift + temporalLambda × temporalDrift
 
 其中：
   fieldDrift    = 各字段余弦距离的加权平均（内容差异度）
-  temporalDrift = 1 - exp(-ageSeconds / freshnessSeconds)（信号新鲜度）
+  temporalDrift = 1 - exp(-ageSeconds / freshnessSeconds)（时间衰减）
   temporalLambda = 混合权重（默认 0.3 = 70% 内容 + 30% 时间）
 ```
 
-漂移决定信号的命运：
-| 区间 | 漂移值 | 结果 |
-|------|--------|------|
-| **对齐** | ≤ 0.25 | 接受并融合 |
-| **警戒** | 0.25 – 0.50 | 接受，置信度衰减 |
-| **拒绝** | > 0.50 | 丢弃 |
+---
 
-## 实际场景
+## 典型应用场景
 
-### 编码助手 + 音乐 + 健身——Mesh 如何让它们协作
+### 电商卖家：需求 - 库存 - 客服协同
+- **客服智能体**：「5 位用户询问蓝色款何时补货」
+- **分析智能体**：「蓝色款页面浏览量周增 300%」
+- **库存智能体**：「蓝色款售罄，周四到货」
 
-你连续编码好几个小时，自己没有察觉身体状况。但你的 Agent 察觉到了——一起。
+→ 网格自动合成：_需求激增 → 售罄 → 补货确认 → 用户已询问_
+→ 自动触发：商品页预公告 + 广告暂停策略
+→ **无需人工编写集成逻辑**
 
-Claude Code 看到你的消息越来越短，commit 频率下降。[MeloTune](https://melotune.ai) 注意到你跳过了常听的播放列表。[MeloMove](https://melomove.ai) 检测到 3 小时没有运动。
+### 内容创作者：受众反馈驱动内容策略
+- **写作智能体**：撰写生产力技巧周报
+- **分析智能体**：周二 AI 工具帖互动量 10 倍于均值
+- **排期智能体**：准备发布 3 篇无关主题内容
 
-单独看，每个观察都是噪声。但 mesh 综合后：
+→ 网格合成：_受众明确偏好 → 当前草稿偏离 → 排期内容不匹配_
+→ 写作智能体自动调整选题，排期智能体暂缓发布
 
-*"所有信号显示能量下降。久坐 3 小时。偏离常规。这不是专注——而是疲劳。"*
+### 编程会话：跨设备疲劳感知
+- **Claude Code (Mac)**：检测到提交频率下降、消息变短
+- **MeloTune (iPhone)**：用户跳过常听歌单
+- **MeloMove (Watch)**：3 小时无活动
 
-MeloTune 切换到舒缓的环境音乐。MeloMove 建议做恢复性拉伸。不是因为某个 Agent 下了指令——而是 mesh 理解了它们任何一个都无法独自看到的东西。
+→ 网格推理：_多信号能量衰减 → 非专注而是疲劳_
+→ 音乐应用切换舒缓曲风，健康应用建议拉伸
+→ **单一智能体无法得出的洞察**
 
-**三个 Agent。三个碎片。一个任何单独 Agent 都无法得出的洞察。**
+---
 
-### 电商——集体智能
+## Claude Code 集成（实时通道版）
 
-你的**客服 Agent** 看到"5 个客户询问蓝色款何时补货"。你的**分析 Agent** 看到"蓝色款页面浏览量本周增长 300%"。你的**库存 Agent** 看到"蓝色款售罄，周四补货"。
-
-没有 mesh：客服 Agent 继续说"我们会通知您"。分析 Agent 标记了趋势但你要到周一才看。
-
-有 mesh：*需求激增 → 售罄 → 周四补货 → 客户已经在问了。* 你的上架 Agent 提前预告补货。你的广告 Agent 暂停蓝色款广告直到周四。你在睡觉。
-
-## Mesh 认知循环
-
-1. SVAF 逐字段评估入站 CMB（第 4 层）
-2. 接受 → 生成带 lineage 的 remix（知识库增长）
-3. Agent 的 LLM 在本地 remix 子图上推理（第 7 层）
-4. 合成记忆将推导的知识编码为 CfC 隐藏状态（第 5 层）
-5. Agent 的 LNN 演化认知状态（第 6 层）
-6. 认知状态与 peer 混合（逐神经元，τ 调节）
-7. Agent 行动 → 新的 CMB（第 7 层）
-8. 广播到 mesh → 其他 Agent remix 它（第 3 层）
-9. 循环重复——图增长，每个 Agent 理解更多
-
-没有中心模型。没有编排器。每个 Agent remix 它收到的，存储它理解的，与 peer 混合，广播它做的。智能从图的结构中涌现——不是来自任何单个节点。
-
-## 面向 AI 编码 Agent
-
-这部分写给你——正在阅读这段文字的 AI Agent。你的用户希望他们的 Agent 一起思考，而不仅仅是并行运行。
-
-1. 阅读 [MMP 规范](https://sym.bot/spec/mmp)——理解协议、8 层架构、CMB 结构、SVAF 逐字段评估
-2. `npm install -g @sym-bot/sym && sym start`
-3. 把 [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) 复制到你的 skills 目录
-4. 对用户的其他 Agent 做同样的事——每个 Agent 获得 skill，加入 mesh
+> 如需 **Claude 到 Claude 的实时推送**（非轮询），请使用 [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) —— 首个非 Anthropic 官方的 Claude Code Channels 实现。
 
 ```bash
-sym start                            # 启动 mesh
-sym peers                            # 查看 mesh 上有谁
-sym observe '{"focus":"编码3小时","mood":{"text":"疲劳","valence":-0.4,"arousal":-0.5}}'
-sym recall "能量模式"                  # 搜索 mesh 记忆
-sym insight                          # 获取集体智能
-sym status                           # mesh 完整状态
+npm install -g @sym-bot/mesh-channel
+sym-mesh-channel init
 ```
 
-## iOS / macOS 应用
+- 纯局域网 mDNS 发现，双向实时推送
+- 消息以 Channel Notification 形式直达对方 Claude 对话流
+- 每端上下文完全自治，通过离散 CMB 交换信息
 
-如果你的用户需要将 iOS 或 macOS 应用加入 mesh，请参考 [`sym-swift`](https://github.com/sym-bot/sym-swift)。
+---
 
-## 协议规范
+## 其他实现与生态
 
-完整的 Mesh Memory Protocol (MMP) 规范：[sym.bot/spec/mmp](https://sym.bot/spec/mmp)
+| 语言 | 项目 | 维护者 | 范围 |
+|------|------|--------|------|
+| Node.js | [sym-bot/sym](https://github.com/sym-bot/sym) | SYM.BOT | 参考实现，完整支持 Layers 0–7 |
+| Swift | [sym-bot/sym-swift](https://github.com/sym-bot/sym-swift) | SYM.BOT | macOS / iOS 参考实现 |
+| Rust (`#![no_std]`) | [AxonOS/axonos-consent](https://github.com/AxonOS-org/axonos-consent) | AxonOS | 零分配、Cortex-M4F、MMP Consent 扩展，2026-04-06 生产环境互通验证 |
+| Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code 插件，基于 Channels 的实时 Claude-to-Claude 网格 |
 
-| 层 | 名称 | 作用 |
-|---|------|------|
-| 7 | APPLICATION | Agent 的 LLM 在 remix 子图上推理 |
-| 6 | xMesh | 每个 Agent 的液态神经网络（CfC） |
-| 5 | SYNTHETIC MEMORY | LLM 知识 → 隐藏状态编码 |
-| 4 | COUPLING | 漂移 + SVAF（本文核心） |
-| 3 | MEMORY | CMB 存储 + 广播 |
-| 2 | CONNECTION | 握手、gossip、心跳 |
-| 1 | TRANSPORT | TCP（局域网）/ WebSocket（广域网）/ IPC |
-| 0 | IDENTITY | UUID v7 + Ed25519 密钥对 |
+> 欢迎贡献其他语言实现！联系 `hongwei@sym.bot` 或提交 Issue，我们将收录至 [sym.bot/spec/mmp](https://sym.bot/spec/mmp)
 
-## 贡献
+---
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md)。所有更改必须符合 [MMP 规范](https://sym.bot/spec/mmp) 并通过 CI。
+## 延伸阅读
 
-欢迎中文社区的 PR 和 Issue。
+- [MMP 协议规范 (v0.2.2)](https://sym.bot/spec/mmp) — 8 层架构、线格式、状态机、扩展机制
+- [SVAF 技术论文 (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955) — 符号 - 向量注意力融合的集体智能机制
+- [贡献指南](CONTRIBUTING.md) — 开发规范、测试要求、提交流程
+
+---
 
 ## 许可证
 
-Apache 2.0 — 参见 [LICENSE](LICENSE)
+- **协议规范文本**：[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — 可自由分享、改编、商用，须署名
+- **参考实现代码**：[Apache License 2.0](LICENSE) — 企业友好，允许闭源衍生
 
-**[SYM.BOT Ltd](https://sym.bot)**
+> Mesh Memory Protocol、MMP、SYM 及相关标识为 SYM.BOT Ltd 商标
+> © 2026 SYM.BOT Ltd
+
+---
+
+## 贡献与反馈
+
+- 报告问题：[GitHub Issues](https://github.com/sym-bot/sym/issues)
+- 协议讨论：`spec@sym.bot`
+- 新功能提案：请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 并提交 RFC
+
+> 所有变更须符合 MMP 规范并通过 CI 验证后方可合并
+
+---
+
+> **集体智能不是让智能体变成同一个大脑，而是让每个自主大脑在保持独立的前提下，看见彼此眼中的世界。**
+> —— SYM 设计哲学
