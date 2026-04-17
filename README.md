@@ -9,7 +9,7 @@ You've deployed multiple AI agents — OpenClaw, CrewAI, Claude Code, custom scr
 SYM is that protocol. Install it, start the daemon, and every agent on your machine joins a mesh where they share structured observations and each agent sees only what's relevant to its role — automatically, through per-field evaluation, not routing rules you configure.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.2-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
 [![arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)

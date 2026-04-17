@@ -3,7 +3,7 @@
 > **让自主智能体真正「协同思考」，而非仅仅「互相发消息」**
 
 [![npm version](https://img.shields.io/npm/v/@sym-bot/sym.svg)](https://www.npmjs.com/package/@sym-bot/sym)
-[![Specification](https://img.shields.io/badge/MMP-v0.2.2-blue)](https://sym.bot/spec/mmp)
+[![Specification](https://img.shields.io/badge/MMP-v0.2.3-blue)](https://sym.bot/spec/mmp)
 [![Paper](https://img.shields.io/badge/arXiv-2604.03955-b31b1b)](https://arxiv.org/abs/2604.03955)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
@@ -30,7 +30,7 @@
 > **重要澄清**：
 > - 智能体之间**不共享上下文**，仅通过离散 CMB 交换信息
 > - 接收方收到的是**通道通知**，后续处理由用户或对话策略决定，非自动分析
-> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.2+）
+> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.3+）
 
 ---
 
@@ -277,7 +277,7 @@ sym-mesh-channel init
 
 ## 延伸阅读
 
-- [MMP 协议规范 (v0.2.2)](https://sym.bot/spec/mmp) — 8 层架构、线格式、状态机、扩展机制
+- [MMP 协议规范 (v0.2.3)](https://sym.bot/spec/mmp) — 8 层架构、线格式、状态机、扩展机制
 - [SVAF 技术论文 (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955) — 符号 - 向量注意力融合的集体智能机制
 - [贡献指南](CONTRIBUTING.md) — 开发规范、测试要求、提交流程
 
