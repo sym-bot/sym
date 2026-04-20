@@ -2,6 +2,30 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.81
+
+### Added
+
+- **MMP §5.8 mesh group membership.** `SymNode` accepts `opts.group`
+  (default `"default"`) and `opts.discoveryServiceType` (default
+  `"_sym._tcp"`); both are propagated into `BonjourDiscovery` for
+  LAN-layer isolation. The handshake frame version is bumped `0.2.2` →
+  `0.2.3` and carries the optional `group` field per §5.2. Matches the
+  `sym-swift` `SymNode(discoveryServiceType:)` parameter so Node and
+  Swift implementations align.
+- **MMP §4.4.4 targeted CMB send.** `SymNode.remember(fields, opts)`
+  now accepts `opts.to` (full peerId). When set, the CMB frame is
+  emitted only to that connected peer; when omitted, behaviour is
+  unchanged (broadcast to all peers). The local store write runs in
+  both cases — lineage and §14.7 remix-guard invariants are enforced
+  identically.
+- **`peers()` exposes `peerId`** (full nodeId) alongside the truncated
+  `id` display form, so external callers can resolve a peer by name to
+  a full peerId without reaching into internal `_peers` state.
+- `tests/remember-targeted.test.js` covering broadcast regression,
+  targeted send to connected peer, targeted send to disconnected peer,
+  and `peers().peerId` exposure.
+
 ## 0.3.80
 
 ### Added
