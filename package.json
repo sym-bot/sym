@@ -8,7 +8,8 @@
     "sym-daemon": "./bin/sym-daemon.js"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:integration": "node --test --test-timeout=30000 --test-concurrency=1 tests/integration/*.js"
   },
   "keywords": [
     "mesh",
