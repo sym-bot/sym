@@ -2,6 +2,27 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.3.82
+
+### Fixed
+
+- **Remix CMB key self-reference on first-observation (MMP §14).**
+  Pairs with the `@sym-bot/core` 0.3.36 fix. When neural SVAF admits
+  an incoming CMB, `_processNeuralSVAF` now mints a fresh remix key
+  via `remixKey(fusedFields, incomingKey, this._node.name)` and
+  overwrites both `fusedEntry.cmb.key` and `fusedEntry.key` before
+  remix-store. Previously the receiver preserved the sender's CMB
+  key on the stored remix, producing `lineage.parents=[remix.key]` —
+  a self-edge that broke DAG traversal. Fix guarantees remix key ≠
+  parent key by construction while keeping idempotent dedup for
+  retries from the same sender to the same receiver. The heuristic
+  SVAF path is fixed in `@sym-bot/core` 0.3.36.
+
+### Changed
+
+- **`@sym-bot/core` dep bumped to `^0.3.36`** for `remixKey` +
+  heuristic-SVAF fix.
+
 ## 0.3.81
 
 ### Added
