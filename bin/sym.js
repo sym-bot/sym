@@ -22,7 +22,7 @@
  *   sym logs                          # Tail daemon logs
  *   sym version                       # Show version
  *
- * Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+ * Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
  */
 
 const net = require('net');

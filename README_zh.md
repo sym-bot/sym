@@ -287,8 +287,8 @@ sym-mesh-channel init
 - **协议规范文本**：[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — 可自由分享、改编、商用，须署名
 - **参考实现代码**：[Apache License 2.0](LICENSE) — 企业友好，允许闭源衍生
 
-> Mesh Memory Protocol、MMP、SYM 及相关标识为 SYM.BOT Ltd 商标
-> © 2026 SYM.BOT Ltd
+> Mesh Memory Protocol、MMP、SYM 及相关标识为 SYM.BOT 商标
+> © 2026 SYM.BOT
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "@sym-bot/sym",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Infrastructure and protocol for multi-agent collective intelligence",
   "main": "lib/node.js",
   "bin": {
@@ -20,7 +20,7 @@
     "bonjour",
     "svaf"
   ],
-  "author": "SYM.BOT Ltd <info@sym.bot> (https://sym.bot)",
+  "author": "SYM.BOT <info@sym.bot> (https://sym.bot)",
   "license": "Apache-2.0",
   "homepage": "https://github.com/sym-bot/sym",
   "repository": {

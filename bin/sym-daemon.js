@@ -35,7 +35,7 @@ suppressEpipe(process.stderr);
  *   sym-daemon --uninstall        # Remove LaunchAgent
  *   sym-daemon --status           # Show daemon status
  *
- * Copyright (c) 2026 SYM.BOT Ltd. Apache 2.0 License.
+ * Copyright (c) 2026 SYM.BOT. Apache 2.0 License.
  */
 
 const net = require('net');

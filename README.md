@@ -614,4 +614,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP sp
 
 Apache 2.0 — see [LICENSE](LICENSE)
 
-**[SYM.BOT Ltd](https://sym.bot)**
+**[SYM.BOT](https://sym.bot)**
