@@ -603,7 +603,6 @@ MMP is an open protocol. Beyond this Node.js reference and [`sym-swift`](https:/
 | Language | Project | Maintainer | Scope |
 | --- | --- | --- | --- |
 | Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code plugin — real-time Claude-to-Claude mesh via Channels. First non-Anthropic Channels implementation. |
-| Rust (`#![no_std]`) | [AxonOS-org/axonos-consent](https://github.com/AxonOS-org) | [AxonOS](https://axonos.org) | Official Rust implementation. Zero-alloc, Cortex-M4F, MMP Consent Extension v0.1.0. Production interop validated against `sym-relay` on 2026-04-06. |
 
 If you're building an MMP implementation in another language, get in touch at `hongwei@sym.bot` — we'll list it here and on [sym.bot/spec/mmp](https://sym.bot/spec/mmp).
 

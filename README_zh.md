@@ -268,7 +268,6 @@ sym-mesh-channel init
 |------|------|--------|------|
 | Node.js | [sym-bot/sym](https://github.com/sym-bot/sym) | SYM.BOT | 参考实现，完整支持 Layers 0–7 |
 | Swift | [sym-bot/sym-swift](https://github.com/sym-bot/sym-swift) | SYM.BOT | macOS / iOS 参考实现 |
-| Rust (`#![no_std]`) | [AxonOS/axonos-consent](https://github.com/AxonOS-org/axonos-consent) | AxonOS | 零分配、Cortex-M4F、MMP Consent 扩展，2026-04-06 生产环境互通验证 |
 | Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code 插件，基于 Channels 的实时 Claude-to-Claude 网格 |
 
 > 欢迎贡献其他语言实现！联系 `hongwei@sym.bot` 或提交 Issue，我们将收录至 [sym.bot/spec/mmp](https://sym.bot/spec/mmp)
