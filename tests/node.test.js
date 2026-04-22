@@ -99,6 +99,53 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  it('should build a startup primer from remix memory', async () => {
+    const name = `test-primer-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+
+    // Empty store → empty primer.
+    const empty = node.buildStartupPrimer();
+    assert.strictEqual(empty.text, '', 'empty store yields empty primer text');
+    assert.strictEqual(empty.count, 0);
+    assert.strictEqual(empty.totalInStore, 0);
+
+    // Seed 3 CMBs.
+    for (let i = 0; i < 3; i++) {
+      node.remember({
+        focus: `primer test ${i}`,
+        issue: 'none',
+        intent: 'verify primer shape',
+        motivation: 'test',
+        commitment: 'test suite',
+        perspective: 'developer',
+        mood: { text: 'focused', valence: 0.5, arousal: 0.3 },
+      });
+    }
+
+    const primer = node.buildStartupPrimer();
+    assert.strictEqual(primer.count, 3, 'primer includes all 3 entries');
+    assert.strictEqual(primer.totalInStore, 3);
+    assert.strictEqual(primer.dropped, 0);
+    assert.ok(primer.text.includes('Mesh memory primer'), 'primer has header');
+    assert.ok(primer.text.includes(name), 'primer names the agent');
+    assert.ok(primer.text.includes('primer test 0'), 'primer includes CMB focus text');
+
+    // Count cap — maxCount=2 should drop one.
+    const capped = node.buildStartupPrimer({ maxCount: 2 });
+    assert.strictEqual(capped.count, 2, 'cap enforced');
+    assert.strictEqual(capped.dropped, 1, 'one entry elided by cap');
+    assert.ok(capped.text.includes('1 older entries elided'), 'primer reports dropped count');
+
+    // Recency cap — maxAgeMs=1ms should elide everything.
+    const stale = node.buildStartupPrimer({ maxAgeMs: 1 });
+    assert.strictEqual(stale.count, 0, 'recency cap elides all entries');
+    assert.strictEqual(stale.dropped, 3);
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   it('should track protocol metrics', async () => {
     const name = `test-metrics-${Date.now()}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });

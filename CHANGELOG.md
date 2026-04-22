@@ -2,6 +2,32 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.0
+
+### Added
+
+- **`node.buildStartupPrimer({ maxCount, maxAgeMs })`** — reconstitute an
+  agent's remix memory as a human-readable primer, suitable for injection
+  into the LLM context at session start. Operationalises MMP §4.2 O2
+  (rejoin-without-replay). A fresh agent session wakes with its prior
+  cognitive state already loaded — zero first-turn `sym_recall` overhead.
+  Returns `{ text, count, dropped, totalInStore }`. Defaults:
+  `maxCount=20`, `maxAgeMs=86_400_000` (24h). Recency window applied
+  first, then count cap. Empty store yields an empty primer.
+
+  Intended use — call as the final step of plugin initialisation:
+
+  ```js
+  const node = new SymNode({ name, ... });
+  await node.start();
+  // ... transport, tool surface, subscriptions ...
+  const primer = node.buildStartupPrimer();
+  mcpServer.instructions += '\n\n' + primer.text;
+  ```
+
+  Inherits to every plugin that depends on `@sym-bot/sym`. Consumers:
+  `@sym-bot/mesh-channel` v0.3.0, `@sym-bot/melotune-plugin` v0.1.7.
+
 ## 0.3.82
 
 ### Fixed
