@@ -485,7 +485,7 @@ Once on the mesh, use the CLI commands from [What you get](#what-you-get) above.
 
 - **Node.js only on the main runtime.** iOS/macOS via [sym-swift](https://github.com/sym-bot/sym-swift); Python, Rust, Go are not yet implemented. Open an issue if you're starting one.
 - **Corporate networks often block mDNS multicast.** If LAN discovery fails on the same wifi, fall back to a relay.
-- **Relay operators can read message bodies.** Transport is authenticated (Ed25519, relay tokens) but end-to-end encryption of CMB payloads is on the MMP roadmap, not yet shipped.
+- **E2E encryption is per-peer-pair, not universal.** CMB field content is encrypted end-to-end with X25519 key agreement + AES-256-GCM between peers that both advertise an E2E public key on handshake. Peers without E2E support fall back to plaintext for backward compatibility. Outer frame metadata (sender ID, timestamp, lineage) stays plaintext — enough for relay forwarding and SVAF evaluation without seeing bodies.
 - **One identity per process.** Two agents on the same machine can't share a `SYM_NODE_NAME`. Each agent needs a distinct name (enforced by an identity lockfile).
 - **No offline directory of known peers.** `sym peers` only shows who's online right now. There is no central registry of offline-but-known peers — by design.
 
