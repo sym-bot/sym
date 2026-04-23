@@ -2,6 +2,36 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.1
+
+### Fixed
+
+- **Mac↔Windows peer connections over LAN.** `BonjourDiscovery` now
+  publishes an explicit `host` field with a normalized mDNS-valid hostname
+  (`.local` suffix). On Windows, `os.hostname()` returns a bare NetBIOS
+  name (e.g. `xmesh-hp`) with no domain suffix; `bonjour-service`
+  previously advertised that verbatim as the SRV target. macOS
+  mDNSResponder only resolves the `.local.` TLD, so the Mac could
+  discover the Windows peer via mDNS browse but failed to open an
+  outbound TCP connection — hostname resolution returned `No Such
+  Record`. CMBs sent to Windows peers never arrived; no replies ever
+  came back. (Same class of bug as the 0.3.72 cross-platform resolve
+  fix; regression path was the `host` field being unset.)
+
+  Fix is two-part:
+  1. `config.loadOrCreateIdentity()` normalizes `identity.hostname` via
+     the new `normalizeMdnsHostname()` helper — bare names get `.local`
+     appended, FQDNs and already-`.local` names pass through. Existing
+     identities with bare hostnames are auto-migrated on next load.
+  2. `BonjourDiscovery._startBonjourFallback()` passes the normalized
+     `identity.hostname` as the `host` field to `bonjour.publish()` so
+     the SRV target matches.
+
+  Affects all peers; Windows nodes must upgrade (their advertisement
+  was broken). Mac nodes benefit from the explicit `host:` field for
+  determinism even though `os.hostname()` happens to produce
+  `.local`-suffixed output on macOS.
+
 ## 0.5.0
 
 ### Added

@@ -7,7 +7,8 @@ const path = require('path');
 const os = require('os');
 const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
-  uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity, log,
+  uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
+  normalizeMdnsHostname, log,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -135,6 +136,58 @@ describe('loadOrCreateIdentity', () => {
     assert.ok(id.privateKey, 'should add privateKey during migration');
 
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('should migrate legacy identity with bare hostname to .local form', () => {
+    const legacyName = `test-bare-host-${Date.now()}`;
+    const dir = nodeDir(legacyName);
+    ensureDir(dir);
+    const legacy = {
+      nodeId: 'bbbbbbbb-cccc-4ddd-eeee-ffffffffffff',
+      name: legacyName,
+      hostname: 'xmesh-hp',
+      createdAt: Date.now(),
+      publicKey: 'x', privateKey: 'y',
+    };
+    fs.writeFileSync(path.join(dir, 'identity.json'), JSON.stringify(legacy));
+
+    const id = loadOrCreateIdentity(legacyName);
+    assert.strictEqual(id.hostname, 'xmesh-hp.local', 'bare hostname should be normalized to .local');
+
+    const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'identity.json'), 'utf8'));
+    assert.strictEqual(persisted.hostname, 'xmesh-hp.local', 'migration should be persisted to disk');
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('should create new identity with normalized mDNS hostname', () => {
+    const id = loadOrCreateIdentity(testName);
+    assert.ok(id.hostname.includes('.'), 'new identity hostname must contain a dot (either .local or FQDN)');
+  });
+});
+
+describe('normalizeMdnsHostname', () => {
+  it('appends .local to bare hostnames', () => {
+    assert.strictEqual(normalizeMdnsHostname('xmesh-hp'), 'xmesh-hp.local');
+    assert.strictEqual(normalizeMdnsHostname('laptop'), 'laptop.local');
+  });
+
+  it('passes through already-.local hostnames', () => {
+    assert.strictEqual(normalizeMdnsHostname('xmesh-hp.local'), 'xmesh-hp.local');
+  });
+
+  it('passes through FQDNs unchanged', () => {
+    assert.strictEqual(normalizeMdnsHostname('host.example.com'), 'host.example.com');
+  });
+
+  it('strips trailing dot', () => {
+    assert.strictEqual(normalizeMdnsHostname('xmesh-hp.local.'), 'xmesh-hp.local');
+  });
+
+  it('handles null/empty gracefully', () => {
+    assert.strictEqual(normalizeMdnsHostname(null), null);
+    assert.strictEqual(normalizeMdnsHostname(''), '');
+    assert.strictEqual(normalizeMdnsHostname(undefined), undefined);
   });
 });
 
