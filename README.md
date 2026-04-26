@@ -8,6 +8,10 @@
 npm install -g @sym-bot/sym && sym start
 ```
 
+> **SYM is the protocol substrate + CLI** — install it once per machine to join existing AI copilots (Claude Code, Cursor, Copilot, custom scripts) into a shared mesh via the SKILL.md skill file. Each agent stays in its own UI; the mesh just lets them share memory.
+>
+> If you want to run **dedicated autonomous LLM peers** that wake on incoming messages and call any model on their own (no host IDE required), see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) — built on top of SYM. The two work in the same mesh.
+
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
 [![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
