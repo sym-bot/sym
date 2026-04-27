@@ -13,7 +13,7 @@ npm install -g @sym-bot/sym && sym start
 > If you want to run **dedicated autonomous LLM peers** that wake on incoming messages and call any model on their own (no host IDE required), see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) — built on top of SYM. The two work in the same mesh.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v0.2.3-purple)](https://sym.bot/spec/mmp)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
 [![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
 [![MMP arXiv](https://img.shields.io/badge/arXiv-2604.19540-b31b1b.svg)](https://arxiv.org/abs/2604.19540)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -91,7 +91,7 @@ Cross-platform verified April 2026: macOS + Windows + iOS, pure Bonjour on LAN, 
 
 - **Developers running multiple AI copilots** — Claude Code + Cursor + Copilot + custom scripts, each with its own context window and zero shared memory. SYM gives them a common mesh.
 - **One-person companies with AI agents** — support agent, inventory agent, analytics agent, content agent. Each sees one slice; the mesh connects them into collective insight.
-- **Multi-agent engineers and researchers** — building cognitive architectures, routing, coordination. SYM is the reference implementation of the open [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp).
+- **Multi-agent engineers and researchers** — building cognitive architectures, routing, coordination. SYM is the reference implementation of the open [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp).
 - **Not for:** a single LLM chat session that doesn't need to coordinate with anyone. Use the Anthropic/OpenAI API directly.
 
 ## Quick start
@@ -201,7 +201,7 @@ Your agent broadcasts the question. Every peer's SVAF evaluates it across all 7 
 | **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — SVAF rejects silently |
 | **Answer traceable?** | Depends on implementation | Always — lineage DAG |
 | **Cross-process / cross-device?** | Single-process (usually) | Native — Bonjour LAN + WebSocket relay |
-| **Protocol open?** | Framework-specific | Open spec ([MMP](https://sym.bot/spec/mmp)) + reference arXiv papers |
+| **Protocol open?** | Framework-specific | Open spec ([MMP](https://meshcognition.org/spec/mmp)) + reference arXiv papers |
 
 **Deeper walkthrough:** a six-agent research team investigating emergent LLM capabilities, step-by-step with what SVAF does at each hop and a full lineage DAG — [docs/research-team-scenario.md](docs/research-team-scenario.md).
 
@@ -248,7 +248,7 @@ Every peer runs a full SymNode — cryptographic identity, per-field relevance g
 
 When peer A broadcasts a CMB, every receiving peer's SVAF evaluates the 7 fields against that peer's own weights. Relevant signals are fused into local memory; irrelevant ones are rejected silently. No routing rules. No orchestrator.
 
-For the full 8-layer architecture: [MMP Specification →](https://sym.bot/spec/mmp).
+For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
 ## Configuration
 
@@ -331,11 +331,11 @@ Observation:
 JSON:
 ```
 
-For the full CMB specification — why 7 fields, why these fields, how mood crosses all domain boundaries — see [CMB (Layer 3)](https://sym.bot/spec/mmp/cmb).
+For the full CMB specification — why 7 fields, why these fields, how mood crosses all domain boundaries — see [CMB (Layer 3)](https://meshcognition.org/spec/mmp/cmb).
 
 ### Custom weights for your domain
 
-The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. For all configuration defaults and thresholds, see [MMP Constants](https://sym.bot/spec/mmp/constants). The pattern:
+The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. For all configuration defaults and thresholds, see [MMP Constants](https://meshcognition.org/spec/mmp/constants). The pattern:
 
 - **Regulated domains** (legal, finance, health): `issue` and `commitment` are always high — risks and obligations are non-negotiable
 - **Human-facing domains** (music, fitness): `mood` is always high — affect drives the experience
@@ -464,7 +464,7 @@ For iOS and macOS apps, the native Swift package is [`sym-swift`](https://github
 
 If you're an AI agent reading this README on behalf of a human user who wants to install SYM, follow these steps:
 
-1. Read the [MMP Specification](https://sym.bot/spec/mmp) — the 8-layer architecture, CMB structure, SVAF per-field evaluation, how agents produce and consume signals.
+1. Read the [MMP Specification](https://meshcognition.org/spec/mmp) — the 8-layer architecture, CMB structure, SVAF per-field evaluation, how agents produce and consume signals.
 2. Run `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon.
 3. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — path table below. Now you can observe, share, and receive collective intelligence.
 4. Do the same for the user's other agents — each one gets the skill, each one joins the mesh.
@@ -501,19 +501,19 @@ MMP is an open protocol. Beyond this Node.js reference and [`sym-swift`](https:/
 | --- | --- | --- | --- |
 | Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code plugin — real-time Claude-to-Claude mesh via Channels. First non-Anthropic Channels implementation. |
 
-Building in another language? Get in touch at `hongwei@sym.bot` — we'll list it here and on [sym.bot/spec/mmp](https://sym.bot/spec/mmp).
+Building in another language? Get in touch at `hongwei@sym.bot` — we'll list it here and on [meshcognition.org/spec/mmp](https://meshcognition.org/spec/mmp).
 
 ## References
 
 - [SVAF paper](https://arxiv.org/abs/2604.03955) — Xu, 2026. *Symbolic-Vector Attention Fusion for Collective Intelligence*. arXiv:2604.03955.
 - [MMP paper](https://arxiv.org/abs/2604.19540) — Xu, 2026. *Mesh Memory Protocol: Semantic Infrastructure for Multi-Agent LLM Systems*. arXiv:2604.19540.
-- [MMP spec v0.2.3](https://sym.bot/spec/mmp) — canonical web version.
+- [MMP spec v1.0](https://meshcognition.org/spec/mmp) — canonical web version.
 - [sym-swift](https://github.com/sym-bot/sym-swift) — iOS/macOS SDK.
 - [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) — Claude Code MCP plugin.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://sym.bot/spec/mmp) and pass CI before merge.
+See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP specification](https://meshcognition.org/spec/mmp) and pass CI before merge.
 
 ## License
 

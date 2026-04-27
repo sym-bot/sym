@@ -1,6 +1,6 @@
 # Contributing to SYM
 
-SYM is the reference Node.js implementation of the [Mesh Memory Protocol (MMP)](https://sym.bot/spec/mmp). All changes must comply with the specification.
+SYM is the reference Node.js implementation of the [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). All changes must comply with the specification.
 
 ## Branch Strategy
 
@@ -10,7 +10,7 @@ SYM is the reference Node.js implementation of the [Mesh Memory Protocol (MMP)](
 
 ## Before Submitting a PR
 
-1. **Read the spec.** If your change touches identity, transport, connection, memory, coupling, or any protocol layer, verify it conforms to [MMP](https://sym.bot/spec/mmp).
+1. **Read the spec.** If your change touches identity, transport, connection, memory, coupling, or any protocol layer, verify it conforms to [MMP](https://meshcognition.org/spec/mmp).
 2. **Run tests.** All tests must pass:
    ```bash
    npm test

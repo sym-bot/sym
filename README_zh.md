@@ -3,7 +3,7 @@
 > **让自主智能体真正「协同思考」，而非仅仅「互相发消息」**
 
 [![npm version](https://img.shields.io/npm/v/@sym-bot/sym.svg)](https://www.npmjs.com/package/@sym-bot/sym)
-[![Specification](https://img.shields.io/badge/MMP-v0.2.3-blue)](https://sym.bot/spec/mmp)
+[![Specification](https://img.shields.io/badge/MMP-v1.0-blue)](https://meshcognition.org/spec/mmp)
 [![Paper](https://img.shields.io/badge/arXiv-2604.03955-b31b1b)](https://arxiv.org/abs/2604.03955)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 
@@ -30,7 +30,7 @@
 > **重要澄清**：
 > - 智能体之间**不共享上下文**，仅通过离散 CMB 交换信息
 > - 接收方收到的是**通道通知**，后续处理由用户或对话策略决定，非自动分析
-> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v0.2.3+）
+> - 所有认知内容必须使用 `cmb` 帧格式传输（MMP v1.0+）
 
 ---
 
@@ -270,13 +270,13 @@ sym-mesh-channel init
 | Swift | [sym-bot/sym-swift](https://github.com/sym-bot/sym-swift) | SYM.BOT | macOS / iOS 参考实现 |
 | Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code 插件，基于 Channels 的实时 Claude-to-Claude 网格 |
 
-> 欢迎贡献其他语言实现！联系 `hongwei@sym.bot` 或提交 Issue，我们将收录至 [sym.bot/spec/mmp](https://sym.bot/spec/mmp)
+> 欢迎贡献其他语言实现！联系 `hongwei@sym.bot` 或提交 Issue，我们将收录至 [meshcognition.org/spec/mmp](https://meshcognition.org/spec/mmp)
 
 ---
 
 ## 延伸阅读
 
-- [MMP 协议规范 (v0.2.3)](https://sym.bot/spec/mmp) — 8 层架构、线格式、状态机、扩展机制
+- [MMP 协议规范 (v1.0)](https://meshcognition.org/spec/mmp) — 8 层架构、线格式、状态机、扩展机制
 - [SVAF 技术论文 (arXiv:2604.03955)](https://arxiv.org/abs/2604.03955) — 符号 - 向量注意力融合的集体智能机制
 - [贡献指南](CONTRIBUTING.md) — 开发规范、测试要求、提交流程
 
