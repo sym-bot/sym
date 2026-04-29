@@ -2,6 +2,33 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.4
+
+### Fixed
+
+- **Replacement transports never received a handshake; remote rejected the
+  next heartbeat-`ping` as a protocol violation.** Companion fix to v0.5.3.
+  When the dual-dial dedup or stale-prior swap path in `_createPeer` replaced
+  an existing transport, the new transport was registered in
+  `existingPeer.transports` but no handshake was sent on it — `_addPeer`
+  (which sends the handshake) is only called for brand-new peers, not
+  transport replacements. The remote (sym-swift) saw the new connection
+  reach `.ready`, sent its own handshake, and waited for ours. Ours never
+  arrived. ~10 seconds later the heartbeat tick fired `ping` on every
+  transport, the remote saw `ping` as the first frame, and disconnected
+  with `[SYM] session: expected handshake, got ping` — protocol violation.
+  Net result: a flap loop where every reconnect was killed within 10s by
+  the protocol-violation trip-wire.
+
+  Fix: extracted handshake-build into `_buildHandshake()` helper; the
+  existing-peer branch in `_createPeer` now sends the handshake on every
+  newly-registered transport. Idempotent — if the remote already sent
+  its handshake, it processes both fine.
+
+  Verified end-to-end on Mac Catalyst MeloMove ↔ claude-code-mac (Node)
+  on the same Mac. Connection stays stable, peers persist in the UI,
+  CMBs flow continuously without the periodic 10s drop.
+
 ## 0.5.3
 
 ### Fixed
