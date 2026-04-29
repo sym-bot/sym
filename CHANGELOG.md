@@ -2,6 +2,28 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.5
+
+### Fixed
+
+- **Stale-prior threshold lowered from 10s to 1s.** v0.5.3+v0.5.4
+  introduced lastSeen-aware stale detection in the inbound-connection
+  and `_createPeer` dedup paths, with the threshold tied to
+  `_heartbeatInterval` (default 10s). Field testing showed this was too
+  lenient: when a peer process was killed and quickly relaunched, the
+  old run had typically sent a CMB seconds before death, so `lastSeen`
+  was still within the 10s window. The dedup logic then rejected the
+  legitimate redial as a same-direction-duplicate, producing
+  `connection ready → immediate disconnect` with no handshake-complete
+  on the dialing side.
+
+  Lowered to a hardcoded 1s threshold in both dedup paths.
+  Sub-second TCP-retry races during initial handshake still keep prior
+  (the case the same-direction-duplicate rule was designed for); peer
+  restarts with ≥1s between kill and re-dial now recover within the
+  application layer instead of being blocked until OS keepalive reaps
+  the underlying socket (~100s).
+
 ## 0.5.4
 
 ### Fixed
