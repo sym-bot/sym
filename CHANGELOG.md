@@ -2,6 +2,64 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.2
+
+### Fixed
+
+- **Same-host Bonjour peers permanently rejected each other.** When two
+  `@sym-bot/sym` (or sym-swift) processes ran on the same host and
+  Bonjour-discovered each other, neither could maintain a peer relationship.
+  The `inbound-connection` handler and `_createPeer` short-circuited the
+  moment a same-source transport key was present in `peer.transports`,
+  regardless of whether that prior was actually alive or what direction it
+  was in. Three real failure modes collapsed into the same bug:
+
+  1. **Stale prior** — the previous transport's `_closed` flag was set but
+     its close handler hadn't fired yet. Apple's Network framework doesn't
+     always deliver FIN promptly when a peer process exits abruptly, leaving
+     a dead entry in the transports map. Any reconnect attempt was
+     permanently rejected until the OS reaped the dead entry.
+  2. **Same-direction duplicate** — listener fires `newConnectionHandler`
+     twice for the same advertised service (TCP retry, multipath race,
+     repeated Bonjour resolution). Silently replacing the established
+     healthy inbound with the duplicate tore down the wire pair on the
+     remote side and triggered peer-left storms.
+  3. **Dual-dial collision** — both peers Bonjour-discovered each other
+     within ~50ms and both initiated outbound TCP. Each side held one
+     outbound + one inbound for the same nodeId. The unconditional reject
+     killed one side's view of the connection, leaving asymmetric peer
+     state.
+
+  Observed in the field on macOS: a Mac Catalyst app (sym-swift) and a
+  Node CLI (`@sym-bot/sym`) on the same Mac would never maintain a peer
+  relationship — the Node side silently rejected the Catalyst side's
+  inbound dial via `transport.close(); return;`. Cross-host LAN peers
+  worked because the timing windows differ.
+
+  Fix is two-part, applied in both `inbound-connection` handler and
+  `_createPeer`:
+
+  1. **Stale-aware dedup** — short-circuit only when the prior transport
+     is alive (`!_closed`). A stale `_closed=true` entry is treated as no
+     prior; the new connection replaces it.
+  2. **Direction-aware dedup with deterministic tie-break** — for a live
+     prior:
+     - **Same-direction duplicate** (both inbound or both outbound) →
+       keep prior, drop new (no wire-pair teardown on the remote).
+     - **Dual-dial collision** (different directions) → nodeId-based
+       tie-break. The lower nodeId acts as client and keeps its outbound;
+       the higher keeps the matching inbound. Both peers independently
+       compute the same physical-socket winner without exchanging
+       coordination frames.
+
+  Mirrors the equivalent fix shipped in `@sym-bot/sym-swift` v0.3.79 +
+  v0.3.80 so cross-runtime peers (sym-swift ↔ sym Node) now agree on the
+  same dedup convention.
+
+  Affects all peers running on the same host with another sym instance,
+  and any deployment where Bonjour discovery races finish within ~50ms
+  of each other.
+
 ## 0.5.1
 
 ### Fixed
