@@ -2,6 +2,58 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.3
+
+### Fixed
+
+- **Same-host loopback peers stayed permanently rejected after one peer
+  restarted.** Companion fix to 0.5.2's same-host dedup. v0.5.2's stale-prior
+  check looked only at the transport's `_closed` flag — set when
+  `transport.close()` had been called explicitly. But the common
+  dead-but-ESTABLISHED case (peer process killed; OS doesn't deliver FIN to
+  the survivor before macOS keepalive reaps it) leaves `_closed=false`
+  forever. On loopback this is a hard block — macOS default TCP_KEEPALIVE is
+  7200 seconds (2 hours) before the first probe. The survivor sees the dead
+  socket as alive, and the dedup logic against this zombie entry rejects
+  every redial from the restarted peer.
+
+  On Wi-Fi the same logical bug is much less visible — mobile TCP routes are
+  noisy (route flaps, ARP timeouts, AP transitions) and keepalive idle
+  defaults are short, so stale sockets die in seconds. On loopback there's
+  zero noise; the dead socket sits in ESTABLISHED indefinitely.
+
+  Observed: Mac Catalyst MeloMove ↔ claude-code-mac (Node) on the same Mac.
+  Each Mac MeloMove rebuild → claude-code-mac retains a dead ESTABLISHED
+  socket → new Mac MeloMove's redial is rejected for 2h. iPhone ↔
+  claude-code-mac on Wi-Fi recovers within seconds because Wi-Fi noise
+  reaps stale sockets quickly.
+
+  Three-part fix:
+
+  1. **`TcpTransport` enables TCP keepalive on the socket** —
+     `socket.setKeepAlive(true, 1000)`. 1-second initial idle delay before
+     OS keepalive probes start, then OS-default probe cadence. macOS detects
+     dead remote in ~10s instead of ~2h.
+
+  2. **`inbound-connection` handler and `_createPeer` now treat stale-by-
+     `lastSeen` as stale.** A prior peer entry whose `lastSeen` is older
+     than `_heartbeatInterval` (default 10s) is now considered stale
+     regardless of the `_closed` flag. The remote re-dialling is itself
+     strong evidence its prior is dead — a healthy peer wouldn't dial
+     again. Closes the dead prior explicitly so its close handler runs and
+     removes the dict entry before the new transport is registered.
+
+  3. **Identity-aware close handlers.** When a stale prior is closed and
+     replaced, its eventual close handler must NOT clobber the new transport
+     entry. Both close handlers in `_createPeer` now guard with
+     `transports.get(source) === transport` before mutating the transports
+     dict. Prevents a late-firing close from a swapped-out prior tearing
+     down its replacement.
+
+  Affects all peers running on the same host as another sym instance, and
+  any peer-restart scenario where the peer's TCP socket on the survivor
+  side stays in ESTABLISHED state past the OS-level FIN.
+
 ## 0.5.2
 
 ### Fixed
