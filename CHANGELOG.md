@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.6
+
+### Fixed
+
+- **Apply 1s stale-prior threshold to `_createPeer` path.** v0.5.5
+  lowered the threshold to 1s in the inbound-connection handler but
+  left the `_createPeer` path on the old `_heartbeatInterval` (10s).
+  When both sides of a peer pair dialled each other in rapid
+  succession, the inbound handler accepted with the 1s rule but the
+  merged `_createPeer` re-evaluated with 10s and could pick the
+  opposite winner. Mac-side and Node-side then kept different
+  connections, each killing the other's choice — visible in field
+  testing as a continuous ~6s join → disconnect cycle even after
+  v0.5.5. Aligned both sites on 1s.
+
 ## 0.5.5
 
 ### Fixed
