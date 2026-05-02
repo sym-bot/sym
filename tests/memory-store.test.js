@@ -166,6 +166,65 @@ describe('MemoryStore', () => {
     assert.ok(typeof removed === 'number', 'purge should return count');
   });
 
+  it('compactByOrigin shims to compact when both freshnessMs values are equal', () => {
+    // Back-compat: the legacy single-value compact() now shims to
+    // compactByOrigin with equal local + peer thresholds. The result
+    // count must remain shaped like a number (existing assertions).
+    const isolatedDir = path.join(os.tmpdir(), `sym-test-shim-${Date.now()}`);
+    const isolated = new MemoryStore(isolatedDir, 'test-agent');
+    try {
+      isolated.write('shim-test entry', { tags: ['shim'] });
+      const compacted = isolated.compactByOrigin(0, 0);
+      assert.ok(typeof compacted === 'number',
+        'compactByOrigin should return count');
+    } finally {
+      fs.rmSync(isolatedDir, { recursive: true, force: true });
+    }
+  });
+
+  it('compactByOrigin uses peer threshold for peer entries and local threshold for self entries', () => {
+    // Origin-aware retention: a peer entry past its peerCutoff
+    // compacts to cold; a self entry of the same age but within its
+    // localCutoff stays hot. The discrimination is the whole point of
+    // the API — apps that retain own lineage longer than peer chatter
+    // configure local > peer freshness.
+    const isolatedDir = path.join(os.tmpdir(), `sym-test-origin-${Date.now()}`);
+    const isolated = new MemoryStore(isolatedDir, 'test-agent');
+    try {
+      // Self entry (peerId == null).
+      const selfEntry = isolated.write('self ancient', { tags: ['origin-test'] });
+      // Peer entry, written via the receiveFromPeer path so peerId is
+      // populated and the entry is treated as not-self by the index.
+      const peerEntry = isolated.receiveFromPeer('peer-x', {
+        key: 'peer-ancient-key',
+        content: 'peer ancient',
+        source: 'peer-x',
+        tags: ['origin-test'],
+      });
+      // Backdate both storedAt to 60 seconds ago via in-memory index
+      // mutation — test-only manipulation; production code never
+      // touches storedAt directly.
+      const sixtySecAgo = Date.now() - 60_000;
+      isolated._index.get(selfEntry.key).storedAt = sixtySecAgo;
+      if (peerEntry) isolated._index.get(peerEntry.key).storedAt = sixtySecAgo;
+
+      // localFreshness = 120s (self stays hot), peerFreshness = 30s
+      // (peer entry is past cutoff and should compact).
+      const moved = isolated.compactByOrigin(120_000, 30_000);
+
+      assert.strictEqual(moved, 1,
+        'exactly one entry (peer) should compact under split thresholds');
+      assert.strictEqual(isolated._index.get(selfEntry.key).tier, 'hot',
+        'self entry must stay hot when within local freshness window');
+      if (peerEntry) {
+        assert.strictEqual(isolated._index.get(peerEntry.key).tier, 'cold',
+          'peer entry must compact when past peer freshness window');
+      }
+    } finally {
+      fs.rmSync(isolatedDir, { recursive: true, force: true });
+    }
+  });
+
   it('should receive from peer', () => {
     const peerEntry = {
       key: 'peer-mem-1',

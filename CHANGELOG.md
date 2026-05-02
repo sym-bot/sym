@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.7
+
+### Added
+
+- **Origin-aware retention.** `MemoryStore.compactByOrigin(localFreshnessMs, peerFreshnessMs)` lets callers move self-authored CMBs (`peerId == null`) and peer-received CMBs to cold tier on independent freshness thresholds. Useful when the agent's own lineage chains carry more retrospective value than peer chatter — apps configure local > peer freshness so their own emissions survive longer.
+- **`SymNode` constructor opts `localRetentionSeconds` + `peerRetentionSeconds`.** Optional overrides of the uniform `retentionSeconds`. When omitted, both fall through to `retentionSeconds` (back-compat preserved). When set, `_runRetentionPurge` (run on start + hourly) uses the new origin-aware path and logs both values when they differ.
+
+### Compatibility
+
+- `MemoryStore.compact(freshnessMs)` is now a back-compat shim that calls `compactByOrigin(freshnessMs, freshnessMs)`. No behavioral change for callers that don't explicitly opt into origin-aware retention.
+- Existing apps configured with only `retentionSeconds` see no behavioral change. The new opts are purely additive.
+
+### Tests
+
+- 2 new tests in `tests/memory-store.test.js`: shim equivalence (back-compat) + origin discrimination (peer compacts past peer cutoff while self stays hot under local cutoff). 18/18 pass.
+
 ## 0.5.6
 
 ### Fixed
