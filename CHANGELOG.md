@@ -2,6 +2,18 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.5.8
+
+### Added
+
+- **`opts.payload` on `SymNode.remember(fields, opts)`** — optional opaque payload attached to the CMB alongside CAT7 fields. Rides the wire frame (the existing `peer.transport.send({ type: 'cmb', timestamp, cmb })` path serializes the whole cmb object, so payload propagates automatically) and the local store. NOT part of `cmbKey` — CAT7 fields alone remain the content-addressed identity, preserving cross-SDK CMB dedup with sym-core-swift. Substrate-level protocols (LLM request/response primitive, sym.day ATTACH-DATABASE) carry data beyond CAT7 through this slot without violating MMP §8 semantics by smuggling JSON through `motivation` or other CAT7 fields. Senders ensure CAT7 fields differ when payloads differ (e.g. unique request_id in `focus`) to avoid store-side dedup collisions on the CAT7 hash. Backward-compat: when `opts.payload` is omitted, CMB serialization is identical to v0.5.7.
+
+### Compatibility
+
+- Old peers receiving payload-bearing CMBs ignore the unknown field (existing `cmb-accepted` handlers only read `entry.cmb.fields` / `entry.content`). Forward-compat.
+- New peers receiving non-payload CMBs from old peers see `cmb.payload === undefined`. Backward-compat.
+- `cmbKey()` algorithm unchanged → CMB identity remains stable across the v0.5.7 / v0.5.8 boundary.
+
 ## 0.5.7
 
 ### Added
