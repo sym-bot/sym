@@ -22,70 +22,21 @@ npm install -g @sym-bot/sym && sym start
 
 ## Contents
 
-1. [What this looks like](#what-this-looks-like) — production log of three apps coordinating through the mesh
-2. [Who this is for](#who-this-is-for)
-3. [Quick start](#quick-start)
-4. [What you get](#what-you-get) — CLI + SDK surface
-5. [Ask the mesh](#ask-the-mesh) — one question, every agent that knows contributes
-6. [Why this is different from multi-agent frameworks](#why-this-is-different)
-7. [Use cases](#use-cases) — e-commerce, content creators, vibe coding
-8. [How it works](#how-it-works)
-9. [Configuration](#configuration) — profiles, field weights, drift thresholds, math
-10. [Claude Code as a mesh node](#claude-code-as-a-mesh-node)
-11. [iOS / macOS apps](#ios--macos-apps)
-12. [For AI coding agents reading this](#for-ai-coding-agents-reading-this)
-13. [Limitations](#limitations)
-14. [Other implementations](#other-implementations)
+1. [Who this is for](#who-this-is-for)
+2. [Quick start](#quick-start)
+3. [What you get](#what-you-get) — CLI + SDK surface
+4. [Ask the mesh](#ask-the-mesh) — one question, every agent that knows contributes
+5. [Why this is different from multi-agent frameworks](#why-this-is-different)
+6. [Use cases](#use-cases) — e-commerce, content creators, vibe coding
+7. [How it works](#how-it-works)
+8. [Configuration](#configuration) — profiles, field weights, drift thresholds, math
+9. [Claude Code as a mesh node](#claude-code-as-a-mesh-node)
+10. [iOS / macOS apps](#ios--macos-apps)
+11. [For AI coding agents reading this](#for-ai-coding-agents-reading-this)
+12. [Limitations](#limitations)
+13. [Other implementations](#other-implementations)
 
 ---
-
-## What this looks like
-
-Three apps on three devices, three different vendors. Claude Code (macOS), MeloTune (iPhone), MeloMove (iPhone). None of them know the others exist. All three are on the mesh.
-
-You vibe-code for hours. You don't notice what's happening to you. But your agents do — together.
-
-Claude Code sees your messages getting shorter, your commits slowing down. [MeloTune](https://melotune.ai) notices you skipped your usual playlist. [MeloMove](https://melomove.ai) sees 3 hours without movement. Individually, each observation is noise. Together, the mesh synthesises:
-
-> *"Energy declining across all signals. 3-hour sedentary. Deviation from routine. This isn't focus — it's fatigue."*
-
-MeloTune shifts to calm ambient. MeloMove suggests a recovery stretch. Not because one agent told them to — because **the mesh understood something none of them could see alone.**
-
-**This isn't hypothetical.** Here's the actual production log from that session:
-
-```
-# 1. Claude Code extracts 7 structured fields from what it observes
-sym observe '{
-  "focus": "wrapping up mesh protocol testing session",
-  "issue": "neutral",
-  "intent": "validate end-to-end CMB flow",
-  "motivation": "release readiness",
-  "commitment": "final test round",
-  "perspective": "developer, 10am morning session",
-  "mood": {"text": "cautiously optimistic", "valence": 0.3, "arousal": 0.2}
-}'
-# → Shared: cmb-c96d21a4cf4598cf
-
-# 2. MeloTune receives the CMB, SVAF evaluates all 7 fields independently
-[SYM] memory-share: received CMB cmb-c96d21a4cf from sym-daemon (7 fields, mood: cautiously optimistic)
-[SYM] memory: SVAF fused from sym-daemon [aligned, drift:0.032,
-  fields: commitment:-0.00 focus:0.06 intent:0.09 issue:-0.00 mood:0.06 motivation:-0.00 perspective:0.07]
-
-# 3. MeloTune's LLM interprets the mood autonomously
-[LLM] input: "cautiously optimistic"
-[LLM] output: mood_based, emotion: 55, energy: 50, genre: Indie
-[LLM] reason: Mood-based request for cautious optimism in music.
-
-# 4. MeloTune curates and plays
-[MoodState] ▶ START MoodSession | mood: Exploring Wonder (e:55, n:50), genre: Indie
-[PlaybackSync] 🎵 Now playing: 'Circle of Trust' (Indie Rock, E:55 N:65)
-```
-
-<table><tr><td width="260"><img src="docs/sym-readme-melotune-mesh-result.jpg" alt="MeloTune playing Circle of Trust" width="240" /></td><td>
-Claude Code didn't tell MeloTune to play Indie. It shared what it observed — 7 structured fields with mood "cautiously optimistic". MeloTune's SVAF evaluated each field, accepted the signal (drift 0.032), extracted the mood, and its own LLM decided "Exploring Wonder" with Indie genre. Neither agent knows the other exists. The mesh connects them.
-</td></tr></table>
-
-Cross-platform verified April 2026: macOS + Windows + iOS, pure Bonjour on LAN, WebSocket relay for cross-network.
 
 ## Who this is for
 
@@ -227,12 +178,12 @@ With SYM: the writing agent pivots the newsletter. The scheduling agent holds th
 
 ![Vibe coding — collective intelligence](docs/sym-readme-usecase-coding-01.png)
 
-The full production log from this scenario is at the top of this README. Three apps, three fragments, one insight none of them could reach alone.
+Three apps, three fragments, one insight none of them could reach alone.
 
 ## How it works
 
 ```
-   Claude Code (Mac)          Cursor (Mac)         MeloTune (iPhone)
+   Claude Code (Mac)          Cursor (Mac)         Copilot (VSCode)
          │                        │                        │
          ▼                        ▼                        ▼
    ┌─────────────────────────────────────────────────────────┐
@@ -437,8 +388,8 @@ That's it. Other agents on the same network discover each other automatically vi
 
 1. You observe what the user is doing (coding patterns, energy, mood)
 2. You share a CMB with structured CAT7 fields → mesh broadcasts it
-3. Other agents (MeloTune, MeloMove, etc.) receive and remix your observation
-4. Their models evolve — MeloTune shifts to calming music, MeloMove suggests a stretch
+3. Other agents (MeloMove, etc.) receive and remix your observation
+4. Their models evolve — MeloMove suggests a stretch
 5. You receive their observations back → collective insight informs your next response
 6. The graph of remixed CMBs grows every cycle → each agent understands more
 
