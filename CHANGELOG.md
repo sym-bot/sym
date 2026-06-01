@@ -2,6 +2,20 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.0
+
+### Added
+
+- **Mesh group commands (MMP §5.8).** `sym start --group <name>` joins a group at launch (+ `--relay-url` / `--relay-token` for WAN); `sym join <name>` switches into one, `sym leave` returns to the default mesh, `sym groups` discovers groups live on the LAN, `sym group` shows the current one. A group is the "group chat" boundary — only nodes in the same group discover each other and exchange CMBs. `lib/groups.js` is the single source of truth for the group↔serviceType mapping (`default → _sym._tcp`, `<kebab> → _<group>._tcp`), matching `sym-mesh-channel` (the Claude MCP node) and sym-swift so CLI, app, and Claude peers meet in the same group. The daemon resolves the group from `SYM_GROUP` env → persisted `~/.sym/group` → default (the file is the cross-platform source of truth across launchd/spawn restarts) and logs it on startup.
+
+### Fixed
+
+- **Windows portability.** `sym stop` no longer shells out to `pgrep` (POSIX-only, absent on Windows): the daemon's pid is tracked in `~/.sym/daemon.pid` and stopped via `process.kill` (pgrep kept only as a Linux fallback). `isDaemonRunning` now checks pid-file liveness on Windows instead of always returning `true`. The group-switch restart uses a portable `Atomics.wait` sleep instead of `execSync('sleep')`. macOS (launchd) path unchanged.
+
+### Docs
+
+- README (EN + ZH) reframed around the node × reach × scope model: the daemon is the polyglot, real-time node (any language joins via shell-out + `sym listen`), not optional; a new Groups section; Privacy reconciled with the relay (local stays local; remote forwards E2E-encrypted bodies through your own authenticated relay). The agent SKILL teaches the group commands.
+
 ## 0.6.0
 
 ### Added
