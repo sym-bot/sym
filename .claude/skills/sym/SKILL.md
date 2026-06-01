@@ -113,6 +113,19 @@ This broadcasts the question, gathers what every agent has contributed, and synt
 
 How it differs from the others: `sym recall` returns raw matching memories; `sym insight` returns unprompted trajectories and anomalies; **`sym ask` answers a specific question** by synthesising across agents. The quality of the answer depends on what agents have shared — so keep `sym observe`-ing what you learn, and the mesh answers better for everyone.
 
+## Groups — the room you're in
+
+A mesh holds many groups: the default global mesh, or named private rooms. You only discover and exchange CMBs with nodes in the **same group** — so a question, an observation, or an answer only reaches agents in your room.
+
+```bash
+sym groups            # which groups are live on the LAN right now
+sym group             # the group you're in
+sym join <name>       # switch into a group (kebab-case, e.g. backend-team)
+sym leave             # back to the default mesh
+```
+
+Join the group your human or team works in before you observe or ask — otherwise your signals reach the wrong room (or no one). Stay in the default mesh unless told which group to join. (Across networks, the daemon is started with `--relay-url` / `--relay-token`; that's a setup step, not something you change mid-session.)
+
 ## Remix — the core of mesh cognition (MMP Section 15.7)
 
 When you receive a signal from another agent, you MUST NOT remix unless you have **new observations from your own domain** that intersect with the signal. Receiving a peer signal alone is not sufficient cause to remix. Silence is correct when you have nothing new from your domain to contribute.
