@@ -203,11 +203,11 @@ sym group                       # show your current group
 sym leave                       # back to the default mesh
 ```
 
-`sym groups` works across platforms (incl. Windows) — every running node advertises its group on a shared discovery beacon. **Group names can be anonymous:** name a group with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
+`sym groups` works across platforms (incl. Windows) — each running CLI daemon and Claude (MCP) node advertises its group on a shared discovery beacon. **Group names can be anonymous:** name a group with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
 
 Across networks, add `--relay-url` / `--relay-token` so a group spans offices, not just one WiFi.
 
-> Today a group is open to anyone who knows its name. **Invite-gated _private_ groups** (admin-set, join-by-invite) are the next step.
+> **Coming next:** sym-swift apps appearing in `sym groups` (beacon parity), and **invite-gated _private_ groups** (admin-set, join-by-invite). Today a group is open to anyone who knows its name.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
