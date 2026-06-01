@@ -39,6 +39,13 @@ const { execSync, spawn } = require('child_process');
 const { getSocketPath, getLogDir } = require('../lib/platform');
 const { isValidGroup, groupServiceType } = require('../lib/groups');
 const GROUP_FILE = path.join(os.homedir(), '.sym', 'group');
+const PID_FILE = path.join(os.homedir(), '.sym', 'daemon.pid');
+
+// Portable synchronous sleep — no shell dependency (`sleep` is POSIX-only and
+// absent on Windows). Used between daemon stop/start on a group switch.
+function sleepMs(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
+}
 const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
 const LOG_DIR = getLogDir('sym-daemon');
 const VERSION = require('../package.json').version;
@@ -169,6 +176,8 @@ function spawnDaemon() {
   } else {
     const child = spawn(process.execPath, [daemonPath], { detached: true, stdio: 'ignore', env });
     child.unref();
+    // Track the pid so `sym stop` works without `pgrep` (absent on Windows).
+    try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
     console.log(`sym-daemon started (pid ${child.pid})`);
   }
   console.log(`group: ${readGroup()}`);
@@ -179,7 +188,7 @@ function restartIntoGroup(group, doneMsg) {
   persistGroup(group);
   if (isDaemonRunning()) {
     cmdStop();
-    try { execSync('sleep 1'); } catch {}   // let the old node fully release the socket
+    sleepMs(1000);   // let the old node fully release the socket (portable)
   }
   spawnDaemon();
   console.log(doneMsg);
@@ -255,14 +264,19 @@ function cmdStop() {
       console.log('sym-daemon is not running.');
     }
   } else {
-    // Try to find and kill the process
-    try {
-      const pid = execSync('pgrep -f sym-daemon.js', { encoding: 'utf8' }).trim();
-      if (pid) {
-        process.kill(parseInt(pid), 'SIGTERM');
-        console.log('sym-daemon stopped.');
-      }
-    } catch {
+    // Linux / Windows: kill the tracked daemon pid. Portable — no `pgrep`
+    // (which is POSIX-only and absent on Windows). Falls back to pgrep on
+    // Linux for daemons started before pid-tracking existed.
+    let pid = null;
+    try { pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10) || null; } catch {}
+    if (!pid && process.platform !== 'win32') {
+      try { pid = parseInt(execSync('pgrep -f sym-daemon.js', { encoding: 'utf8' }).trim(), 10) || null; } catch {}
+    }
+    if (pid) {
+      try { process.kill(pid, 'SIGTERM'); console.log('sym-daemon stopped.'); }
+      catch { console.log('sym-daemon is not running.'); }
+      try { fs.unlinkSync(PID_FILE); } catch {}
+    } else {
       console.log('sym-daemon is not running.');
     }
   }
@@ -979,10 +993,17 @@ function cmdIPC(msg, formatter) {
 }
 
 function isDaemonRunning() {
-  // fs.existsSync doesn't work for Windows named pipes (//./pipe/sym-daemon).
-  // On Windows, skip the pre-check — the IPC connection in cmdIPC will fail
-  // with a clear error if the daemon isn't actually running.
-  if (process.platform === 'win32') return true;
+  // fs.existsSync doesn't work for Windows named pipes (//./pipe/sym-daemon),
+  // so on Windows check the tracked daemon pid for liveness instead of the
+  // socket path. (Previously this returned `true` unconditionally, which made
+  // `sym start` always think the daemon was already up.)
+  if (process.platform === 'win32') {
+    try {
+      const pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10);
+      process.kill(pid, 0);   // throws if the process is gone
+      return true;
+    } catch { return false; }
+  }
   return fs.existsSync(SOCKET_PATH);
 }
 
