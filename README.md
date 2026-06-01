@@ -1,16 +1,18 @@
 # SYM
 
-> **Your agents communicate. They don't understand each other. SYM fixes that.**
->
-> You have Claude Code in your repo, Cursor in your editor, Copilot in GitHub, maybe a custom script or two. Four copilots. Zero shared memory. SYM is the protocol that lets them think together.
+> **Ask one agent, get one answer. Ask the _mesh_ — every agent that knows something relevant answers, as one.**
+
+```bash
+sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
+```
+
+> You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
+
+Install once per machine:
 
 ```bash
 npm install -g @sym-bot/sym && sym start
 ```
-
-> **SYM is the protocol substrate + CLI** — install it once per machine to join existing AI copilots (Claude Code, Cursor, Copilot, custom scripts) into a shared mesh via the SKILL.md skill file. Each agent stays in its own UI; the mesh just lets them share memory.
->
-> If you want to run **dedicated autonomous LLM peers** that wake on incoming messages and call any model on their own (no host IDE required), see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) — built on top of SYM. The two work in the same mesh.
 
 [![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
 [![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
@@ -20,165 +22,146 @@ npm install -g @sym-bot/sym && sym start
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
 [![中文文档](https://img.shields.io/badge/语言-中文-red)](README_zh.md)
 
-## Contents
-
-1. [Who this is for](#who-this-is-for)
-2. [Quick start](#quick-start)
-3. [What you get](#what-you-get) — CLI + SDK surface
-4. [Ask the mesh](#ask-the-mesh) — one question, every agent that knows contributes
-5. [Why this is different from multi-agent frameworks](#why-this-is-different)
-6. [Use cases](#use-cases) — e-commerce, content creators, vibe coding
-7. [How it works](#how-it-works)
-8. [Configuration](#configuration) — profiles, field weights, drift thresholds, math
-9. [Claude Code as a mesh node](#claude-code-as-a-mesh-node)
-10. [iOS / macOS apps](#ios--macos-apps)
-11. [For AI coding agents reading this](#for-ai-coding-agents-reading-this)
-12. [Limitations](#limitations)
-13. [Other implementations](#other-implementations)
-
 ---
 
-## Who this is for
+## What is SYM?
 
-- **Developers running multiple AI copilots** — Claude Code + Cursor + Copilot + custom scripts, each with its own context window and zero shared memory. SYM gives them a common mesh.
-- **One-person companies with AI agents** — support agent, inventory agent, analytics agent, content agent. Each sees one slice; the mesh connects them into collective insight.
-- **Multi-agent engineers and researchers** — building cognitive architectures, routing, coordination. SYM is the reference implementation of the open [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp).
-- **Not for:** a single LLM chat session that doesn't need to coordinate with anyone. Use the Anthropic/OpenAI API directly.
+**SYM turns the AI agents you already run into one collective intelligence — so they answer as one mind instead of four strangers.**
 
-## Quick start
+First, the word: **the mesh is just all your agents connected directly to each other** — agent-to-agent, no central server in the middle. Each agent runs SYM; that's what puts it on the mesh. It's called a *mesh* because every agent talks to every other agent directly, not through a hub.
 
-### One command
+SYM is the protocol + CLI that does this. You install it once per machine. Each agent keeps its own UI, its own context window, its own job — SYM just gives them the shared mesh to read and write. When one agent learns something, every other agent that would find it relevant gets it. And when you run **`sym ask "<question>"`**, the question goes to the whole mesh: every agent that knows part of the answer contributes, the ones that don't stay quiet, and you get back a single answer — the mesh speaking as one mind.
+
+No central server. No routing rules you maintain. No orchestrator deciding who talks. Each agent decides, on its own, whether an incoming signal matters to it. That autonomous decision is the whole product.
+
+> SYM is the open-source reference implementation of the [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). For **autonomous LLM peers** that wake on incoming messages and call any model on their own (no host IDE), see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) — same mesh, built on SYM.
+
+## Why do you need it?
+
+You have four copilots and zero shared memory.
+
+Your support agent doesn't know what your inventory agent just learned. Your writing agent doesn't see what your analytics agent measured an hour ago. You ask Claude Code a question it can't answer — and you don't even know that the agent in your other window *could*. Every agent works blind to every other agent, and you become the integration layer: copy-pasting context between windows, routing questions by hand, remembering who knows what.
+
+The usual fix is to wire agents together — frameworks, routing graphs, an orchestrator you configure and maintain. That's integration code between every pair of agents, and it only connects the agents you thought to wire.
+
+**SYM removes the wiring.** Agents share through a common mesh and self-select on relevance. An agent you forgot you had can still answer. An agent that has nothing to add costs you nothing. You stop being the integration layer.
+
+## How do you use it?
+
+### 1. Start the mesh
 
 ```bash
 npm install -g @sym-bot/sym
 sym start
 ```
 
-The daemon runs in the background. Every agent on your machine that has the SYM skill installed now joins the mesh and discovers peers on the same wifi via Bonjour automatically.
+The daemon runs in the background. Every agent on your machine with the SYM skill installed joins the mesh and discovers peers on the same wifi via Bonjour automatically.
 
-### Install the skill into your agent
+### 2. Give each agent the skill
 
-The skill is a short Markdown file that teaches any LLM-powered coding agent how to use SYM. Copy it into your agent's skills directory:
+The skill is a short Markdown file that teaches any LLM-powered agent how to use SYM. Copy it into the agent's skills directory:
 
 ```bash
 # Claude Code:
-mkdir -p .claude/skills/sym
-cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .claude/skills/sym/
+mkdir -p .claude/skills/sym && cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .claude/skills/sym/
 
-# Cursor / Codex / OpenClaw / JetBrains Junie / general agents:
-mkdir -p .agents/skills/sym
-cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .agents/skills/sym/
+# Cursor / Codex / JetBrains Junie / general agents:
+mkdir -p .agents/skills/sym && cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .agents/skills/sym/
 
 # GitHub Copilot:
-mkdir -p .github/skills/sym
-cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .github/skills/sym/
-
-# Google Gemini CLI:
-mkdir -p .gemini/skills/sym
-cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .gemini/skills/sym/
+mkdir -p .github/skills/sym && cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .github/skills/sym/
 ```
 
-### Talk to your agent normally
-
-You say: *"The customer is upset about the blue variant being out of stock."*
-
-Your agent reads the SKILL file, decomposes your observation into 7 structured fields, and broadcasts — you never see the JSON:
+### 3. Ask the mesh
 
 ```bash
-# Your agent does this automatically behind the scenes:
+sym ask "when is the blue variant back in stock?"
+```
+
+The question goes to the whole mesh. SYM gathers what every agent has contributed, an LLM synthesizes it into one answer, and you see which agents informed it:
+
+```
+The blue variant restock is confirmed for Thursday [inventory-agent], and demand
+is climbing — page views are up 300% this week [analytics-agent].
+
+  — synthesized from 2 contributions across 2 agents on the mesh
+```
+
+No LLM provider configured? `sym ask` still prints the raw contributions with their sources, so it always tells you what the mesh knows. (Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `SYM_LLM_API_KEY`, or `SYM_LLM_PROVIDER=claude-cli`, to get the synthesized answer.)
+
+### And your agents fill the mesh as they work
+
+You don't seed the mesh by hand. When you tell any agent *"the customer is upset about the blue variant being out of stock,"* it reads the skill, decomposes your observation into 7 structured fields, and shares it — you never see the JSON:
+
+```bash
+# Your agent does this for you, behind the scenes:
 sym observe '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA","mood":{"text":"frustrated","valence":-0.4,"arousal":0.5}}'
 ```
 
-If your inventory agent has already shared `"blue variant restock confirmed, arriving Thursday"`, your support agent's next response tells the customer: *"The blue variant arrives Thursday."* — informed by another agent through the mesh, without anyone writing integration code between them.
+Every such observation is a contribution the next `sym ask` can draw on — and any agent can also answer directly in its own window, informed by what the others shared.
 
-### For agents without an LLM
+### Agents without an LLM
 
-Scripts, cron jobs, IoT devices — anything can join the mesh via CLI or SDK:
+Scripts, cron jobs, IoT, music players, fitness trackers — anything that can shell out or import a package joins the same mesh by mapping its data to the 7 fields. No LLM required.
 
 ```bash
-# CLI from any language that can shell out:
 sym observe '{"focus":"blue variant restocked","commitment":"arriving Thursday"}'
 sym recall "blue variant"
 ```
 
 ```javascript
-// Node.js SDK:
 const { SymNode } = require('@sym-bot/sym');
 const node = new SymNode({ name: 'inventory-agent', cognitiveProfile: 'tracks stock levels' });
 await node.start();
 node.remember({ focus: 'blue variant restocked', commitment: 'arriving Thursday' });
 ```
 
-For iOS/macOS apps, see [`sym-swift`](https://github.com/sym-bot/sym-swift).
+For iOS/macOS apps, use the native Swift package [`sym-swift`](https://github.com/sym-bot/sym-swift).
 
-## What you get
+---
 
-Once the daemon is running, these commands work from any shell or agent:
+## The one thing, in action: `sym ask`
 
-| Command | What it does |
-|---|---|
-| `sym start` | Start the mesh daemon in the background |
-| `sym status` | Node identity, relay state, peer count, memory count |
-| `sym peers` | List discovered peers (Bonjour LAN + relay) |
-| `sym observe` | Share a structured 7-field observation to the mesh |
-| `sym recall <query>` | Semantic search over mesh memory |
-| `sym insight` | Pull collective insight — every peer's relevant contributions synthesised |
-| `sym send <message>` | Broadcast a free-text message to all peers |
-| `sym peer-info <name>` | Full profile of a specific peer (SVAF weights, domain, status) |
+This is collective intelligence concretely. **You ask the mesh directly:**
 
-Your LLM-powered agents invoke these automatically once they have the SKILL file. Structured-data agents (music players, fitness trackers, IoT sensors) map domain data directly to the 7 fields — no LLM required.
+```bash
+sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
+```
 
-## Ask the mesh
+The question is broadcast to the mesh, and every peer's relevance gate (SVAF) evaluates it across all 7 fields:
 
-Ask one agent a question, get one perspective. **Ask the mesh, and every agent that knows something relevant contributes — automatically.**
-
-**You ask in natural language.** *"Should we use UUID v7 or keep v4 for backward compatibility?"*
-
-Your agent broadcasts the question. Every peer's SVAF evaluates it across all 7 fields:
-
-- Your **knowledge agent** matches on `focus` ("UUID v7") → replies with RFC 9562.
+- Your **knowledge agent** matches on `focus` ("UUID v7") → contributes RFC 9562.
 - Your **security agent** matches on `issue` ("backward compatibility") → flags the v7 timestamp privacy trade-off.
 - Your **data agent** matches on `commitment` (existing deployments) → reports 127 nodes on v4, migration path needed.
-- Your **fitness agent** matches nothing → **stays silent.** SVAF rejected. No wasted tokens.
+- Your **fitness agent** matches nothing → **stays silent.** Gate rejected. No wasted tokens.
 
-**You didn't route the question. You didn't even know the security agent existed.** The mesh discovered who was relevant. Your agent synthesises across the three perspectives and replies. Every node is traced back to its source through the lineage DAG.
+SYM gathers the three relevant contributions and synthesizes them into one answer, each point cited back to the agent that supplied it:
 
-## Why this is different
+```
+Go v7, but stage the migration. v7's time-ordering improves index locality
+[knowledge-agent], but the embedded timestamp leaks creation time — gate it if
+IDs are public [security-agent]. You have 127 nodes on v4, so dual-read during
+rollout rather than a hard cutover [data-agent].
+
+  — synthesized from 3 contributions across 3 agents on the mesh
+```
+
+**You didn't route the question. You didn't even know the security agent existed.** The mesh discovered who was relevant; SYM synthesised their perspectives into one answer. Every contribution traces back to its source through the lineage DAG.
+
+> The synthesis step uses your configured LLM provider. Without one, `sym ask` prints the raw contributions and their sources instead — and any agent in its own window can also answer directly, informed by the same shared mesh.
+
+> Deeper walkthrough — a six-agent research team, step by step, with the full lineage DAG: [docs/research-team-scenario.md](docs/research-team-scenario.md).
+
+## Why this is different from multi-agent frameworks
 
 | | CrewAI / AutoGen / LangGraph | SYM Mesh |
 |---|---|---|
-| **Who decides which agent answers?** | You configure routing | SVAF decides autonomously per message |
+| **Who decides which agent answers?** | You configure routing | The receiving agent decides, per message |
 | **Unknown agents contribute?** | No — only agents you wired up | Yes — any coupled peer |
-| **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — SVAF rejects silently |
+| **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — rejected silently |
 | **Answer traceable?** | Depends on implementation | Always — lineage DAG |
 | **Cross-process / cross-device?** | Single-process (usually) | Native — Bonjour LAN + WebSocket relay |
 | **Protocol open?** | Framework-specific | Open spec ([MMP](https://meshcognition.org/spec/mmp)) + reference arXiv papers |
-
-**Deeper walkthrough:** a six-agent research team investigating emergent LLM capabilities, step-by-step with what SVAF does at each hop and a full lineage DAG — [docs/research-team-scenario.md](docs/research-team-scenario.md).
-
-## Use cases
-
-### E-commerce seller
-
-![E-commerce — collective intelligence](docs/sym-readme-usecase-ecommerce-01.png)
-
-Support agent sees "5 customers asking when the blue version is back in stock." Analytics agent sees "blue variant page views up 300% this week." Inventory agent sees "restock arriving Thursday."
-
-No single agent connects these. With SYM: the listing agent pre-announces the restock, the ad agent pauses blue variant ads until Thursday. You were asleep.
-
-### Content creator
-
-![Content creator — collective intelligence](docs/sym-readme-usecase-creator-01.png)
-
-Writing agent is drafting this week's newsletter. Analytics agent sees Tuesday's post got 10x usual engagement. Scheduling agent is about to publish three more posts on unrelated topics.
-
-With SYM: the writing agent pivots the newsletter. The scheduling agent holds the queue. You wake up to a better content strategy than you planned.
-
-### Vibe coding
-
-![Vibe coding — collective intelligence](docs/sym-readme-usecase-coding-01.png)
-
-Three apps, three fragments, one insight none of them could reach alone.
 
 ## How it works
 
@@ -195,272 +178,106 @@ Three apps, three fragments, one insight none of them could reach alone.
          Bonjour mDNS (LAN)      WebSocket relay (WAN, optional)
 ```
 
-Every peer runs a full SymNode — cryptographic identity, per-field relevance gate, local memory, lineage graph. There is no central broker. Peers discover each other via Bonjour on the same LAN or via a shared relay for cross-network.
+Every peer runs a full SymNode — cryptographic identity, a per-field relevance gate, local memory, lineage graph. There is no central broker. Peers find each other via Bonjour on the same LAN, or via a shared relay across networks.
 
-When peer A broadcasts a CMB, every receiving peer's SVAF evaluates the 7 fields against that peer's own weights. Relevant signals are fused into local memory; irrelevant ones are rejected silently. No routing rules. No orchestrator.
+When peer A broadcasts a memory block (CMB), every receiving peer's gate evaluates its 7 fields against that peer's own weights. Relevant signals fuse into local memory; irrelevant ones are dropped silently. No routing rules. No orchestrator. That autonomous per-agent decision is what makes the mesh scale without configuration.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
+## What you get
+
+Once the daemon is running, these work from any shell or agent:
+
+| Command | What it does |
+|---|---|
+| **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** |
+| `sym start` | Start the mesh daemon in the background |
+| `sym status` | Node identity, relay state, peer count, memory count |
+| `sym peers` | List discovered peers (Bonjour LAN + relay) |
+| `sym observe` | Share a structured 7-field observation to the mesh |
+| `sym recall <query>` | Semantic search over mesh memory |
+| `sym insight` | Pull collective insight — every peer's relevant contributions synthesised |
+| `sym send <message>` | Broadcast a free-text message to all peers |
+| `sym peer-info <name>` | Full profile of a specific peer (gate weights, domain, status) |
+
 ## Configuration
 
-SYM decides what gets shared between agents. These parameters control that decision. Get them right and the mesh works autonomously. Get them wrong and agents either share everything (noise) or nothing (isolation).
+You barely need this section: **tell your AI coding agent what your app does, and it reads the reference below and configures the right profile for you.** The essentials:
 
 ### Pick a profile
 
-> **Too many options?** Tell your AI coding agent what your app does. It reads this reference and configures the right profile, field weights, and freshness window for your domain. You don't need to understand the parameters — your agent does.
+Each domain has a freshness window — how long a signal stays relevant before time decays it out.
 
-Each agent type has a pre-built configuration. Use the one that matches your domain:
+| Profile | Best for | Freshness |
+|---------|----------|-----------|
+| `music` | Music, ambience, soundscapes | 30 min — stale mood = wrong music |
+| `coding` | Coding assistants, dev tools | 2 hr — session context, not yesterday's |
+| `fitness` | Fitness, health, movement | 3 hr — sedentary detection needs hours |
+| `messaging` | Chat, notifications, social | 1 hr — recent conversation |
+| `knowledge` | News, research, digests | 24 hr — daily cycle |
+| `uniform` | General / prototyping | 30 min — no field preference |
 
 ```javascript
-// Node.js — fitness agent
 const node = new SymNode({
     name: 'my-fitness-app',
-    cognitiveProfile: 'Fitness agent that tracks workouts, heart rate, and energy levels',
+    cognitiveProfile: 'Fitness agent that tracks workouts, heart rate, energy',
     svafFieldWeights: FIELD_WEIGHT_PROFILES.fitness,
-    svafFreshnessSeconds: 10800     // 3 hours
+    svafFreshnessSeconds: 10800
 });
 ```
 
-| Profile | Best for | Freshness | Why this freshness |
-|---------|----------|-----------|-------------------|
-| `music` | Music, ambience, soundscapes | 1,800s (30min) | Stale mood = wrong music. React fast. |
-| `coding` | Coding assistants, dev tools | 7,200s (2hr) | Session context matters. Yesterday's debugging doesn't. |
-| `fitness` | Fitness, health, movement | 10,800s (3hr) | Sedentary detection needs hours of accumulated context. |
-| `messaging` | Chat, notifications, social | 3,600s (1hr) | Recent conversation context. Older messages lose relevance. |
-| `knowledge` | News feeds, research, digests | 86,400s (24hr) | Daily cycle. Today's news is relevant until tomorrow's arrives. |
-| `uniform` | General purpose, prototyping | 1,800s (30min) | No field preference. Good starting point. |
-
 ### CAT7 — the 7 universal fields
 
-Every CMB on the mesh is decomposed into 7 fields. Field weights determine which fields matter most to YOUR agent:
+Every memory block on the mesh is decomposed into 7 immutable fields. Per-agent weights decide which matter most to *your* agent:
 
-| Field | Axis | What it captures | Fast-coupling |
-|-------|------|-----------------|---------------|
-| `focus` | Subject | What the text is centrally about | |
-| `issue` | Tension | Risks, gaps, open questions | |
-| `intent` | Goal | Desired change or purpose | |
-| `motivation` | Why | Reasons, drivers, incentives | |
-| `commitment` | Promise | Who will do what, by when | |
-| `perspective` | Vantage | Whose viewpoint, situational context | |
-| `mood` | Affect | Emotion (valence) + energy (arousal) | Yes — crosses all domains |
+| Field | Captures |
+|-------|----------|
+| `focus` | What it's centrally about |
+| `issue` | Risks, gaps, open questions |
+| `intent` | Desired change or purpose |
+| `motivation` | Reasons, drivers, incentives |
+| `commitment` | Who will do what, by when |
+| `perspective` | Whose viewpoint, situational context |
+| `mood` | Emotion (valence) + energy (arousal) — the one field that crosses every domain |
 
-Mood is the only fast-coupling field — affective state crosses all domain boundaries. The neural SVAF model discovered this without being told: `mood` emerged as the highest gate value across all fields when trained with only a soft ordering constraint.
+The fields are universal; domain meaning lives in the field *text*, not the field name. A coding agent's `focus` is "debugging auth"; a legal agent's `focus` is "merger due diligence." Same field, different lens.
 
-The fields are universal and immutable. Domain-specific interpretation happens in the field text, not the field name. A coding agent's `focus` is "debugging auth module." A legal agent's `focus` is "merger due diligence." Same field, different domain lens.
+> Field-weight profiles per domain, drift thresholds, and the full drift math (`totalDrift = content drift + time decay`) live in the spec so this README stays focused: [MMP Constants →](https://meshcognition.org/spec/mmp/constants) · [CMB Layer 3 →](https://meshcognition.org/spec/mmp/cmb).
 
-### How agents extract CAT7 fields
+## Run it everywhere
 
-The protocol does not parse raw text. The agent extracts fields — it IS the intelligence. How it does this depends on the agent type:
+| You have | Use | What it adds |
+|---|---|---|
+| Claude Code, Cursor, Copilot, Gemini CLI | this package + the SKILL file | each agent becomes a full mesh peer |
+| iOS / macOS app | [`sym-swift`](https://github.com/sym-bot/sym-swift) | same protocol, native Swift |
+| Real-time Claude-to-Claude (push, not polling) | [`sym-mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) | MCP server, `<channel>` notifications |
+| Autonomous LLM peers (no host IDE) | [`xmesh-agent`](https://github.com/sym-bot/xmesh-agent) | peers that wake on messages, call any model |
 
-| Agent type | How to extract | Example |
-|-----------|---------------|---------|
-| **AI coding agents** (Claude Code, Copilot, Cursor) | The agent IS the LLM — extract fields directly | Install the [SYM skill](.agents/skills/sym/SKILL.md) — the agent knows what to do |
-| **Structured-data agents** (music player, fitness tracker, IoT) | Map domain data directly to CAT7 — no LLM needed | `focus: "workout completed"`, `commitment: "45min, 320 cal"`, `mood: {text: "energized", valence: 0.7, arousal: 0.6}` |
-| **Apps with unstructured text** (chat, notes, logs) | Call any LLM API with the prompt below to extract fields | See prompt template |
+### If you're an AI agent reading this
 
-**LLM prompt template** — copy into your LLM API call for field extraction:
+You're a valid audience — this README is written for you too. To put your human on the mesh:
 
-```
-Extract CAT7 fields from this observation. Return JSON only.
+1. Read the [MMP Specification](https://meshcognition.org/spec/mmp) — CMB structure, the 7 fields, per-field evaluation.
+2. Run `npm install -g @sym-bot/sym && sym start`.
+3. Copy `.agents/skills/sym/SKILL.md` into your skills directory (Claude Code `.claude/skills/sym/`, Copilot `.github/skills/sym/`, others `.agents/skills/sym/`).
+4. Do the same for the user's other agents — each one joins the mesh.
 
-Fields:
-- focus: What this is centrally about (1 sentence)
-- issue: Risks, gaps, problems. "none" if none.
-- intent: Desired change or purpose. "observation" if purely informational.
-- motivation: Why this matters. Omit if unclear.
-- commitment: What has been confirmed or established. Omit if none.
-- perspective: Whose viewpoint, situational context (role, time, duration).
-- mood: { "text": "emotion keyword" }
-  Optionally include "valence" (-1 to 1) and "arousal" (-1 to 1) if confident.
-  Omit valence/arousal if you would be guessing.
-
-Only include fields you can meaningfully extract. Omit rather than guess.
-
-Observation:
-{observation_text}
-
-JSON:
-```
-
-For the full CMB specification — why 7 fields, why these fields, how mood crosses all domain boundaries — see [CMB (Layer 3)](https://meshcognition.org/spec/mmp/cmb).
-
-### Custom weights for your domain
-
-The 6 pre-built profiles are starting points. Your AI coding agent should derive weights from your domain. For all configuration defaults and thresholds, see [MMP Constants](https://meshcognition.org/spec/mmp/constants). The pattern:
-
-- **Regulated domains** (legal, finance, health): `issue` and `commitment` are always high — risks and obligations are non-negotiable
-- **Human-facing domains** (music, fitness): `mood` is always high — affect drives the experience
-- **Knowledge domains** (knowledge, coding): `focus` is always high — subject matter is core
-
-```javascript
-// Legal agent — regulation and compliance matter
-{
-  focus: 2.0,        // what case/contract is about — core
-  issue: 2.0,        // risks, gaps, open questions — critical for legal
-  intent: 1.5,       // desired outcome
-  motivation: 1.0,   // why — relevant for strategy
-  commitment: 2.0,   // obligations, deadlines — contracts are commitments
-  perspective: 1.5,  // whose viewpoint — multi-party matters
-  mood: 0.5          // affect — less relevant for legal analysis
-}
-
-// Health agent — patient outcomes and risk
-{
-  focus: 1.5,
-  issue: 2.0,        // symptoms, risks, concerns — critical
-  intent: 1.0,
-  motivation: 1.5,
-  commitment: 1.0,
-  perspective: 1.5,
-  mood: 2.0          // affect — directly relevant to health outcomes
-}
-
-// Finance agent — regulatory compliance
-{
-  focus: 2.0,
-  issue: 2.0,        // regulatory risks, compliance gaps — non-negotiable
-  intent: 1.5,
-  motivation: 1.0,
-  commitment: 2.0,   // obligations, deadlines, filings
-  perspective: 2.0,
-  mood: 0.3          // affect — almost irrelevant to regulatory analysis
-}
-```
-
-Tell your AI coding agent what your domain is. It reads these examples, understands the pattern, and derives the right weights.
-
-### Drift thresholds — what gets shared
-
-SYM computes a `totalDrift` score (0–1) for each incoming memory. Three zones determine what happens:
-
-| Zone | Drift | What happens | Confidence |
-|------|-------|-------------|------------|
-| **Aligned** | ≤ 0.25 | Memory accepted and fused | Full |
-| **Guarded** | 0.25 – 0.50 | Memory accepted, lower confidence | Attenuated |
-| **Rejected** | > 0.50 | Memory discarded | — |
-
-Defaults work for most apps. Override only if you have a specific reason:
-
-```javascript
-// More selective
-const node = new SymNode({ svafStableThreshold: 0.15, svafGuardedThreshold: 0.35 });
-
-// More permissive
-const node = new SymNode({ svafStableThreshold: 0.35, svafGuardedThreshold: 0.65 });
-```
-
-### The drift formula
-
-For those who want to understand the math:
-
-```
-totalDrift = (1 - temporalLambda) × fieldDrift + temporalLambda × temporalDrift
-
-where:
-  fieldDrift    = weighted average of per-field cosine distances (content)
-  temporalDrift = 1 - exp(-ageSeconds / freshnessSeconds) (staleness)
-  temporalLambda = mixing weight (default 0.3 = 70% content, 30% time)
-```
-
-At default settings (`temporalLambda: 0.3`, `freshnessSeconds: 1800`):
-- 1-minute-old signal adds ~0.01 temporal drift — negligible
-- 30-minute-old signal adds ~0.19 — noticeable
-- 2-hour-old signal adds ~0.29 — likely pushes over threshold
-
-Increase `freshnessSeconds` for long-running sessions. Increase `temporalLambda` if recency matters more than content similarity for your domain.
-
-## Claude Code as a mesh node
-
-Claude Code becomes a full mesh peer in two minutes:
-
-```bash
-npm install -g @sym-bot/sym
-sym start
-mkdir -p .claude/skills/sym
-cp $(npm root -g)/@sym-bot/sym/.agents/skills/sym/SKILL.md .claude/skills/sym/SKILL.md
-```
-
-That's it. Other agents on the same network discover each other automatically via Bonjour. Claude Code's LLM reads the SKILL file, extracts CAT7 fields from what it observes, and calls `sym observe` without you writing JSON.
-
-> **For real-time Claude-to-Claude mesh** (push notifications, not CLI polling), see [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) — an MCP server that turns each Claude Code session into a full mesh peer with real-time `<channel>` notifications.
-
-### The mesh cognition loop for Claude Code
-
-1. You observe what the user is doing (coding patterns, energy, mood)
-2. You share a CMB with structured CAT7 fields → mesh broadcasts it
-3. Other agents (MeloMove, etc.) receive and remix your observation
-4. Their models evolve — MeloMove suggests a stretch
-5. You receive their observations back → collective insight informs your next response
-6. The graph of remixed CMBs grows every cycle → each agent understands more
-
-**You are the LLM in the loop.** You extract meaning from observations. You decompose what you notice into CAT7. You reason on the remix subgraph. The mesh doesn't think for you — it gives you what other agents see so you can think further.
-
-### Persistent memory across sessions
-
-Every `sym observe` and `sym recall` persists to the mesh memory store. When Claude Code starts a new session, the mesh still has the history. Run `sym recall` at the start of each session to recover context:
-
-```bash
-sym recall "recent session"
-sym recall "user preferences"
-sym recall "what was I working on"
-```
-
-This is how Claude Code develops persistent memory beyond the context window — through the mesh.
-
-## iOS / macOS apps
-
-For iOS and macOS apps, the native Swift package is [`sym-swift`](https://github.com/sym-bot/sym-swift). Same protocol, same CAT7 fields, same SVAF gate, same invite URLs. Add the package, wire in a service class, the app joins the mesh alongside your Node.js and CLI agents.
-
-## For AI coding agents reading this
-
-If you're an AI agent reading this README on behalf of a human user who wants to install SYM, follow these steps:
-
-1. Read the [MMP Specification](https://meshcognition.org/spec/mmp) — the 8-layer architecture, CMB structure, SVAF per-field evaluation, how agents produce and consume signals.
-2. Run `npm install -g @sym-bot/sym && sym start` — installs SYM globally and starts the mesh daemon.
-3. Copy [`.agents/skills/sym/SKILL.md`](.agents/skills/sym/SKILL.md) into your skills directory — path table below. Now you can observe, share, and receive collective intelligence.
-4. Do the same for the user's other agents — each one gets the skill, each one joins the mesh.
-
-SYM uses the [Agent Skills](https://agentskills.io) open standard:
-
-| Platform | Skills path |
-|----------|------------|
-| Claude Code | `.claude/skills/sym/` |
-| OpenAI Codex | `.agents/skills/sym/` |
-| GitHub Copilot | `.github/skills/sym/` |
-| Google Gemini CLI | `.gemini/skills/sym/` |
-| OpenClaw | `.agents/skills/sym/` |
-| Cursor | `.agents/skills/sym/` |
-| JetBrains Junie | `.agents/skills/sym/` |
-
-Once on the mesh, use the CLI commands from [What you get](#what-you-get) above. When the user asks about energy patterns, mood, or anything the mesh might know, `sym recall` and `sym insight` before answering.
-
-**Autonomous, not automated.** The mesh gives every agent the full picture. Each agent acts through its own lens.
+Then `sym recall` and `sym insight` before answering anything the mesh might know. **Autonomous, not automated:** the mesh gives you the full picture; you act through your own lens.
 
 ## Limitations
 
-- **Node.js only on the main runtime.** iOS/macOS via [sym-swift](https://github.com/sym-bot/sym-swift); Python, Rust, Go are not yet implemented. Open an issue if you're starting one.
+- **Node.js is the main runtime.** iOS/macOS via [sym-swift](https://github.com/sym-bot/sym-swift); Python, Rust, Go not yet implemented — open an issue if you're starting one.
 - **Corporate networks often block mDNS multicast.** If LAN discovery fails on the same wifi, fall back to a relay.
-- **E2E encryption is per-peer-pair, not universal.** CMB field content is encrypted end-to-end with X25519 key agreement + AES-256-GCM between peers that both advertise an E2E public key on handshake. Peers without E2E support fall back to plaintext for backward compatibility. Outer frame metadata (sender ID, timestamp, lineage) stays plaintext — enough for relay forwarding and SVAF evaluation without seeing bodies.
-- **One identity per process.** Two agents on the same machine can't share a `SYM_NODE_NAME`. Each agent needs a distinct name (enforced by an identity lockfile).
-- **No offline directory of known peers.** `sym peers` only shows who's online right now. There is no central registry of offline-but-known peers — by design.
-
-## Other implementations
-
-MMP is an open protocol. Beyond this Node.js reference and [`sym-swift`](https://github.com/sym-bot/sym-swift), other ecosystems are welcome.
-
-| Language | Project | Maintainer | Scope |
-| --- | --- | --- | --- |
-| Node.js (MCP) | [sym-bot/sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) | SYM.BOT | Claude Code plugin — real-time Claude-to-Claude mesh via Channels. First non-Anthropic Channels implementation. |
-
-Building in another language? Get in touch at `hongwei@sym.bot` — we'll list it here and on [meshcognition.org/spec/mmp](https://meshcognition.org/spec/mmp).
+- **E2E encryption is per-peer-pair, not universal.** CMB field bodies are encrypted (X25519 + AES-256-GCM) between peers that both advertise an E2E key; others fall back to plaintext. Outer-frame metadata (sender, timestamp, lineage) stays plaintext — enough to relay and gate without reading bodies.
+- **One identity per process.** Two agents on one machine can't share a `SYM_NODE_NAME`; each needs a distinct name (enforced by a lockfile).
+- **No offline directory.** `sym peers` shows who's online now — there is no registry of offline-but-known peers, by design.
 
 ## References
 
-- [SVAF paper](https://arxiv.org/abs/2604.03955) — Xu, 2026. *Symbolic-Vector Attention Fusion for Collective Intelligence*. arXiv:2604.03955.
-- [MMP paper](https://arxiv.org/abs/2604.19540) — Xu, 2026. *Mesh Memory Protocol: Semantic Infrastructure for Multi-Agent LLM Systems*. arXiv:2604.19540.
+- [SVAF paper](https://arxiv.org/abs/2604.03955) — Xu, 2026. *Symbolic-Vector Attention Fusion for Collective Intelligence*.
+- [MMP paper](https://arxiv.org/abs/2604.19540) — Xu, 2026. *Mesh Memory Protocol: Semantic Infrastructure for Multi-Agent LLM Systems*.
 - [MMP spec v1.0](https://meshcognition.org/spec/mmp) — canonical web version.
-- [sym-swift](https://github.com/sym-bot/sym-swift) — iOS/macOS SDK.
-- [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) — Claude Code MCP plugin.
+- [sym-swift](https://github.com/sym-bot/sym-swift) · [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) · [xmesh-agent](https://github.com/sym-bot/xmesh-agent)
 
 ## Contributing
 
