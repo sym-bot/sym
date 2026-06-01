@@ -280,6 +280,7 @@ Then `sym ask` / `sym recall` before answering anything the mesh might know. **A
 - **Corporate networks often block mDNS multicast.** If LAN discovery fails on the same wifi, fall back to a relay.
 - **E2E encryption is per-peer-pair, not universal.** CMB field bodies are encrypted (X25519 + AES-256-GCM) between peers that both advertise an E2E key; others fall back to plaintext. Outer-frame metadata (sender, timestamp, lineage) stays plaintext — enough to relay and gate without reading bodies.
 - **One identity per process.** Two agents on one machine can't share a `SYM_NODE_NAME`; each needs a distinct name (enforced by a lockfile).
+- **Node names aren't unique across devices.** The lockfile only guards duplicates on the *same* machine. Two installs of the same app on *different* devices (e.g. the iPhone and iPad build both naming themselves `myapp`) advertise the same name, and peers can't tell them apart — they collapse to one peer record, breaking per-device attribution, targeted `sym send`, and CMB dedup. Give each device-side install a unique node name (`myapp-iphone`, or `myapp-<deviceID>`).
 - **No offline directory.** `sym peers` shows who's online now — there is no registry of offline-but-known peers, by design.
 
 ## References
