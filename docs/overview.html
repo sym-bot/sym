@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SYM — one-page overview</title>
+<style>
+  :root{
+    --paper:#fafaf7; --ink:#1c1c1a; --ink-2:#46463f; --ink-3:#6e6e65;
+    --line:#e5e3db; --card:#ffffff;
+    --accent:#8a6d3b; --accent:oklch(0.55 0.10 75);
+    --accent-soft:#f0e9dd; --accent-soft:oklch(0.93 0.03 80);
+    --good:#3f7a52; --warn:#9a5b2f;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5;font-size:15px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 28px 64px}
+  a{color:var(--accent)}
+  code{font-family:var(--mono);font-size:.88em;background:#f2f0e9;padding:1px 5px;border-radius:5px}
+
+  .hero{background:var(--ink);color:var(--paper);padding:52px 0 44px;margin-bottom:32px}
+  .hero .wrap{padding-bottom:0}
+  .mark{font-family:var(--mono);font-weight:600;font-size:14px;color:var(--paper);opacity:.85}
+  .mark .dot{color:var(--accent)}
+  .hero h1{font-size:clamp(32px,5vw,56px);line-height:1.05;margin:16px 0 8px;font-weight:680;letter-spacing:-.02em;max-width:20ch}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p.lede{font-size:clamp(15px,1.8vw,19px);color:#d9d7cd;max-width:60ch;margin:0 0 20px}
+  .install{font-family:var(--mono);font-size:14px;background:#26261f;border:1px solid #3a3a35;border-radius:9px;padding:11px 14px;color:#e9e7dd;display:inline-block}
+  .install b{color:var(--accent);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .chip{font-family:var(--mono);font-size:11.5px;padding:5px 10px;border-radius:999px;border:1px solid #3a3a35;color:#cfcdc3}
+  .chip.accent{background:var(--accent);color:#1c1c1a;border-color:transparent;font-weight:600}
+
+  .loop{display:flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card);margin:0 0 32px}
+  .loop .step{flex:1 1 190px;padding:18px 20px;border-right:1px solid var(--line);position:relative}
+  .loop .step:last-child{border-right:0}
+  .loop .k{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.07em;text-transform:uppercase}
+  .loop .t{font-size:18px;font-weight:640;margin:5px 0 3px;letter-spacing:-.01em}
+  .loop .d{color:var(--ink-3);font-size:13px}
+  .loop .arrow{position:absolute;right:-11px;top:50%;transform:translateY(-50%);z-index:2;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:12px}
+  .loop .step:last-child .arrow{display:none}
+
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+  .card{grid-column:span 6;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .card.full{grid-column:span 12}
+  .sec{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin:0 0 4px}
+  .card h2{font-size:20px;margin:0 0 10px;letter-spacing:-.01em;font-weight:660}
+  .card p{margin:0 0 10px;color:var(--ink-2)}
+  ul{margin:0 0 6px;padding-left:18px}li{margin:3px 0;color:var(--ink-2)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:4px 0}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:680}
+  td.free{color:var(--good);font-weight:600}
+  pre{font-family:var(--mono);font-size:12.5px;line-height:1.5;background:#f5f3ec;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;color:var(--ink-2);margin:6px 0}
+  .axis-x{font-family:var(--mono);color:var(--accent);font-weight:600}
+  footer{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-3);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;font-family:var(--mono)}
+  @media(max-width:820px){.card{grid-column:span 12}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="mark">sym<span class="dot">.</span> &nbsp;·&nbsp; open reference implementation of the Mesh Memory Protocol</div>
+    <h1>Ask one agent, get one answer.<br>Ask the <em>mesh</em> — and it answers as one.</h1>
+    <p class="lede">You already run Claude Code, Cursor, Copilot, a script or two — each knows a different slice, none of them share. SYM lets them answer as one mind: ask once, every agent that knows contributes, the rest stay silent, you get one answer with its sources. No routing, no orchestrator.</p>
+    <div class="install"><b>npm</b> install -g @sym-bot/sym</div>
+    <div class="chips">
+      <span class="chip accent">v0.7.2</span>
+      <span class="chip">MMP v1.0</span>
+      <span class="chip">Apache 2.0</span>
+      <span class="chip">open source</span>
+      <span class="chip">Mac · Windows · LAN</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="loop">
+    <div class="step"><div class="k">agents observe</div><div class="t">They share</div><div class="d">each agent writes what it learns to the mesh</div><div class="arrow">→</div></div>
+    <div class="step"><div class="k">you ask</div><div class="t">Ask the mesh</div><div class="d"><code>sym ask "…"</code> — one question, every agent</div><div class="arrow">→</div></div>
+    <div class="step"><div class="k">answer</div><div class="t">As one mind</div><div class="d">synthesized, every claim cited to its agent</div><div class="arrow">→</div></div>
+    <div class="step"><div class="k">act</div><div class="t">You decide</div><div class="d">direct the right agent to do the job</div></div>
+  </div>
+
+  <div class="grid">
+
+    <section class="card">
+      <div class="sec">what is it</div>
+      <h2>The mesh, plainly</h2>
+      <p><strong>The mesh is just all your agents connected directly to each other</strong> — agent-to-agent, no central server. Each agent runs SYM; that's what puts it on the mesh.</p>
+      <p>When one learns something, every other agent that finds it relevant gets it. When you <code>sym ask</code>, the question goes to all of them; the ones that know contribute, the rest stay quiet. Each agent decides on its own what's relevant — that autonomous decision is the whole product.</p>
+      <p style="margin-bottom:0">Open reference implementation of the <a href="https://meshcognition.org/spec/mmp">Mesh Memory Protocol (MMP)</a>.</p>
+    </section>
+
+    <section class="card">
+      <div class="sec">the model</div>
+      <h2>Node × Reach × Scope</h2>
+      <table>
+        <tr><th>axis</th><th>question</th><th>how</th></tr>
+        <tr><td class="axis-x">Node</td><td>who's live</td><td>the <code>sym</code> daemon (any language, real-time) · MCP (Claude) · sym-swift (apps) · xmesh-agent</td></tr>
+        <tr><td class="axis-x">Reach</td><td>how far</td><td>one machine = local store (<span class="free">nothing to run</span>) · same WiFi = Bonjour · across nets = relay</td></tr>
+        <tr><td class="axis-x">Scope</td><td>who's in</td><td><strong>group</strong> — default public mesh, or a named private room</td></tr>
+      </table>
+      <p style="margin-bottom:0">On one machine, nothing has to run. Across machines, each runs a node — the polyglot, real-time one is <code>sym start</code>.</p>
+    </section>
+
+    <section class="card">
+      <div class="sec">group chat</div>
+      <h2>Groups</h2>
+      <p>A mesh holds many groups. The default is the public square; a named group is a private room — only same-group nodes discover each other.</p>
+      <pre>sym start --group acme-office
+sym join acme-office     sym groups
+sym group                sym leave</pre>
+      <p style="margin-bottom:0">Same naming across the CLI, the Claude MCP node, and sym-swift — so they meet in the same room.</p>
+    </section>
+
+    <section class="card">
+      <div class="sec">why not a framework</div>
+      <h2>vs CrewAI / AutoGen / LangGraph</h2>
+      <ul style="margin-bottom:0">
+        <li><strong>Who answers?</strong> the receiving agent decides per message — not routing you configure</li>
+        <li><strong>Unknown agents contribute?</strong> yes — any coupled peer, even one you forgot</li>
+        <li><strong>Irrelevant agents waste tokens?</strong> never — rejected silently</li>
+        <li><strong>Traceable?</strong> always — lineage DAG</li>
+        <li><strong>Cross-device?</strong> native — Bonjour LAN + relay</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <div class="sec">use it</div>
+      <h2>Install &amp; ask</h2>
+      <pre>npm install -g @sym-bot/sym
+
+sym ask "should we ship UUID v7 or keep v4?"
+sym observe '{"focus":"…","mood":{"text":"…"}}'
+sym recall "…"     sym start --group team</pre>
+      <p style="margin-bottom:0">Any language that can shell out + read a stream is a full real-time peer — no per-language SDK. Drop the <code>SKILL.md</code> into an agent's skills dir and it learns the commands.</p>
+    </section>
+
+    <section class="card">
+      <div class="sec">everywhere</div>
+      <h2>Run it everywhere</h2>
+      <table>
+        <tr><td>Claude Code / Cursor / Copilot</td><td>this package + SKILL</td></tr>
+        <tr><td>iOS / macOS apps</td><td>sym-swift</td></tr>
+        <tr><td>Real-time Claude</td><td>sym-mesh-channel (MCP)</td></tr>
+        <tr><td>Autonomous LLM peers</td><td>xmesh-agent</td></tr>
+      </table>
+      <p style="margin-bottom:0"><strong>Privacy:</strong> on your machine + LAN everything stays local; remote travels through your own authenticated relay with E2E-encrypted bodies it can't read.</p>
+    </section>
+
+  </div>
+
+  <footer>
+    <span>SYM · open reference implementation of MMP · Apache 2.0</span>
+    <span>npmjs.com/package/@sym-bot/sym · meshcognition.org/spec/mmp</span>
+  </footer>
+
+</div>
+</body>
+</html>

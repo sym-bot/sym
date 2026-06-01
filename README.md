@@ -1,27 +1,32 @@
+<div align="center">
+
 # SYM
 
-[![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
+### Ask one agent, get one answer.<br>Ask the _mesh_ — every agent that knows something relevant answers, as one.
 
-> **Ask one agent, get one answer. Ask the _mesh_ — every agent that knows something relevant answers, as one.**
+<p>
+  <a href="https://www.npmjs.com/package/@sym-bot/sym"><img src="https://img.shields.io/npm/v/@sym-bot/sym" alt="npm"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+  <a href="https://meshcognition.org/spec/mmp"><img src="https://img.shields.io/badge/protocol-MMP_v1.0-orange" alt="MMP Spec"></a>
+  <a href="https://github.com/sym-bot/sym/actions/workflows/ci.yml"><img src="https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://arxiv.org/abs/2604.03955"><img src="https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg" alt="SVAF paper"></a>
+  <a href="https://arxiv.org/abs/2604.19540"><img src="https://img.shields.io/badge/arXiv-2604.19540-b31b1b.svg" alt="MMP paper"></a>
+  <a href="README_zh.md"><img src="https://img.shields.io/badge/%E8%AF%AD%E8%A8%80-%E4%B8%AD%E6%96%87-red" alt="中文"></a>
+</p>
+
+**observe&nbsp; → &nbsp;ask the mesh&nbsp; → &nbsp;answer as one, cited&nbsp; → &nbsp;act**
+
+`npm install -g @sym-bot/sym`
+
+**▸ [Open the one-page overview](https://htmlpreview.github.io/?https://github.com/sym-bot/sym/blob/main/docs/overview.html)**
+
+</div>
+
+> You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
 
 ```bash
 sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 ```
-
-> You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
-
-Install once per machine — no central server, ever:
-
-```bash
-npm install -g @sym-bot/sym
-```
-
-[![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
-[![MMP arXiv](https://img.shields.io/badge/arXiv-2604.19540-b31b1b.svg)](https://arxiv.org/abs/2604.19540)
-[![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
-[![中文文档](https://img.shields.io/badge/语言-中文-red)](README_zh.md)
 
 ---
 
