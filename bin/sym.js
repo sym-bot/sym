@@ -215,59 +215,50 @@ function cmdGroup() {
 
 // Discover SYM-mesh groups with at least one node online on this LAN.
 // Mirrors the MCP node's discovery (dns-sd on macOS/Windows, avahi on Linux).
+// Discover SYM groups live on the LAN. Browses the shared `_symgroups._tcp`
+// beacon every running node advertises (group name in TXT) via the pure-JS
+// bonjour-service — works cross-platform, including Windows where Apple's
+// dns-sd is absent. Each live node publishes its group; we list the distinct
+// groups (group names may be opaque/anonymous codes — we just show what's
+// advertised). Discovery-only; comms stay isolated per group.
 function cmdGroups() {
-  const platform = process.platform;
-  const cmd = (platform === 'linux') ? 'avahi-browse' : 'dns-sd';
-  const argv = (platform === 'linux') ? ['-t', '-a', '-p'] : ['-B', '_services._dns-sd._udp', 'local.'];
-  // Graceful when the browse tool is absent (e.g. Windows without Apple
-  // Bonjour's dns-sd — the node itself still discovers peers via the
-  // bundled pure-JS bonjour-service, so meshing works; only this LAN-wide
-  // group *enumeration* needs the CLI tool).
-  const unavailable = (e) => {
-    if (e && e.code === 'ENOENT') {
-      console.log(`Live group discovery isn't available here — '${cmd}' isn't installed.`);
-      if (platform === 'win32') console.log('(Windows: LAN group discovery needs Apple Bonjour. Your node still meshes fine.)');
-      else if (platform === 'linux') console.log('(Install avahi-utils for discovery: sudo apt install avahi-utils)');
-    } else {
-      console.error(`group discovery failed: ${(e && e.message) || e}`);
-    }
-    console.log(`Your group: ${readGroup()}  (${groupServiceType(readGroup())})  ·  switch with: sym join <name>`);
-  };
+  let Bonjour;
+  try { ({ Bonjour } = require('bonjour-service')); }
+  catch (e) { console.error(`group discovery unavailable: ${e.message}`); return; }
 
-  let child;
-  try { child = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] }); }
-  catch (e) { return unavailable(e); }
-  let errored = false;
-  let timer = null;
-  child.on('error', (e) => { errored = true; if (timer) clearTimeout(timer); unavailable(e); });
-  if (!child.stdout) return;   // ENOENT path on some platforms leaves no stream
-  const out = [];
-  child.stdout.on('data', (c) => out.push(c));
-  timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, 2200);
-  child.on('close', () => {
-    clearTimeout(timer);
-    if (errored) return;   // already reported via the error handler
-    const text = Buffer.concat(out).toString('utf8');
-    const typeRe = /_([a-z0-9][a-z0-9-]+)\._tcp/gi;
-    const seen = new Set();
-    let m;
-    while ((m = typeRe.exec(text)) !== null) {
-      const full = `_${m[1]}._tcp`;
-      // SYM family only: global sym, named groups, app-scoped rooms.
-      if (/^_(sym|[a-z0-9]+-[a-z0-9]+|[a-z0-9]+-team)\._tcp$/i.test(full)) seen.add(full);
-    }
-    const current = groupServiceType(readGroup());
-    if (seen.size === 0) {
-      console.log('No SYM-mesh groups visible on the LAN right now (only shows groups with a node online).');
-      console.log(`Your group: ${readGroup()}  (${current})`);
+  const bonjour = new Bonjour();
+  const groups = new Map();   // group name -> Set(node names)
+  let browser;
+  try {
+    browser = bonjour.find({ type: 'symgroups' }, (svc) => {
+      const txt = svc.txt || {};
+      const g = txt.group != null ? String(txt.group) : null;
+      const n = txt.node != null ? String(txt.node) : (svc.name || '?');
+      if (g) {
+        if (!groups.has(g)) groups.set(g, new Set());
+        groups.get(g).add(n);
+      }
+    });
+  } catch (e) {
+    try { bonjour.destroy(); } catch {}
+    console.error(`group discovery failed: ${e.message}`);
+    return;
+  }
+
+  setTimeout(() => {
+    try { if (browser && browser.stop) browser.stop(); bonjour.destroy(); } catch {}
+    const current = readGroup();
+    if (groups.size === 0) {
+      console.log('No SYM groups visible on the LAN right now (only groups with a live node appear).');
+      console.log(`Your group: ${current}  ·  switch with: sym join <name>`);
       return;
     }
-    console.log(`SYM-mesh groups on the LAN (${seen.size}):`);
-    for (const st of [...seen].sort()) {
-      const name = st.replace(/^_/, '').replace(/\._tcp$/, '');
-      console.log(`  ${name.padEnd(20)} ${st}${st === current ? '   <- your group' : ''}`);
+    console.log(`SYM groups live on the LAN (${groups.size}):`);
+    for (const [g, nodes] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const mark = g === current ? '   <- your group' : '';
+      console.log(`  ${g.padEnd(22)} ${nodes.size} node(s): ${[...nodes].join(', ')}${mark}`);
     }
-  });
+  }, 2200);
 }
 
 function cmdStop() {

@@ -2,6 +2,16 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.3
+
+### Changed
+
+- **`sym groups` now lists groups cross-platform (including Windows)** via a discovery beacon, replacing the `dns-sd` shell-out (which doesn't exist on Windows, and which `bonjour-service` can't substitute for because it doesn't answer the DNS-SD meta-query). Every running daemon now advertises its group on a shared `_symgroups._tcp` service (group name in TXT) via the bundled pure-JS `bonjour-service`; `sym groups` browses that beacon and lists the live groups with their nodes. Discovery-only — comms stay isolated on each group's own `_<group>._tcp`. **Group names may be anonymous** (opaque codes), so the LAN listing need not reveal a group's purpose.
+
+### Notes
+
+- Groups are **open-join** in this release (anyone who knows the name can join). **Invite-gated private groups** (admin-set, join-by-invite, LAN handshake gating) are the planned fast-follow.
+
 ## 0.7.2
 
 ### Fixed (Windows — COO bisected it on re-test)

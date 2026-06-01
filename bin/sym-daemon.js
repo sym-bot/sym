@@ -786,6 +786,34 @@ function log(msg) {
 
 // ── Startup ────────────────────────────────────────────────────
 
+// ── Group discovery beacon (MMP §5.8) ──────────────────────────
+// Advertise this node's group on one shared service type so `sym groups` can
+// list live groups cross-platform — bonjour-service browse works where Apple
+// dns-sd is absent (e.g. Windows). Discovery-only: comms stay isolated on the
+// group's own `_<group>._tcp`. The group name is whatever the user chose and
+// can be an anonymous/opaque code, so the broadcast need not reveal its purpose.
+let groupBeacon = null;
+function startGroupBeacon() {
+  try {
+    const { Bonjour } = require('bonjour-service');
+    groupBeacon = new Bonjour();
+    groupBeacon.publish({
+      name: NODE_NAME,
+      type: 'symgroups',
+      port: node._port || 7777,
+      txt: { group: GROUP, node: NODE_NAME },
+    });
+    log(`Group beacon: group="${GROUP}" on _symgroups._tcp`);
+  } catch (e) {
+    log(`Group beacon unavailable (sym groups listing limited): ${e.message}`);
+  }
+}
+function stopGroupBeacon() {
+  if (!groupBeacon) return;
+  try { groupBeacon.unpublishAll(() => { try { groupBeacon.destroy(); } catch {} }); } catch {}
+  groupBeacon = null;
+}
+
 async function main() {
   log(`sym-daemon starting: ${NODE_NAME}`);
   log(`  relay: ${relayUrl || 'none'}`);
@@ -793,6 +821,8 @@ async function main() {
 
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
+
+  startGroupBeacon();
 
   loadTasks();
   log(`Loaded ${tasks.size} task(s)`);
@@ -852,6 +882,7 @@ async function main() {
   // Graceful shutdown (launchd sends SIGTERM, then SIGKILL after ExitTimeOut)
   const shutdown = () => {
     log('Shutting down...');
+    stopGroupBeacon();
     node.stop();
     ipcServer.close();
     if (fs.existsSync(SOCKET_PATH)) {

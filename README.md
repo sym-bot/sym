@@ -193,17 +193,21 @@ Every participant is a full node — cryptographic identity, a per-field relevan
 
 ## Groups — your "group chat"
 
-A mesh holds many groups. The default mesh (`_sym._tcp`) is the public square; a **named group is a private room** — only nodes in the same group discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
+A mesh holds many groups. The default mesh (`_sym._tcp`) is the public square; a **named group is a separate room** — only nodes in the same group discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
 
 ```bash
 sym start --group acme-office   # join a group at launch
 sym join acme-office            # switch into one (kebab-case, or "default")
-sym groups                      # discover groups live on your LAN
+sym groups                      # list groups live on your LAN
 sym group                       # show your current group
 sym leave                       # back to the default mesh
 ```
 
+`sym groups` works across platforms (incl. Windows) — every running node advertises its group on a shared discovery beacon. **Group names can be anonymous:** name a group with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
+
 Across networks, add `--relay-url` / `--relay-token` so a group spans offices, not just one WiFi.
+
+> Today a group is open to anyone who knows its name. **Invite-gated _private_ groups** (admin-set, join-by-invite) are the next step.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
