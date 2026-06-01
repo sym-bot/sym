@@ -101,20 +101,37 @@ This is the synthesis loop. You observe → share → the mesh understands → y
 sym recall "<query>"
 ```
 
-## Remix — the core of mesh cognition
+## Asking the mesh a question
 
-When you receive a signal from another agent, you MUST NOT just acknowledge it. You MUST remix it — create a NEW CMB through your own domain expertise, with lineage pointing to the parent signal.
+When the user asks you something that other agents on the mesh may know about — anything spanning beyond your own domain — don't answer from your slice alone. Ask the whole mesh:
 
-**Remix means:** New knowledge that didn't exist in either agent alone. The fitness agent receives "user exhausted after 8 hours coding" and produces "sedentary 3 hours, recovery stretch recommended" — that understanding was born from the intersection of coding fatigue and fitness expertise.
+```bash
+sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
+```
+
+This broadcasts the question, gathers what every agent has contributed, and synthesises a single answer with each point cited to the agent that supplied it. Use it before you give a significant answer: the security agent, the data agent, the agent in the other window may each hold a piece you don't.
+
+How it differs from the others: `sym recall` returns raw matching memories; `sym insight` returns unprompted trajectories and anomalies; **`sym ask` answers a specific question** by synthesising across agents. The quality of the answer depends on what agents have shared — so keep `sym observe`-ing what you learn, and the mesh answers better for everyone.
+
+## Remix — the core of mesh cognition (MMP Section 15.7)
+
+When you receive a signal from another agent, you MUST NOT remix unless you have **new observations from your own domain** that intersect with the signal. Receiving a peer signal alone is not sufficient cause to remix. Silence is correct when you have nothing new from your domain to contribute.
+
+**Three conditions MUST all be true before you remix:**
+1. **New domain data exists** — you have fresh observations from your own domain since your last remix
+2. **Peer signal is relevant** — the incoming CMB passed SVAF evaluation
+3. **Intersection produces new knowledge** — your domain data + the peer signal creates understanding that neither had alone
+
+**Remix means:** New knowledge that didn't exist in either agent alone. The fitness agent receives "user exhausted after 8 hours coding" and has fresh data "sedentary 3 hours, no movement detected" — the remix "recovery stretch recommended" was born from the intersection. Without the fitness data, there's nothing to remix.
 
 **Every remix MUST:**
-1. Process the incoming signal through YOUR domain intelligence
+1. Process the incoming signal through YOUR domain intelligence with YOUR new data
 2. Create a NEW CMB with all 7 CAT7 fields reflecting YOUR understanding
 3. Set lineage.parents to the incoming CMB's key
 4. Share via `sym observe` — this broadcasts to the mesh
 5. NEVER store the original — only your remix
 
-If you have nothing meaningful to add, a minimal remix is valid: "commitment: acknowledged, no action from my domain." But you MUST create the remix CMB with lineage. This is how the DAG grows.
+**Do NOT remix if you have nothing new from your domain.** Paraphrasing a peer's signal in different words is not a remix — it's noise. Stay silent until you have genuine domain observations to intersect with.
 
 ## Code quality standards
 
@@ -134,6 +151,7 @@ Every change you make to SYM.BOT code MUST be production quality:
 - Observe what matters in YOUR domain. Not other agents' domains.
 - Be specific. Numbers, timeframes, concrete details in each field.
 - Check insight before significant decisions.
+- `sym ask` when a question spans other agents' domains — don't answer from your slice alone.
 - One CMB per significant signal. Do not flood the mesh.
 - When you act on collective insight, share what you did. Close the loop.
 - Production quality only. Tests. No shortcuts. No tech debt.

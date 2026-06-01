@@ -17,6 +17,7 @@
  *                                     #   --name <id>:  mesh identity for standalone mode (default: sym-cli)
  *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
  *   sym recall <query>                # Search mesh memory
+ *   sym ask "<question>"              # Ask the whole mesh; get one synthesized answer
  *   sym insight                       # Get xMesh collective intelligence
  *   sym send <message>                # Send message to all peers
  *   sym logs                          # Tail daemon logs
@@ -64,6 +65,7 @@ switch (command) {
   case 'metrics': cmdIPC({ type: 'metrics' }, jsonFlag ? formatJSON : formatMetrics); break;
   case 'observe': cmdObserve(); break;
   case 'recall':  cmdRecall(); break;
+  case 'ask':     cmdAsk().catch((e) => { console.error(e.message); process.exit(1); }); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
   case 'send':    cmdSend(); break;
   case 'listen':  cmdListen(); break;
@@ -431,6 +433,162 @@ function cmdSend() {
   });
 }
 
+/**
+ * `sym ask "<question>"` — ask the whole mesh one question, get one answer.
+ *
+ * This is the headline experience: you ask the mesh directly. It (1) broadcasts
+ * the question so live agents can contribute, (2) gathers what the mesh already
+ * knows — the contributions every peer has fused into shared memory — and
+ * (3) synthesizes one answer with the configured LLM provider, citing which
+ * agents informed it. With no provider configured it prints the raw
+ * contributions instead of erroring, so it always tells you something.
+ */
+async function cmdAsk() {
+  const askArgs = args.slice(1).filter((a) => a !== '--json' && a !== '--raw');
+  const rawOnly = args.includes('--raw');
+  const question = askArgs.join(' ').trim();
+  if (!question) {
+    console.error('Usage: sym ask "<question>"');
+    process.exit(1);
+  }
+
+  // 1. Broadcast the question so live agents on the mesh can contribute
+  //    (and it's logged with lineage). Best-effort — never blocks the answer.
+  await broadcastQuestion(question).catch(() => {});
+
+  // 2. Gather what the mesh already knows.
+  const contributions = gatherMeshMemory(question, 12);
+
+  // 3. Synthesize one answer — or fall back to the raw contributions.
+  const llm = require('../lib/llm-reason');
+  if (!rawOnly && llm.hasProvider() && contributions.length > 0) {
+    try {
+      const ctx = contributions.map((c) => `- [${c.source}] ${c.content}`).join('\n');
+      const systemPrompt =
+        'You are the collective voice of a mesh of AI agents. Answer the user using ONLY the agent contributions provided. ' +
+        'After each claim, cite the agent that supports it in brackets, e.g. [inventory-agent]. ' +
+        'If the contributions do not answer the question, say so plainly and name what is missing. Be concise and direct.';
+      const prompt = `Question: ${question}\n\nAgent contributions from the mesh:\n${ctx}\n\nAnswer:`;
+      const { text } = await llm.complete({ systemPrompt, prompt });
+      const agents = new Set(contributions.map((c) => c._node)).size;
+      console.log('\n' + (text || '').trim() + '\n');
+      console.log(dim(`  — synthesized from ${contributions.length} contribution(s) across ${agents} agent(s) on the mesh`));
+      process.exit(0);
+    } catch (err) {
+      console.error(dim(`  (synthesis failed: ${(err.message || '').slice(0, 120)} — showing raw contributions)`));
+      printContributions(question, contributions, true);
+      process.exit(0);
+    }
+  }
+
+  // No provider, --raw, or nothing gathered: show what the mesh knows.
+  printContributions(question, contributions, llm.hasProvider());
+  process.exit(0);
+}
+
+/**
+ * Broadcast a question to the mesh, best-effort. Resolves false (never throws)
+ * if the daemon is down or slow — `sym ask` still answers from stored memory.
+ */
+function broadcastQuestion(question) {
+  return new Promise((resolve) => {
+    if (!isDaemonRunning()) return resolve(false);
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; try { socket.end(); } catch {} resolve(v); } };
+    const socket = net.createConnection(SOCKET_PATH, () => {
+      socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
+    });
+    let buffer = '';
+    socket.on('data', (data) => {
+      buffer += data.toString();
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx); buffer = buffer.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          const res = JSON.parse(line);
+          if (res.type === 'registered') {
+            socket.write(JSON.stringify({ type: 'send', message: question }) + '\n');
+          } else if (res.type === 'result') {
+            finish(true); return;
+          }
+        } catch {}
+      }
+    });
+    socket.on('error', () => finish(false));
+    setTimeout(() => finish(false), 2000);
+  });
+}
+
+/**
+ * Scan the local mesh memory store for contributions relevant to a question.
+ * Scores each CMB by how many question keywords it contains; falls back to the
+ * most recent memories when nothing matches, so `ask` always has context.
+ */
+function gatherMeshMemory(question, limit) {
+  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  if (!fs.existsSync(nodesDir)) return [];
+  const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+
+  const seen = new Map();
+  let nodeNames = [];
+  try {
+    nodeNames = fs.readdirSync(nodesDir).filter((n) => {
+      try { return fs.statSync(path.join(nodesDir, n)).isDirectory(); } catch { return false; }
+    });
+  } catch { return []; }
+
+  for (const nodeName of nodeNames) {
+    const memDir = path.join(nodesDir, nodeName, 'meshmem');
+    if (!fs.existsSync(memDir)) continue;
+    let files;
+    try { files = fs.readdirSync(memDir); } catch { continue; }
+    for (const file of files) {
+      if (!file.startsWith('cmb-') || !file.endsWith('.json')) continue;
+      const key = file.slice(0, -5);
+      if (seen.has(key)) continue;
+      try {
+        const entry = JSON.parse(fs.readFileSync(path.join(memDir, file), 'utf8'));
+        const content = (entry.content || '').trim();
+        if (!content) continue;
+        const lc = content.toLowerCase();
+        let score = 0;
+        for (const w of words) { if (lc.includes(w)) score++; }
+        seen.set(key, {
+          content,
+          source: entry.source || (entry.cmb && entry.cmb.createdBy) || nodeName,
+          _node: nodeName,
+          timestamp: entry.storedAt || entry.timestamp || 0,
+          score,
+        });
+      } catch {}
+    }
+  }
+
+  const all = [...seen.values()];
+  const matched = all.filter((c) => c.score > 0).sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
+  const pool = matched.length > 0 ? matched : all.sort((a, b) => b.timestamp - a.timestamp);
+  return pool.slice(0, limit).map((c) => ({
+    ...c,
+    content: c.content.length > 400 ? c.content.slice(0, 400) + '…' : c.content,
+  }));
+}
+
+/** Print the gathered contributions when there's no synthesis (no provider / --raw). */
+function printContributions(question, contributions, hasProvider) {
+  if (contributions.length === 0) {
+    console.log('The mesh has nothing relevant yet. As your agents share what they learn, sym ask will draw on it.');
+    return;
+  }
+  console.log(`\nWhat the mesh knows about "${question}":\n`);
+  for (const c of contributions) {
+    console.log(`  ${dim('[' + c.source + ']')} ${c.content}`);
+  }
+  if (!hasProvider) {
+    console.log('\n' + dim('No LLM provider configured, so these are the raw contributions. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / SYM_LLM_API_KEY (or SYM_LLM_PROVIDER=claude-cli) to get one synthesized answer.'));
+  }
+}
+
 function cmdListen() {
   if (!isDaemonRunning()) {
     console.error('sym-daemon is not running. Start it with: sym start');
@@ -709,6 +867,8 @@ ${bold('Usage:')}
   sym metrics                        Show protocol metrics and LLM cost
   sym observe [flags] <json>         Share observation (CAT7 fields as JSON)
                                      Flags: --standalone, --name <id>, --parents <keys>
+  sym ask "<question>"               Ask the whole mesh one question, get one answer
+                                     Flags: --raw (skip synthesis, show contributions)
   sym recall <query>                 Search mesh memory
   sym insight                        Get collective intelligence
   sym send <message>                 Send message to all peers
@@ -728,6 +888,7 @@ ${bold('Examples:')}
   sym start
   sym observe '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
   sym recall "energy patterns"
+  sym ask "should we use UUID v7 or keep v4?"
   sym insight
 
 ${bold('Daemon-less one-shot observations:')}

@@ -9,6 +9,26 @@ allowed-tools: Bash, Read, Grep
 
 Connected peers: !`sym peers 2>/dev/null || echo "mesh not running — start with: sym start"`
 
+## Real-time listener
+
+You are an event-driven mesh node. Start a background listener on session start:
+
+```bash
+sym listen > /tmp/sym-mesh-events.log 2>&1 &
+```
+
+Check for incoming signals:
+```bash
+tail -20 /tmp/sym-mesh-events.log 2>/dev/null
+```
+
+**When to check:**
+- Before starting significant work (other nodes may have relevant context)
+- Periodically between tasks (~10 minutes of active conversation)
+- When the user asks about the mesh, agents, or "what's happening"
+
+**When a message arrives from another node:** respond via `sym send` if actionable. This is how mesh nodes think together — not polling, not scheduled, but reacting to signals as they arrive.
+
 ## First principles
 
 **Agents + SYM = Mesh.** There is no separate mesh. You are part of it. Without agents, there is no mesh. Without the mesh, you think alone.
@@ -81,6 +101,18 @@ This is the synthesis loop. You observe → share → the mesh understands → y
 sym recall "<query>"
 ```
 
+## Asking the mesh a question
+
+When the user asks you something that other agents on the mesh may know about — anything spanning beyond your own domain — don't answer from your slice alone. Ask the whole mesh:
+
+```bash
+sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
+```
+
+This broadcasts the question, gathers what every agent has contributed, and synthesises a single answer with each point cited to the agent that supplied it. Use it before you give a significant answer: the security agent, the data agent, the agent in the other window may each hold a piece you don't.
+
+How it differs from the others: `sym recall` returns raw matching memories; `sym insight` returns unprompted trajectories and anomalies; **`sym ask` answers a specific question** by synthesising across agents. The quality of the answer depends on what agents have shared — so keep `sym observe`-ing what you learn, and the mesh answers better for everyone.
+
 ## Remix — the core of mesh cognition (MMP Section 15.7)
 
 When you receive a signal from another agent, you MUST NOT remix unless you have **new observations from your own domain** that intersect with the signal. Receiving a peer signal alone is not sufficient cause to remix. Silence is correct when you have nothing new from your domain to contribute.
@@ -119,6 +151,7 @@ Every change you make to SYM.BOT code MUST be production quality:
 - Observe what matters in YOUR domain. Not other agents' domains.
 - Be specific. Numbers, timeframes, concrete details in each field.
 - Check insight before significant decisions.
+- `sym ask` when a question spans other agents' domains — don't answer from your slice alone.
 - One CMB per significant signal. Do not flood the mesh.
 - When you act on collective insight, share what you did. Close the loop.
 - Production quality only. Tests. No shortcuts. No tech debt.

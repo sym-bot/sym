@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.6.0
+
+### Added
+
+- **`sym ask "<question>"`** — ask the whole mesh one question and get one synthesized answer. Broadcasts the question to the mesh (best-effort; live agents can contribute and it's logged with lineage), gathers the contributions every peer has fused into shared memory (`~/.sym/nodes/*/meshmem`, ranked by keyword overlap with the question, falling back to most-recent for context), and synthesizes a single answer with the configured LLM provider — each point cited to the agent that supplied it. With no provider configured it prints the ranked raw contributions and their sources instead of erroring, so it always returns what the mesh knows. Flag: `--raw` (skip synthesis, show contributions). This is the headline experience: ask the mesh directly, instead of asking one agent and getting one perspective.
+- **`complete(opts)` + `hasProvider(opts)` exported from `lib/llm-reason`.** `complete()` is a free-form sibling of `invoke()` — same Anthropic / OpenAI-compatible / Claude-CLI providers, returns raw text instead of extracting CAT7 (throws `code: 'NO_PROVIDER'` when no key / CLI provider is configured). `hasProvider()` reports whether a provider is configured without making a network call. Used by `sym ask`; available to any caller needing plain LLM completion over the mesh's provider config.
+
+### Changed
+
+- **Skill teaches `sym ask`.** The SYM agent skill gains an "Asking the mesh a question" section so agents query the whole mesh when a question spans other agents' domains. The `.agents/` and `.claude/` skill copies — which had drifted — are reconciled to one canonical source (`.agents/`), with the `.claude/`-only "Real-time listener" section ported in so nothing is lost.
+- **README refocused** on a single capability — collective intelligence: ask the mesh, answer as one mind. Defines "the mesh" in plain language up front, answers What / Why / How in the first screen, headlines `sym ask`, and moves the heavy config / drift-math inline reference to spec pointers.
+
+### Tests
+
+- 6 offline tests for `sym ask` (gather + relevance ranking, empty-mesh, no-provider fallback, usage) plus the `llm-reason` synthesis exports. No paid API in CI. Full suite 162 passing.
+
 ## 0.5.8
 
 ### Added
