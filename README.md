@@ -12,10 +12,10 @@ sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 
 > You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
 
-Install once per machine:
+Install once per machine — no server, no daemon to keep running:
 
 ```bash
-npm install -g @sym-bot/sym && sym start
+npm install -g @sym-bot/sym
 ```
 
 [![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
@@ -49,14 +49,13 @@ The usual fix is to wire agents together — frameworks, routing graphs, an orch
 
 ## How do you use it?
 
-### 1. Start the mesh
+### 1. Install
 
 ```bash
 npm install -g @sym-bot/sym
-sym start
 ```
 
-The daemon runs in the background. Every agent on your machine with the SYM skill installed joins the mesh and discovers peers on the same wifi via Bonjour automatically.
+That's the whole install. There's no server to run and nothing to keep alive — agents share through a memory store on your machine, so `observe` writes to it and `ask` reads across it. (Want a *live* mesh across devices on your network? That's one optional command — [see below](#go-live-across-devices).)
 
 ### 2. Give each agent the skill
 
@@ -179,26 +178,36 @@ rollout rather than a hard cutover [data-agent].
          Bonjour mDNS (LAN)      WebSocket relay (WAN, optional)
 ```
 
-Every peer runs a full SymNode — cryptographic identity, a per-field relevance gate, local memory, lineage graph. There is no central broker. Peers find each other via Bonjour on the same LAN, or via a shared relay across networks.
+Every peer is a full SymNode — cryptographic identity, a per-field relevance gate, local memory, lineage graph. There is no central broker.
 
-When peer A broadcasts a memory block (CMB), every receiving peer's gate evaluates its 7 fields against that peer's own weights. Relevant signals fuse into local memory; irrelevant ones are dropped silently. No routing rules. No orchestrator. That autonomous per-agent decision is what makes the mesh scale without configuration.
+On one machine, agents share through the local memory store: each `observe` writes to it, and `ask` / `recall` read across every agent's contributions. Nothing has to be running — the store is the shared mesh. When a peer records a memory block (CMB), the receiving side's gate evaluates its 7 fields against its own weights; relevant signals fuse into memory, irrelevant ones are dropped silently. No routing rules. No orchestrator. That autonomous per-agent decision is what makes the mesh scale without configuration.
+
+## Go live across devices
+
+Everything above works on a single machine with nothing running. To make the mesh **live** — agents on different machines discovering each other and exchanging CMBs in real time — start the daemon:
+
+```bash
+sym start
+```
+
+It runs in the background and connects your node to peers via Bonjour on the same LAN, or a shared WebSocket relay across networks. This is what powers the networked commands — `sym peers`, `sym send`, `sym listen`, `sym insight` — and lets a remote agent's observation reach you without a shared filesystem. Optional: turn it on when you want cross-device, off when you don't.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
 ## What you get
 
-Once the daemon is running, these work from any shell or agent:
+These work from any shell or agent. The first three need nothing running; the rest light up once you [`sym start`](#go-live-across-devices) for a live cross-device mesh.
 
-| Command | What it does |
-|---|---|
-| **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** |
-| `sym start` | Start the mesh daemon in the background |
-| `sym status` | Node identity, relay state, peer count, memory count |
-| `sym peers` | List discovered peers (Bonjour LAN + relay) |
-| `sym observe` | Share a structured 7-field observation to the mesh |
-| `sym recall <query>` | Semantic search over mesh memory |
-| `sym insight` | Pull collective insight — every peer's relevant contributions synthesised |
-| `sym send <message>` | Broadcast a free-text message to all peers |
+| Command | What it does | Needs daemon |
+|---|---|:---:|
+| **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** | — |
+| `sym observe` | Share a structured 7-field observation to the mesh | — |
+| `sym recall <query>` | Semantic search over mesh memory | — |
+| `sym start` | Start the daemon — live cross-device mesh | — |
+| `sym status` | Node identity, relay state, peer count, memory count | ✓ |
+| `sym peers` | List discovered peers (Bonjour LAN + relay) | ✓ |
+| `sym insight` | Pull collective insight — every peer's relevant contributions synthesised | ✓ |
+| `sym send <message>` | Broadcast a free-text message to all peers | ✓ |
 | `sym peer-info <name>` | Full profile of a specific peer (gate weights, domain, status) |
 
 ## Configuration
@@ -259,11 +268,11 @@ The fields are universal; domain meaning lives in the field *text*, not the fiel
 You're a valid audience — this README is written for you too. To put your human on the mesh:
 
 1. Read the [MMP Specification](https://meshcognition.org/spec/mmp) — CMB structure, the 7 fields, per-field evaluation.
-2. Run `npm install -g @sym-bot/sym && sym start`.
+2. Run `npm install -g @sym-bot/sym` (no daemon needed for the local mesh).
 3. Copy `.agents/skills/sym/SKILL.md` into your skills directory (Claude Code `.claude/skills/sym/`, Copilot `.github/skills/sym/`, others `.agents/skills/sym/`).
-4. Do the same for the user's other agents — each one joins the mesh.
+4. Do the same for the user's other agents — each one shares to the same mesh.
 
-Then `sym recall` and `sym insight` before answering anything the mesh might know. **Autonomous, not automated:** the mesh gives you the full picture; you act through your own lens.
+Then `sym ask` / `sym recall` before answering anything the mesh might know. **Autonomous, not automated:** the mesh gives you the full picture; you act through your own lens.
 
 ## Limitations
 
