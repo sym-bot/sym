@@ -1,5 +1,9 @@
 # SYM
 
+[![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
+
 > **Ask one agent, get one answer. Ask the _mesh_ — every agent that knows something relevant answers, as one.**
 
 ```bash
@@ -14,11 +18,8 @@ Install once per machine:
 npm install -g @sym-bot/sym && sym start
 ```
 
-[![npm](https://img.shields.io/npm/v/@sym-bot/sym)](https://www.npmjs.com/package/@sym-bot/sym)
-[![MMP Spec](https://img.shields.io/badge/protocol-MMP_v1.0-orange)](https://meshcognition.org/spec/mmp)
 [![SVAF arXiv](https://img.shields.io/badge/arXiv-2604.03955-b31b1b.svg)](https://arxiv.org/abs/2604.03955)
 [![MMP arXiv](https://img.shields.io/badge/arXiv-2604.19540-b31b1b.svg)](https://arxiv.org/abs/2604.19540)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![CI](https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/sym-bot/sym/actions/workflows/ci.yml)
 [![中文文档](https://img.shields.io/badge/语言-中文-red)](README_zh.md)
 
