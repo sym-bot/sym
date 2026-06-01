@@ -20,6 +20,10 @@
  *   sym ask "<question>"              # Ask the whole mesh; get one synthesized answer
  *   sym insight                       # Get xMesh collective intelligence
  *   sym send <message>                # Send message to all peers
+ *   sym group                         # Show current mesh group
+ *   sym groups                        # Discover groups live on the LAN
+ *   sym join <name>                   # Switch into a group ("group chat")
+ *   sym leave                         # Return to the default global mesh
  *   sym logs                          # Tail daemon logs
  *   sym version                       # Show version
  *
@@ -33,6 +37,8 @@ const os = require('os');
 const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
+const { isValidGroup, groupServiceType } = require('../lib/groups');
+const GROUP_FILE = path.join(os.homedir(), '.sym', 'group');
 const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
 const LOG_DIR = getLogDir('sym-daemon');
 const VERSION = require('../package.json').version;
@@ -69,6 +75,10 @@ switch (command) {
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
   case 'send':    cmdSend(); break;
   case 'listen':  cmdListen(); break;
+  case 'join':    cmdJoin(); break;
+  case 'leave':   cmdLeave(); break;
+  case 'groups':  cmdGroups(); break;
+  case 'group':   cmdGroup(); break;
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
@@ -81,30 +91,159 @@ switch (command) {
 // ── Command Implementations ───────────────────────────────────
 
 function cmdStart() {
+  applyStartFlags();                       // parse + persist --group / --relay-* first
   if (isDaemonRunning()) {
     console.log('sym-daemon is already running.');
+    console.log(`group: ${readGroup()}`);
     return;
   }
+  spawnDaemon();
+}
 
+// ── Mesh groups (MMP §5.8) ─────────────────────────────────────
+// A group is the "group chat" boundary. The persisted ~/.sym/group file is
+// the source of truth across launchd/spawn restarts; the daemon reads it (or
+// SYM_GROUP env) at startup and maps the name to a Bonjour service type that
+// matches the MCP node + sym-swift, so peers in the same group discover each
+// other. See lib/groups.js.
+
+function flagValue(name) {
+  const i = args.indexOf(name);
+  return i !== -1 ? (args[i + 1] || '') : null;
+}
+
+function persistGroup(group) {
+  const dir = path.dirname(GROUP_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(GROUP_FILE, group + '\n');
+}
+
+function readGroup() {
+  try { return fs.readFileSync(GROUP_FILE, 'utf8').trim() || 'default'; }
+  catch { return 'default'; }
+}
+
+function persistRelay(url, token) {
+  const dir = path.join(os.homedir(), '.sym');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, 'relay.env');
+  const kv = {};
+  try {
+    for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+      const m = line.match(/^([A-Z_]+)=(.*)$/);
+      if (m) kv[m[1]] = m[2];
+    }
+  } catch {}
+  if (url) kv.SYM_RELAY_URL = url;
+  if (token) kv.SYM_RELAY_TOKEN = token;
+  fs.writeFileSync(f, Object.entries(kv).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
+}
+
+// Validate + persist --group / --relay-url / --relay-token before a launch.
+function applyStartFlags() {
+  const g = flagValue('--group');
+  if (g !== null) {
+    if (!isValidGroup(g)) {
+      console.error(`Invalid group "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+      process.exit(1);
+    }
+    persistGroup(g);
+  }
+  const url = flagValue('--relay-url');
+  const token = flagValue('--relay-token');
+  if (url || token) persistRelay(url, token);
+}
+
+// Launch the daemon (no running-check). Passes SYM_GROUP in env for the
+// spawn path (Linux/immediate); the persisted file covers launchd (macOS).
+function spawnDaemon() {
   const daemonPath = path.join(__dirname, 'sym-daemon.js');
-
+  const env = { ...process.env, SYM_GROUP: readGroup() };
   if (process.platform === 'darwin') {
-    // Install and start via launchd
     try {
-      execSync(`node "${daemonPath}" --install`, { stdio: 'inherit' });
+      execSync(`node "${daemonPath}" --install`, { stdio: 'inherit', env });
     } catch (err) {
       console.error('Failed to start daemon:', err.message);
       process.exit(1);
     }
   } else {
-    // Linux/other: start in background
-    const child = spawn(process.execPath, [daemonPath], {
-      detached: true,
-      stdio: 'ignore',
-    });
+    const child = spawn(process.execPath, [daemonPath], { detached: true, stdio: 'ignore', env });
     child.unref();
     console.log(`sym-daemon started (pid ${child.pid})`);
   }
+  console.log(`group: ${readGroup()}`);
+}
+
+// Restart the daemon into a (newly persisted) group.
+function restartIntoGroup(group, doneMsg) {
+  persistGroup(group);
+  if (isDaemonRunning()) {
+    cmdStop();
+    try { execSync('sleep 1'); } catch {}   // let the old node fully release the socket
+  }
+  spawnDaemon();
+  console.log(doneMsg);
+}
+
+function cmdJoin() {
+  const g = args[1];
+  if (!g) { console.error('Usage: sym join <group>   (kebab-case, or "default")'); process.exit(1); }
+  if (!isValidGroup(g)) {
+    console.error(`Invalid group "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+    process.exit(1);
+  }
+  restartIntoGroup(g, `joined group "${g}".`);
+}
+
+function cmdLeave() {
+  restartIntoGroup('default', 'left — back on the default mesh (_sym._tcp).');
+}
+
+function cmdGroup() {
+  const g = readGroup();
+  console.log(`current group: ${g}   (${groupServiceType(g)})`);
+}
+
+// Discover SYM-mesh groups with at least one node online on this LAN.
+// Mirrors the MCP node's discovery (dns-sd on macOS/Windows, avahi on Linux).
+function cmdGroups() {
+  const platform = process.platform;
+  const cmd = (platform === 'linux') ? 'avahi-browse' : 'dns-sd';
+  const argv = (platform === 'linux') ? ['-t', '-a', '-p'] : ['-B', '_services._dns-sd._udp', 'local.'];
+  let child;
+  try { child = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) {
+    console.error(`Could not run discovery ('${cmd}'): ${e.message}` +
+      (platform === 'linux' ? '\nInstall avahi-utils: sudo apt install avahi-utils' : ''));
+    return;
+  }
+  const out = [];
+  child.stdout.on('data', (c) => out.push(c));
+  child.on('error', (e) => console.error(`discovery failed: ${e.message}`));
+  const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, 2200);
+  child.on('close', () => {
+    clearTimeout(timer);
+    const text = Buffer.concat(out).toString('utf8');
+    const typeRe = /_([a-z0-9][a-z0-9-]+)\._tcp/gi;
+    const seen = new Set();
+    let m;
+    while ((m = typeRe.exec(text)) !== null) {
+      const full = `_${m[1]}._tcp`;
+      // SYM family only: global sym, named groups, app-scoped rooms.
+      if (/^_(sym|[a-z0-9]+-[a-z0-9]+|[a-z0-9]+-team)\._tcp$/i.test(full)) seen.add(full);
+    }
+    const current = groupServiceType(readGroup());
+    if (seen.size === 0) {
+      console.log('No SYM-mesh groups visible on the LAN right now (only shows groups with a node online).');
+      console.log(`Your group: ${readGroup()}  (${current})`);
+      return;
+    }
+    console.log(`SYM-mesh groups on the LAN (${seen.size}):`);
+    for (const st of [...seen].sort()) {
+      const name = st.replace(/^_/, '').replace(/\._tcp$/, '');
+      console.log(`  ${name.padEnd(20)} ${st}${st === current ? '   <- your group' : ''}`);
+    }
+  });
 }
 
 function cmdStop() {
@@ -860,10 +999,15 @@ function printUsage() {
 ${bold('sym')} — local AI mesh for collective intelligence
 
 ${bold('Usage:')}
-  sym start                          Start the mesh daemon
+  sym start [--group <name>]         Start the mesh daemon (in a group; default = global mesh)
+                                     Flags: --relay-url <url>, --relay-token <token>
   sym stop                           Stop the mesh daemon
   sym status                         Show mesh status
   sym peers                          List connected peers
+  sym group                          Show the current group
+  sym groups                         Discover SYM-mesh groups live on the LAN
+  sym join <name>                    Switch into a group (kebab-case, or "default")
+  sym leave                          Return to the default global mesh
   sym metrics                        Show protocol metrics and LLM cost
   sym observe [flags] <json>         Share observation (CAT7 fields as JSON)
                                      Flags: --standalone, --name <id>, --parents <keys>

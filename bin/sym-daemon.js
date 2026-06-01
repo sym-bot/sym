@@ -103,12 +103,31 @@ if (args.includes('--status')) {
   process.exit(0);
 }
 
+// ── Mesh group (MMP §5.8) ──────────────────────────────────────
+// Resolve which group this node joins, in precedence order:
+//   1. SYM_GROUP env   2. persisted ~/.sym/group (written by `sym join`)   3. default
+// The persisted file is the source of truth across launchd/spawn restarts;
+// env overrides it for one run. group -> service type matches the MCP node +
+// sym-swift, so CLI peers discover app/Claude peers in the same group.
+const { groupServiceType, isValidGroup } = require('../lib/groups');
+const GROUP_FILE = path.join(SYM_DIR, 'group');
+let GROUP = process.env.SYM_GROUP
+  || (() => { try { return fs.readFileSync(GROUP_FILE, 'utf8').trim(); } catch { return ''; } })()
+  || 'default';
+if (!isValidGroup(GROUP)) {
+  log(`Invalid group "${GROUP}" — must be kebab-case or "default". Falling back to default.`);
+  GROUP = 'default';
+}
+log(`Mesh group: ${GROUP} (${groupServiceType(GROUP)})`);
+
 // ── SYM Node ───────────────────────────────────────────────────
 
 const node = new SymNode({
   name: NODE_NAME,
   cognitiveProfile: `Local CLI-host for ${os.hostname()}. Hosts IPC surface for sym CLI. Forwards frames, no storage, no SVAF.`,
   cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
+  group: GROUP,
+  discoveryServiceType: groupServiceType(GROUP),
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,
