@@ -219,19 +219,34 @@ function cmdGroups() {
   const platform = process.platform;
   const cmd = (platform === 'linux') ? 'avahi-browse' : 'dns-sd';
   const argv = (platform === 'linux') ? ['-t', '-a', '-p'] : ['-B', '_services._dns-sd._udp', 'local.'];
+  // Graceful when the browse tool is absent (e.g. Windows without Apple
+  // Bonjour's dns-sd — the node itself still discovers peers via the
+  // bundled pure-JS bonjour-service, so meshing works; only this LAN-wide
+  // group *enumeration* needs the CLI tool).
+  const unavailable = (e) => {
+    if (e && e.code === 'ENOENT') {
+      console.log(`Live group discovery isn't available here — '${cmd}' isn't installed.`);
+      if (platform === 'win32') console.log('(Windows: LAN group discovery needs Apple Bonjour. Your node still meshes fine.)');
+      else if (platform === 'linux') console.log('(Install avahi-utils for discovery: sudo apt install avahi-utils)');
+    } else {
+      console.error(`group discovery failed: ${(e && e.message) || e}`);
+    }
+    console.log(`Your group: ${readGroup()}  (${groupServiceType(readGroup())})  ·  switch with: sym join <name>`);
+  };
+
   let child;
   try { child = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] }); }
-  catch (e) {
-    console.error(`Could not run discovery ('${cmd}'): ${e.message}` +
-      (platform === 'linux' ? '\nInstall avahi-utils: sudo apt install avahi-utils' : ''));
-    return;
-  }
+  catch (e) { return unavailable(e); }
+  let errored = false;
+  let timer = null;
+  child.on('error', (e) => { errored = true; if (timer) clearTimeout(timer); unavailable(e); });
+  if (!child.stdout) return;   // ENOENT path on some platforms leaves no stream
   const out = [];
   child.stdout.on('data', (c) => out.push(c));
-  child.on('error', (e) => console.error(`discovery failed: ${e.message}`));
-  const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, 2200);
+  timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch {} }, 2200);
   child.on('close', () => {
     clearTimeout(timer);
+    if (errored) return;   // already reported via the error handler
     const text = Buffer.concat(out).toString('utf8');
     const typeRe = /_([a-z0-9][a-z0-9-]+)\._tcp/gi;
     const seen = new Set();
@@ -647,7 +662,18 @@ function broadcastQuestion(question) {
   return new Promise((resolve) => {
     if (!isDaemonRunning()) return resolve(false);
     let settled = false;
-    const finish = (v) => { if (!settled) { settled = true; try { socket.end(); } catch {} resolve(v); } };
+    let timer = null;
+    // socket.destroy() (not .end()) — fully tears down the handle synchronously
+    // so no named-pipe handle is left mid-close when `sym ask` later exits.
+    // On Windows, exiting with a half-closed handle trips a libuv assertion
+    // (UV_HANDLE_CLOSING, win/async.c) and aborts with 0xC0000409.
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { socket.removeAllListeners('data'); socket.destroy(); } catch {}
+      resolve(v);
+    };
     const socket = net.createConnection(SOCKET_PATH, () => {
       socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
     });
@@ -669,7 +695,7 @@ function broadcastQuestion(question) {
       }
     });
     socket.on('error', () => finish(false));
-    setTimeout(() => finish(false), 2000);
+    timer = setTimeout(() => finish(false), 2000);
   });
 }
 

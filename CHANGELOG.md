@@ -2,6 +2,15 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.1
+
+### Fixed (Windows — found by COO's cross-machine test on a real Windows box)
+
+- **`sym ask` crashed on exit on Windows** with a libuv assertion (`!(handle->flags & UV_HANDLE_CLOSING)`, `win/async.c`, exit `0xC0000409`). The best-effort broadcast socket was closed with `socket.end()`, which leaves the named-pipe handle mid-close; when the command then `process.exit`s, Windows aborts. Now `socket.destroy()` tears the handle down fully (and the timeout is cleared) before exit. Mac/Linux unaffected either way.
+- **`sym groups` errored with `spawn dns-sd ENOENT` on Windows** (Apple Bonjour's `dns-sd` isn't installed). It now degrades gracefully — a clear message that LAN group *enumeration* needs the tool, while noting the node still meshes via the bundled pure-JS `bonjour-service` and you can `sym join <name>` directly. Also fixed a timer-ordering bug in the discovery path.
+
+*(Cross-machine mesh, install, and daemon lifecycle all PASSED on Windows in 0.7.0 — these two were the only issues.)*
+
 ## 0.7.0
 
 ### Added
