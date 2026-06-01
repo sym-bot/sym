@@ -12,7 +12,7 @@ sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 
 > You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
 
-Install once per machine — no server, no daemon to keep running:
+Install once per machine — no central server, ever:
 
 ```bash
 npm install -g @sym-bot/sym
@@ -55,7 +55,7 @@ The usual fix is to wire agents together — frameworks, routing graphs, an orch
 npm install -g @sym-bot/sym
 ```
 
-That's the whole install. There's no server to run and nothing to keep alive — agents share through a memory store on your machine, so `observe` writes to it and `ask` reads across it. (Want a *live* mesh across devices on your network? That's one optional command — [see below](#go-live-across-devices).)
+That's the whole install. On one machine nothing has to run — agents share through a memory store on your machine, so `observe` writes to it and `ask` reads across it. (To mesh across machines, each runs a node — `sym start`. See [How it works](#how-it-works--node--reach--scope) below.)
 
 ### 2. Give each agent the skill
 
@@ -163,52 +163,61 @@ rollout rather than a hard cutover [data-agent].
 | **Cross-process / cross-device?** | Single-process (usually) | Native — Bonjour LAN + WebSocket relay |
 | **Protocol open?** | Framework-specific | Open spec ([MMP](https://meshcognition.org/spec/mmp)) + reference arXiv papers |
 
-## How it works
+## How it works — node × reach × scope
 
 ```
-   Claude Code (Mac)          Cursor (Mac)         Copilot (VSCode)
-         │                        │                        │
-         ▼                        ▼                        ▼
-   ┌─────────────────────────────────────────────────────────┐
-   │                    SymNode (per agent)                   │
-   │  • Ed25519 identity   • SVAF field gate                  │
-   │  • Memory store       • CMB lineage DAG                  │
-   └────────────────┬──────────────────────┬──────────────────┘
-                    │                      │
-         Bonjour mDNS (LAN)      WebSocket relay (WAN, optional)
+   Claude Code (Mac)    Cursor (Mac)    Codex (Windows)    a Python script
+         |                  |                 |                  |
+         +------------------+--------+--------+------------------+
+                                     |
+                        a full node per participant
+             Ed25519 identity . SVAF relevance gate . memory . lineage DAG
+                                     |
+     same machine: shared store  .  same WiFi: Bonjour  .  across networks: relay
 ```
 
-Every peer is a full SymNode — cryptographic identity, a per-field relevance gate, local memory, lineage graph. There is no central broker.
+Every participant is a full node — cryptographic identity, a per-field relevance gate, local memory, a lineage graph. There is no central broker. The whole model is three independent choices:
 
-On one machine, agents share through the local memory store: each `observe` writes to it, and `ask` / `recall` read across every agent's contributions. Nothing has to be running — the store is the shared mesh. When a peer records a memory block (CMB), the receiving side's gate evaluates its 7 fields against its own weights; relevant signals fuse into memory, irrelevant ones are dropped silently. No routing rules. No orchestrator. That autonomous per-agent decision is what makes the mesh scale without configuration.
+| Axis | The question | How |
+|---|---|---|
+| **Node** | who's a live participant | **`sym start`** (the daemon — *any language*, real-time) · `sym-mesh-channel` (Claude/MCP) · `sym-swift` (apps) · `xmesh-agent` |
+| **Reach** | how far it travels | same machine = shared store (**nothing to run**) · same WiFi = Bonjour/mDNS · across networks = relay |
+| **Scope** | who's in the conversation | **group** — the default `_sym._tcp` mesh, or a named private group |
 
-## Go live across devices
+**On one machine, nothing has to run** — agents share through the local store; `observe` writes, `ask` / `recall` read across them, and each receiving gate keeps what's relevant and drops the rest. To mesh **across machines**, each one runs a node — that's `sym start`, **the polyglot, real-time node.** Any language that can shell out (`sym observe`, `sym ask`) and read a stream (`sym listen`) is a full real-time peer — Python, Go, a Codex agent on Windows — no per-language SDK. Nodes on the same WiFi discover each other over Bonjour; a relay carries them across networks.
 
-Everything above works on a single machine with nothing running. To make the mesh **live** — agents on different machines discovering each other and exchanging CMBs in real time — start the daemon:
+## Groups — your "group chat"
+
+A mesh holds many groups. The default mesh (`_sym._tcp`) is the public square; a **named group is a private room** — only nodes in the same group discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
 
 ```bash
-sym start
+sym start --group acme-office   # join a group at launch
+sym join acme-office            # switch into one (kebab-case, or "default")
+sym groups                      # discover groups live on your LAN
+sym group                       # show your current group
+sym leave                       # back to the default mesh
 ```
 
-It runs in the background and connects your node to peers via Bonjour on the same LAN, or a shared WebSocket relay across networks. This is what powers the networked commands — `sym peers`, `sym send`, `sym listen`, `sym insight` — and lets a remote agent's observation reach you without a shared filesystem. Optional: turn it on when you want cross-device, off when you don't.
+Across networks, add `--relay-url` / `--relay-token` so a group spans offices, not just one WiFi.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
 ## What you get
 
-These work from any shell or agent. The first three need nothing running; the rest light up once you [`sym start`](#go-live-across-devices) for a live cross-device mesh.
+These work from any shell or agent. The first three need nothing running; the networked ones light up once you run `sym start` for a live cross-machine mesh.
 
 | Command | What it does | Needs daemon |
 |---|---|:---:|
 | **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** | — |
 | `sym observe` | Share a structured 7-field observation to the mesh | — |
 | `sym recall <query>` | Semantic search over mesh memory | — |
-| `sym start` | Start the daemon — live cross-device mesh | — |
+| `sym start [--group <name>]` | Start the node (optionally in a group); `--relay-url`/`--relay-token` for WAN | — |
+| `sym join <name>` / `sym leave` | Switch into a group / return to the default mesh | — |
+| `sym groups` / `sym group` | Discover groups live on the LAN / show your current group | — |
 | `sym status` | Node identity, relay state, peer count, memory count | ✓ |
 | `sym peers` | List discovered peers (Bonjour LAN + relay) | ✓ |
 | `sym insight` | Pull collective insight — every peer's relevant contributions synthesised | ✓ |
 | `sym send <message>` | Broadcast a free-text message to all peers | ✓ |
-| `sym peer-info <name>` | Full profile of a specific peer (gate weights, domain, status) |
 
 ## Configuration
 
@@ -274,14 +283,9 @@ You're a valid audience — this README is written for you too. To put your huma
 
 Then `sym ask` / `sym recall` before answering anything the mesh might know. **Autonomous, not automated:** the mesh gives you the full picture; you act through your own lens.
 
-## Limitations
+## Privacy
 
-- **Node.js is the main runtime.** iOS/macOS via [sym-swift](https://github.com/sym-bot/sym-swift); Python, Rust, Go not yet implemented — open an issue if you're starting one.
-- **Corporate networks often block mDNS multicast.** If LAN discovery fails on the same wifi, fall back to a relay.
-- **E2E encryption is per-peer-pair, not universal.** CMB field bodies are encrypted (X25519 + AES-256-GCM) between peers that both advertise an E2E key; others fall back to plaintext. Outer-frame metadata (sender, timestamp, lineage) stays plaintext — enough to relay and gate without reading bodies.
-- **One identity per process.** Two agents on one machine can't share a `SYM_NODE_NAME`; each needs a distinct name (enforced by a lockfile).
-- **Node names aren't unique across devices.** The lockfile only guards duplicates on the *same* machine. Two installs of the same app on *different* devices (e.g. the iPhone and iPad build both naming themselves `myapp`) advertise the same name, and peers can't tell them apart — they collapse to one peer record, breaking per-device attribution, targeted `sym send`, and CMB dedup. Give each device-side install a unique node name (`myapp-iphone`, or `myapp-<deviceID>`).
-- **No offline directory.** `sym peers` shows who's online now — there is no registry of offline-but-known peers, by design.
+**Does SYM collect your code or data?** No. On your machine and your LAN, everything stays local — communication and storage never leave your own network. To reach across networks you connect through a relay, which forwards CMBs whose bodies are **end-to-end encrypted** between your peers: the relay routes them, it can't read them — only outer-frame metadata (sender, timestamp, lineage) is visible, enough to deliver. Local is free and private by default; remote is *your* authenticated relay, never a third party reading your data.
 
 ## References
 
