@@ -611,6 +611,19 @@ function cmdSend() {
  * agents informed it. With no provider configured it prints the raw
  * contributions instead of erroring, so it always tells you something.
  */
+// End `sym ask` without forcing teardown mid-close. Calling process.exit()
+// while the synthesis transport (a spawned claude subprocess's stdio pipes,
+// or a fetch socket) is still closing trips a libuv assertion on Windows
+// (UV_HANDLE_CLOSING -> exit 0xC0000409). So prefer a natural drain — set the
+// code and return — with a deferred, unref'd fallback that force-exits only if
+// some idle keep-alive handle lingers, by which point the closing handle is
+// long gone (so the force-exit can't hit the assertion either).
+function endAsk() {
+  process.exitCode = 0;
+  const t = setTimeout(() => process.exit(0), 300);
+  if (t && t.unref) t.unref();
+}
+
 async function cmdAsk() {
   const askArgs = args.slice(1).filter((a) => a !== '--json' && a !== '--raw');
   const rawOnly = args.includes('--raw');
@@ -641,17 +654,17 @@ async function cmdAsk() {
       const agents = new Set(contributions.map((c) => c._node)).size;
       console.log('\n' + (text || '').trim() + '\n');
       console.log(dim(`  — synthesized from ${contributions.length} contribution(s) across ${agents} agent(s) on the mesh`));
-      process.exit(0);
+      return endAsk();
     } catch (err) {
       console.error(dim(`  (synthesis failed: ${(err.message || '').slice(0, 120)} — showing raw contributions)`));
       printContributions(question, contributions, true);
-      process.exit(0);
+      return endAsk();
     }
   }
 
   // No provider, --raw, or nothing gathered: show what the mesh knows.
   printContributions(question, contributions, llm.hasProvider());
-  process.exit(0);
+  return endAsk();
 }
 
 /**

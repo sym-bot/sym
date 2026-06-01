@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.2
+
+### Fixed (Windows — COO bisected it on re-test)
+
+- **`sym ask` still crashed on Windows in 0.7.1** — the 0.7.1 broadcast-socket fix was necessary but not the culprit. COO bisected the crash to the **synthesis path**: `process.exit(0)` was firing while the LLM call's handles (a spawned `claude` subprocess's stdio pipes, or a fetch socket) were still closing, tripping the libuv `UV_HANDLE_CLOSING` assertion (`0xC0000409`). Fix: `sym ask` no longer force-exits — it sets the exit code and lets the event loop drain naturally (so closing handles finish cleanly), with a deferred unref'd fallback that force-exits only if an idle keep-alive handle lingers (by which point nothing is mid-close). Verified prompt clean exit (≈130ms, no provider).
+
 ## 0.7.1
 
 ### Fixed (Windows — found by COO's cross-machine test on a real Windows box)
