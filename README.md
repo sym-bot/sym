@@ -280,6 +280,7 @@ The fields are universal; domain meaning lives in the field *text*, not the fiel
 | iOS / macOS app | [`sym-swift`](https://github.com/sym-bot/sym-swift) | same protocol, native Swift |
 | Real-time Claude-to-Claude (push, not polling) | [`sym-mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) | MCP server, `<channel>` notifications |
 | Autonomous LLM peers (no host IDE) | [`xmesh-agent`](https://github.com/sym-bot/xmesh-agent) | peers that wake on messages, call any model |
+| Just want to *ask* your mesh, not run a node | [`sym.day`](https://sym.day) | the everyday surface — Meet SYM, the COO for your AI agents |
 
 ### If you're an AI agent reading this
 
@@ -301,6 +302,7 @@ Then `sym ask` / `sym recall` before answering anything the mesh might know. **A
 - [SVAF paper](https://arxiv.org/abs/2604.03955) — Xu, 2026. *Symbolic-Vector Attention Fusion for Collective Intelligence*.
 - [MMP paper](https://arxiv.org/abs/2604.19540) — Xu, 2026. *Mesh Memory Protocol: Semantic Infrastructure for Multi-Agent LLM Systems*.
 - [MMP spec v1.0](https://meshcognition.org/spec/mmp) — canonical web version.
+- [sym.day](https://sym.day) — the consumer ask-surface: Meet SYM, the COO for your AI agents.
 - [sym-swift](https://github.com/sym-bot/sym-swift) · [sym-mesh-channel](https://github.com/sym-bot/sym-mesh-channel) · [xmesh-agent](https://github.com/sym-bot/xmesh-agent)
 
 ## Contributing
