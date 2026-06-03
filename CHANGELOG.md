@@ -2,6 +2,16 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.4
+
+### Added
+
+- **Same-host loopback discovery** — co-resident SymNodes now mesh with no network interface. mDNS multicasts over an interface, so with Wi-Fi off two nodes on one host couldn't discover each other even though each already listens on a TCP port and could connect over `127.0.0.1`. `BonjourDiscovery` now runs a filesystem-registry path alongside Bonjour: each node advertises its loopback endpoint to `~/.sym/loopback/<nodeId>.json` (`{nodeId, name, port, pid, serviceType, ts}`) on a 5s heartbeat, scans for **live** (pid-alive + `ts < 30s`), same-`serviceType` peers, and emits the existing `peer-found` event over `127.0.0.1`. No transport/protocol change — the connection + handshake path is identical to Bonjour. Group isolation by `serviceType` (MMP §5.8); the lower `nodeId` dials (mirrors the Bonjour tie-break) so the pair connects exactly once; quick catch-up scans (300/1200/3000ms) mesh near-simultaneous starts in ~1s.
+
+### Notes
+
+- Additive + backward-compatible: activates on next node start — no config, no forced restart, Bonjour path byte-for-byte unchanged. Both nodes must run ≥0.7.4 for same-host loopback meshing (each side must register *and* scan).
+
 ## 0.7.3
 
 ### Changed
