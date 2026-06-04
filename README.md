@@ -272,6 +272,25 @@ The fields are universal; domain meaning lives in the field *text*, not the fiel
 
 > Field-weight profiles per domain, drift thresholds, and the full drift math (`totalDrift = content drift + time decay`) live in the spec so this README stays focused: [MMP Constants →](https://meshcognition.org/spec/mmp/constants) · [CMB Layer 3 →](https://meshcognition.org/spec/mmp/cmb).
 
+## Where this sits — one engine, two surfaces
+
+`sym` (this package) is the universal layer — a CLI + library any agent or language joins, where you pull collective intelligence with `sym ask`. [`sym-mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) is the Claude-Code-native surface built on top of it: peers' thoughts push into Claude's context in real-time, no tool call.
+
+```
+@sym-bot/mesh-channel   the channel · Claude-Code-native · real-time push (<channel>)
+        ▼ depends on
+@sym-bot/sym            this package · any agent, any language · sym ask (pull)
+        ▼ depends on
+@sym-bot/core           the shared MMP + SVAF engine
+```
+
+They're **not alternatives** — the channel is built *on* sym and speaks the same protocol, identity, and SVAF relevance gate, so CLI agents and Claude sessions meet on the same mesh.
+
+**Which do you install?**
+
+- **Other agents (Cursor, Copilot), scripts, any language — or you want the `sym ask` CLI?** → **this package** (`@sym-bot/sym`) + the skill file per agent.
+- **Only using Claude Code, and want agents to coordinate in real-time?** → [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) — it bundles sym's engine, so there's nothing else to add.
+
 ## Run it everywhere
 
 | You have | Use | What it adds |
