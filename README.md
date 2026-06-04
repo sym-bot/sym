@@ -280,9 +280,9 @@ The fields are universal; domain meaning lives in the field *text*, not the fiel
 @sym-bot/mesh-channel   the channel · Claude-Code-native · real-time push (<channel>)
         ▼ depends on
 @sym-bot/sym            this package · any agent, any language · sym ask (pull)
-        ▼ depends on
-@sym-bot/core           the shared MMP + SVAF engine
 ```
+
+Both implement the same open **MMP** protocol and **SVAF** relevance gate underneath.
 
 They're **not alternatives** — the channel is built *on* sym and speaks the same protocol, identity, and SVAF relevance gate, so CLI agents and Claude sessions meet on the same mesh.
 
