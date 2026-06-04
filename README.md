@@ -30,6 +30,8 @@ sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 
 ---
 
+> ⚡ **Running two or more Claude Code sessions?** They can talk in **real time** over the mesh — a peer's finding lands mid-conversation, no tool call, no polling, and they review and ship together. → **[Claude Code Mesh — real-time communication and collaboration among Claude Code sessions](https://github.com/sym-bot/sym-mesh-channel)**
+
 ## What is SYM?
 
 **SYM turns the AI agents you already run into one collective intelligence — so they answer as one mind instead of four strangers.**
