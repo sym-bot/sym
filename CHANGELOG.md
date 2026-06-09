@@ -2,6 +2,18 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.6
+
+### Added
+
+- **SVAF decision log.** Every SVAF evaluation — `aligned` / `guarded` / `redundant` / **`rejected`** — is now persisted and emitted, not just the admitted CMBs. A node's autonomous, per-field admission — including the rejections the memory store never keeps — is observable: `node.decisions({ limit, since, decision, source })`, a live `svaf-decision` event, and an append-only, capped log at `~/.sym/nodes/<name>/decisions/log.jsonl`. Each record carries the per-field `fieldDrifts` + `gateValues`, the evaluated CMB key, and a short focus label — **never the rejected payload** (local-first, label-only). Capped (default 2000; `SYM_DECISION_LOG_CAP`); opt out with `SYM_DECISION_LOG=0`. Additive + backward compatible — `meshmem` and all existing readers are unchanged.
+
+## 0.7.5
+
+### Fixed
+
+- **Mesh replay-storm receive-path dedup (#32).** Received CMBs are deduped by content-hash, so already-seen CMBs are no longer re-surfaced or re-broadcast. Stops the loop where nodes re-dumped their stored history on every (re)connection, flooding the mesh with stale CMBs.
+
 ## 0.7.4
 
 ### Added
