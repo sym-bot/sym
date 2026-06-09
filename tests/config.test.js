@@ -5,10 +5,11 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawn } = require('child_process');
 const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
-  normalizeMdnsHostname, log,
+  normalizeMdnsHostname, pidIsAlive, lockHolderPid, resolveAvailableName, log,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -205,6 +206,104 @@ describe('nodeDir', () => {
     const dir = nodeDir('test-node');
     assert.ok(dir.startsWith(NODES_DIR));
     assert.ok(dir.endsWith('test-node'));
+  });
+});
+
+describe('resolveAvailableName', () => {
+  const base = `test-resolve-${Date.now()}`;
+  const writeLock = (name, pid) => {
+    ensureDir(nodeDir(name));
+    fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), String(pid));
+  };
+  // A real, live, foreign process (our child — alive, pid !== process.pid).
+  let liveChild;
+  before(() => {
+    liveChild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  });
+  after(() => {
+    if (liveChild) { try { liveChild.kill('SIGKILL'); } catch {} }
+    for (let i = 1; i <= 4; i++) {
+      const n = i === 1 ? base : `${base}-${i}`;
+      fs.rmSync(nodeDir(n), { recursive: true, force: true });
+    }
+    fs.rmSync(nodeDir(`${base}-long`), { recursive: true, force: true });
+  });
+
+  it('returns the base name when no lockfile exists', () => {
+    assert.strictEqual(resolveAvailableName(base), base);
+  });
+
+  it('returns the base name when the holder PID is dead (stale lock)', () => {
+    writeLock(base, 2147483646); // implausible PID → ESRCH → treated as free
+    assert.strictEqual(resolveAvailableName(base), base);
+  });
+
+  it('returns the base name when the holder is our own process', () => {
+    writeLock(base, process.pid);
+    assert.strictEqual(resolveAvailableName(base), base);
+  });
+
+  it('suffixes to -2 when the base is held by a live foreign process', () => {
+    writeLock(base, liveChild.pid);
+    assert.strictEqual(resolveAvailableName(base), `${base}-2`);
+  });
+
+  it('skips multiple live holders to the next free suffix', () => {
+    writeLock(base, liveChild.pid);
+    writeLock(`${base}-2`, liveChild.pid);
+    assert.strictEqual(resolveAvailableName(base), `${base}-3`);
+  });
+
+  it('keeps a suffixed slot whose prior holder has died', () => {
+    writeLock(base, liveChild.pid);     // base: live → skip
+    writeLock(`${base}-2`, 2147483646); // -2: dead → reclaimable
+    assert.strictEqual(resolveAvailableName(base), `${base}-2`);
+  });
+
+  it('does not overflow the 64-byte name limit (skips over-long candidates)', () => {
+    // A base near the limit: appending "-2" would exceed 64 bytes, so that
+    // candidate is skipped. With the base held live and no room to suffix,
+    // it falls back to the base (acquireIdentityLock then hard-fails).
+    const longBase = 'x'.repeat(63); // 63 bytes; "-2" → 65 bytes, over limit
+    ensureDir(nodeDir(longBase));
+    fs.writeFileSync(path.join(nodeDir(longBase), 'lock.pid'), String(liveChild.pid));
+    assert.strictEqual(resolveAvailableName(longBase), longBase);
+    fs.rmSync(nodeDir(longBase), { recursive: true, force: true });
+  });
+
+  it('validates the base name (throws on invalid input)', () => {
+    assert.throws(() => resolveAvailableName(''), /non-empty string/);
+  });
+});
+
+describe('pidIsAlive', () => {
+  it('is true for our own process', () => {
+    assert.strictEqual(pidIsAlive(process.pid), true);
+  });
+  it('is false for an implausible/dead PID', () => {
+    assert.strictEqual(pidIsAlive(2147483646), false);
+  });
+  it('is false for non-finite input', () => {
+    assert.strictEqual(pidIsAlive(NaN), false);
+  });
+});
+
+describe('lockHolderPid', () => {
+  const name = `test-holder-${Date.now()}`;
+  after(() => { fs.rmSync(nodeDir(name), { recursive: true, force: true }); });
+
+  it('returns null when no lockfile exists', () => {
+    assert.strictEqual(lockHolderPid(name), null);
+  });
+  it('returns the numeric PID when present', () => {
+    ensureDir(nodeDir(name));
+    fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), '12345');
+    assert.strictEqual(lockHolderPid(name), 12345);
+  });
+  it('returns null for non-numeric content', () => {
+    ensureDir(nodeDir(name));
+    fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), 'not-a-pid');
+    assert.strictEqual(lockHolderPid(name), null);
   });
 });
 
