@@ -2,6 +2,24 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.9
+
+### Added
+
+- **Ingestion flag on surfaced CMBs (MMP §9.2.2).** Because directed delivery and SVAF memory admission are decoupled, a surfaced CMB now declares whether the receiver **ingested** it (remixed into memory with lineage → `remixed: true`) or only **delivered** it (surfaced to the agent but not stored → `remixed: false`, the directed-but-SVAF-rejected case), alongside the SVAF `decision`. Consumers check `remixed` to know whether a directed request is recallable from memory later or transient. Covered by four cases in `tests/inbound-cmb-surfacing.test.js`.
+
+## 0.7.8
+
+### Fixed
+
+- **Directed (peer-bound) CMBs now surface unconditionally (MMP §4.4.4 / §9.2.2).** A CMB sent to a specific recipient (`sym_send to=X`) is a request between two agents and must reach the receiving agent regardless of the SVAF verdict — previously every inbound CMB (directed or broadcast) ran through the group-autonomous SVAF surfacing gate, so a directed coordination CMB scored low (redundant/foreign) by SVAF was silently dropped. Now the send path marks the wire frame with `to` + `directed`, and the receiver surfaces a directed CMB exactly once: on SVAF admit via the existing store path, on SVAF reject/redundant via a dedicated delivery path. SVAF governs memory admission only for directed CMBs, never delivery. Group-bound broadcasts (`sym_observe`, no `to`) stay fully SVAF-gated for surfacing — unchanged.
+
+## 0.7.7
+
+### Fixed
+
+- **Inbound-CMB receive fix — record dedup key after surfacing, not before.** The receive-path dedup recorded a CMB's content-hash key as "seen" before it had actually surfaced, so a first pass that surfaced nothing (an SVAF reject with neutral mood) still poisoned the key — the same CMB re-arriving on the next reconnect was deduped and silently dropped, leaving the node receive-blind. The key is now recorded only after the CMB genuinely surfaces, preserving the anti-replay-storm guarantee without swallowing undelivered CMBs.
+
 ## 0.7.6
 
 ### Added
