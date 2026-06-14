@@ -73,6 +73,17 @@ function wireCopy(frame) {
   return JSON.parse(JSON.stringify(frame));
 }
 
+// A directed (peer-bound) frame: marked with `directed` + `to` = the receiving
+// node's id, the way node.remember({to}) marks a targeted send on the wire
+// (MMP §4.4.4 / §9.2.2). `to` must equal the receiver's nodeId for the
+// directed-delivery branch to fire.
+function directedFrame(receiverNode, focusText, mood) {
+  const frame = cmbFrame(focusText, mood);
+  frame.to = receiverNode.nodeId;
+  frame.directed = true;
+  return frame;
+}
+
 async function settle(ms = 150) {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -155,6 +166,75 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
         assert.strictEqual(bSurfaced, 1, 'B must surface the CMB sent from A');
         assert.strictEqual(aSurfaced, 1, 'A must surface the CMB sent from B');
       });
+    });
+  });
+});
+
+/**
+ * Directed (peer-bound) delivery — MMP §9.2.2.
+ *
+ * A CMB addressed to this node (sym_send to=X → wire frame carries
+ * directed:true + to:<nodeId>) is a request between two agents and MUST be
+ * surfaced to the application layer regardless of the SVAF verdict — SVAF
+ * governs MEMORY admission only, not delivery. A group-bound broadcast (no
+ * `to`) stays fully SVAF-gated for surfacing.
+ *
+ * The surfaced entry carries an ingestion indicator so the agent can tell the
+ * two outcomes apart: `remixed:true` when SVAF admitted it into memory as a
+ * remix, `remixed:false` when it was delivered but not stored (the
+ * directed-but-SVAF-rejected case), alongside the SVAF `decision`.
+ */
+describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () => {
+  it('a directed CMB that SVAF REJECTS still surfaces, flagged remixed:false (delivered-only)', async () => {
+    await withNode('directed-reject', async (node) => {
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const surfaced = [];
+      node.on('cmb-accepted', (e) => surfaced.push(e));
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(directedFrame(node, 'urgent: please review the auth token flow')));
+      await settle();
+      assert.strictEqual(surfaced.length, 1, 'a directed CMB MUST surface even when SVAF rejects it for memory');
+      assert.strictEqual(surfaced[0].directed, true, 'surfaced entry is flagged directed');
+      assert.strictEqual(surfaced[0].remixed, false, 'an SVAF-rejected directed CMB is delivered-only — not ingested');
+      assert.strictEqual(surfaced[0].decision, 'rejected', 'the SVAF verdict travels with the delivered entry');
+    });
+  });
+
+  it('a directed CMB that SVAF ADMITS surfaces flagged remixed:true (ingested)', async () => {
+    await withNode('directed-admit', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const surfaced = [];
+      node.on('cmb-accepted', (e) => surfaced.push(e));
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(directedFrame(node, 'directed observation that aligns with memory')));
+      await settle();
+      assert.strictEqual(surfaced.length, 1, 'a directed CMB that admits surfaces exactly once (admit path)');
+      assert.strictEqual(surfaced[0].remixed, true, 'an admitted CMB is ingested — remixed into local memory');
+    });
+  });
+
+  it('a group-bound broadcast that SVAF REJECTS does NOT surface (broadcast delivery stays SVAF-gated)', async () => {
+    await withNode('broadcast-reject', async (node) => {
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const surfaced = [];
+      node.on('cmb-accepted', (e) => surfaced.push(e));
+      // No `to`/`directed` → group-bound. Neutral mood so the mood fast-path
+      // surfaces nothing either.
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(cmbFrame('ambient broadcast unrelated to my domain')));
+      await settle();
+      assert.strictEqual(surfaced.length, 0, 'a rejected broadcast MUST NOT surface — receiver-autonomous attention');
+    });
+  });
+
+  it('a directed CMB addressed to a DIFFERENT node is treated as a normal broadcast (not force-surfaced)', async () => {
+    await withNode('directed-not-me', async (node) => {
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const surfaced = [];
+      node.on('cmb-accepted', (e) => surfaced.push(e));
+      const frame = cmbFrame('directed at someone else');
+      frame.directed = true;
+      frame.to = 'some-other-node-id'; // not this node's nodeId
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      await settle();
+      assert.strictEqual(surfaced.length, 0, 'a CMB directed at another node must not be force-surfaced here');
     });
   });
 });
