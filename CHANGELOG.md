@@ -2,6 +2,20 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.12 — 2026-06-25
+
+### Added
+
+- **Adaptive integration timescale plumbing for SVAF (the liquid substrate).** New node
+  options `svafAdaptiveTimescale` / `svafMinFreshnessSeconds` / `svafReactivity` /
+  `svafChangeWeights` / `svafRecentWindow`, a bounded ring of recent SVAF verdicts, and
+  call-site plumbing passing `recentDecisions` + the adaptive config into `@sym-bot/core`'s
+  `processHeuristicSVAF` (requires `@sym-bot/core ^0.3.39`). When enabled, the SVAF
+  memory-decay timescale shortens after recent `guarded`/`rejected` verdicts and lengthens
+  when stable — the content gate driving the temporal timescale, instead of a fixed-gain
+  integrator. Off by default. The decision log now records `effectiveTau` + `changeSignal`
+  per heuristic admission.
+
 ## 0.7.9
 
 ### Added
