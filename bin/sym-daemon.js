@@ -397,7 +397,7 @@ function handleIPCMessage(socketId, socket, msg) {
     case 'remember':
       if (msg.fields) {
         try {
-          const entry = node.remember(msg.fields, { tags: msg.tags });
+          const entry = node.remember(msg.fields, { tags: msg.tags, parents: msg.parents });
           if (entry) {
             sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
           } else {

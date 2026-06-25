@@ -6,6 +6,11 @@
 
 ### Added
 
+- **IPC `remember` carries lineage `parents`.** The daemon IPC `remember` now forwards
+  `opts.parents` (each `{ key }`) through to `node.remember`, so a CMB emitted via the IPC
+  client (e.g. mesh-edge's `emitCMB`) can declare its source as a remix edge (MMP §14)
+  rather than bare fields.
+
 - **Adaptive integration timescale plumbing for SVAF (the liquid substrate).** New node
   options `svafAdaptiveTimescale` / `svafMinFreshnessSeconds` / `svafReactivity` /
   `svafChangeWeights` / `svafRecentWindow`, a bounded ring of recent SVAF verdicts, and
