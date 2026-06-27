@@ -434,7 +434,7 @@ async function standaloneObserve(fields, opts) {
   const node = new SymNode({
     name: opts.name,
     cognitiveProfile:
-      `sym-cli one-shot observer (${process.platform}). Emits single CMBs ` +
+      `sym-cli one-shot participant (${process.platform}). Emits single CMBs ` +
       'via `sym observe` without a persistent daemon. Identity is stable ' +
       'across invocations via the cached keypair in ~/.sym/nodes/.',
     svafFieldWeights: {
@@ -444,7 +444,7 @@ async function standaloneObserve(fields, opts) {
     svafFreshnessSeconds: 43200,
     relay: process.env.SYM_RELAY_URL,
     relayToken: process.env.SYM_RELAY_TOKEN,
-    lifecycleRole: 'observer',
+    lifecycleRole: 'participant',
     silent: true,
   });
 

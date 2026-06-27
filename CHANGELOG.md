@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.14 — 2026-06-27
+
+### Changed
+
+- **Lifecycle role `observer` renamed to `participant`** (MMP normalization). Frees the "observ-" stem for the projection/observation distinction (an emitted CMB is a *projection*; an admitted one a peer's *observation*). `participant → validator → anchor`; handshake `lifecycleRole` default is now `participant`. Clean break — no backward-compat alias.
+
 ## 0.7.13 — 2026-06-27
 
 ### Fixed
