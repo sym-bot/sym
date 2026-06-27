@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
+
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

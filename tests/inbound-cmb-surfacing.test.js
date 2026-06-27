@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
+
 /**
  * Regression guard for the PUBLIC "real-time mesh communication" claim:
  * an inbound CMB received from a peer MUST surface to the application layer.

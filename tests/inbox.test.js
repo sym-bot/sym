@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
+
 /**
  * Delivery inbox (pull-based receive) — the SDK-level counterpart to remember()
  * (send). The node buffers every delivered CMB (each 'cmb-accepted') so any

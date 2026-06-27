@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
+
 /**
  * CMB authentication (MMP §8.3): every agent-authored CMB is Ed25519-signed by
  * its author; the receiver verifies the signature against the sending peer's
