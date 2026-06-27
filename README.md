@@ -102,7 +102,7 @@ You don't seed the mesh by hand. When you tell any agent *"the customer is upset
 
 ```bash
 # Your agent does this for you, behind the scenes:
-sym observe '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA","mood":{"text":"frustrated","valence":-0.4,"arousal":0.5}}'
+sym publish '{"focus":"5 customers asking about blue variant","issue":"out of stock, no ETA","mood":{"text":"frustrated","valence":-0.4,"arousal":0.5}}'
 ```
 
 Every such observation is a contribution the next `sym ask` can draw on — and any agent can also answer directly in its own window, informed by what the others shared.
@@ -112,7 +112,7 @@ Every such observation is a contribution the next `sym ask` can draw on — and 
 Scripts, cron jobs, IoT, music players, fitness trackers — anything that can shell out or import a package joins the same mesh by mapping its data to the 7 fields. No LLM required.
 
 ```bash
-sym observe '{"focus":"blue variant restocked","commitment":"arriving Thursday"}'
+sym publish '{"focus":"blue variant restocked","commitment":"arriving Thursday"}'
 sym recall "blue variant"
 ```
 
@@ -191,7 +191,7 @@ Every participant is a full node — cryptographic identity, a per-field relevan
 | **Reach** | how far it travels | same machine = shared store (**nothing to run**) · same WiFi = Bonjour/mDNS · across networks = relay |
 | **Scope** | who's in the conversation | **group** — the default `_sym._tcp` mesh, or a named private group |
 
-**On one machine, nothing has to run** — agents share through the local store; `observe` writes, `ask` / `recall` read across them, and each receiving gate keeps what's relevant and drops the rest. To mesh **across machines**, each one runs a node — that's `sym start`, **the polyglot, real-time node.** Any language that can shell out (`sym observe`, `sym ask`) and read a stream (`sym listen`) is a full real-time peer — Python, Go, a Codex agent on Windows — no per-language SDK. Nodes on the same WiFi discover each other over Bonjour; a relay carries them across networks.
+**On one machine, nothing has to run** — agents share through the local store; `observe` writes, `ask` / `recall` read across them, and each receiving gate keeps what's relevant and drops the rest. To mesh **across machines**, each one runs a node — that's `sym start`, **the polyglot, real-time node.** Any language that can shell out (`sym publish`, `sym ask`) and read a stream (`sym listen`) is a full real-time peer — Python, Go, a Codex agent on Windows — no per-language SDK. Nodes on the same WiFi discover each other over Bonjour; a relay carries them across networks.
 
 ## Groups — your "group chat"
 
@@ -220,7 +220,7 @@ These work from any shell or agent. The first three need nothing running; the ne
 | Command | What it does | Needs daemon |
 |---|---|:---:|
 | **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** | — |
-| `sym observe` | Share a structured 7-field observation to the mesh | — |
+| `sym publish` | Share a structured 7-field observation to the mesh | — |
 | `sym recall <query>` | Semantic search over mesh memory | — |
 | `sym start [--group <name>]` | Start the node (optionally in a group); `--relay-url`/`--relay-token` for WAN | — |
 | `sym join <name>` / `sym leave` | Switch into a group / return to the default mesh | — |

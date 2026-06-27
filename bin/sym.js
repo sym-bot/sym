@@ -12,7 +12,7 @@
  *   sym stop                          # Stop daemon
  *   sym status                        # Show mesh status
  *   sym peers                         # List connected peers
- *   sym observe [flags] <json>        # Share observation (CAT7 fields as JSON)
+ *   sym publish [flags] <json>        # Publish a projection (CAT7 fields as JSON)
  *                                     #   --standalone: daemon-less one-shot SymNode (auto-fallback if daemon is down)
  *                                     #   --name <id>:  mesh identity for standalone mode (default: sym-cli)
  *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
@@ -76,7 +76,7 @@ switch (command) {
   case 'status':  cmdIPC({ type: 'status' }, jsonFlag ? formatJSON : formatStatus); break;
   case 'peers':   cmdIPC({ type: 'peers' }, jsonFlag ? formatJSON : formatPeers); break;
   case 'metrics': cmdIPC({ type: 'metrics' }, jsonFlag ? formatJSON : formatMetrics); break;
-  case 'observe': cmdObserve(); break;
+  case 'publish': cmdPublish(); break;
   case 'recall':  cmdRecall(); break;
   case 'ask':     cmdAsk().catch((e) => { console.error(e.message); process.exit(1); }); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
@@ -290,7 +290,7 @@ function cmdStop() {
 
 
 /**
- * Parse `sym observe` flags out of the positional args. Returns
+ * Parse `sym publish` flags out of the positional args. Returns
  * { positional, standalone, name, parents } where `positional` is
  * the remaining non-flag args (the JSON payload).
  *
@@ -323,12 +323,12 @@ function parseObserveFlags(argv) {
   return out;
 }
 
-function cmdObserve() {
+function cmdPublish() {
   const parsed = parseObserveFlags(args);
   const content = parsed.positional.join(' ');
 
   if (!content) {
-    console.error('Usage: sym observe [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
+    console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
     console.error('  The calling agent (LLM) extracts CAT7 fields. The protocol does not parse raw text.');
     console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
     console.error('  --name:       mesh identity for standalone mode (default: sym-cli).');
@@ -356,7 +356,7 @@ function cmdObserve() {
   if (useStandalone) {
     standaloneObserve(fields, { name: parsed.name, parents: parsed.parents })
       .catch((err) => {
-        console.error('Standalone observe failed:', err.message || err);
+        console.error('Standalone publish failed:', err.message || err);
         process.exit(2);
       });
     return;
@@ -380,7 +380,7 @@ function cmdObserve() {
  *
  * This is the same pattern persistent MeshAgent-based agents use
  * (sym/lib/mesh-agent.js), just scoped to a single emission. It lets
- * any user run `sym observe` without starting sym-daemon first — the
+ * any user run `sym publish` without starting sym-daemon first — the
  * daemon is an optimisation, not a requirement.
  *
  * Node identity is stable across invocations: the SymIdentity layer
@@ -435,7 +435,7 @@ async function standaloneObserve(fields, opts) {
     name: opts.name,
     cognitiveProfile:
       `sym-cli one-shot participant (${process.platform}). Emits single CMBs ` +
-      'via `sym observe` without a persistent daemon. Identity is stable ' +
+      'via `sym publish` without a persistent daemon. Identity is stable ' +
       'across invocations via the cached keypair in ~/.sym/nodes/.',
     svafFieldWeights: {
       focus: 2.0, issue: 1.5, intent: 1.5,
@@ -1060,7 +1060,7 @@ ${bold('Usage:')}
   sym join <name>                    Switch into a group (kebab-case, or "default")
   sym leave                          Return to the default global mesh
   sym metrics                        Show protocol metrics and LLM cost
-  sym observe [flags] <json>         Share observation (CAT7 fields as JSON)
+  sym publish [flags] <json>         Publish a projection (CAT7 fields as JSON)
                                      Flags: --standalone, --name <id>, --parents <keys>
   sym ask "<question>"               Ask the whole mesh one question, get one answer
                                      Flags: --raw (skip synthesis, show contributions)
@@ -1081,7 +1081,7 @@ ${bold('CAT7 fields:')}
 
 ${bold('Examples:')}
   sym start
-  sym observe '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
+  sym publish '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
   sym recall "energy patterns"
   sym ask "should we use UUID v7 or keep v4?"
   sym insight
@@ -1091,11 +1091,11 @@ ${bold('Daemon-less one-shot observations:')}
   # daemon is down; force with --standalone. Uses ~/.sym/relay.env
   # for relay credentials. Identity is stable across invocations via
   # the cached keypair in ~/.sym/nodes/<name>/.
-  sym observe --standalone --name claude-code-mac \\
+  sym publish --standalone --name claude-code-mac \\
     '{"focus":"resolved 3 review board tickets","mood":{"text":"focused","valence":0.3,"arousal":0.2}}'
 
   # Remix with lineage (resolve upstream tickets). --parents implies --standalone.
-  sym observe --name claude-code-mac --parents cmb-876bbd483a,cmb-c0d4332a \\
+  sym publish --name claude-code-mac --parents cmb-876bbd483a,cmb-c0d4332a \\
     '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
 `);
 }

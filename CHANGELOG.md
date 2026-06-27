@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.15 — 2026-06-27
+
+### Changed
+
+- **CLI `sym observe` → `sym publish`** (+ the bundled `sym` skill), matching the MCP tool rename to canonical EIP verbs. Publishing emits a projection of the agent's state; the cognitive mechanism terms stay in the spec. Clean break — no alias.
+
 ## 0.7.14 — 2026-06-27
 
 ### Changed
