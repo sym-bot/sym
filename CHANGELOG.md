@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.17 — 2026-06-27
+
+### Notes
+
+- Reconciliation release: 0.7.16 (store rename + migration + role/EIP renames) was published off a stale main; 0.7.17 is the same content rebased onto origin, now also including #31 (lib-level resolveAvailableName) and #33 (ws 8.21.0). No new changes beyond the merge.
+
 ## 0.7.16 — 2026-06-27
 
 ### Changed
