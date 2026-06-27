@@ -96,6 +96,42 @@ describe('BonjourDiscovery', () => {
   });
 });
 
+describe('loopback self-clean on abrupt exit', () => {
+  it('removes the endpoint file when the process exits without stop()', () => {
+    const { spawnSync } = require('node:child_process');
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+
+    // Isolated HOME so we touch a temp loopback dir, not the real ~/.sym.
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-exit-'));
+    const discoveryPath = path.resolve(__dirname, '../lib/discovery.js');
+    // Child starts the loopback registry (writes the endpoint), then exits
+    // WITHOUT calling stop() — the exit hook must still unlink the file.
+    const src = `
+      const fs = require('fs');
+      const { BonjourDiscovery } = require(${JSON.stringify(discoveryPath)});
+      const d = new BonjourDiscovery({ mdns: false });
+      d._identity = { nodeId: 'exit-hook-test', name: 'exit-hook-test' };
+      d._port = 12345; d._serviceType = '_sym._tcp'; d._log = () => {};
+      d._scanLoopback = () => {};
+      d._startLoopbackRegistry();
+      process.stdout.write(d._regFile);
+      process.exit(0);
+    `;
+    const r = spawnSync(process.execPath, ['-e', src], {
+      env: { ...process.env, HOME: tmpHome },
+      encoding: 'utf8',
+    });
+
+    const regFile = r.stdout.trim();
+    assert.ok(regFile.startsWith(tmpHome), `endpoint should write under temp HOME, got ${regFile}`);
+    assert.ok(!fs.existsSync(regFile), 'endpoint file must be removed on exit');
+
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+});
+
 describe('Discovery base class', () => {
   it('should have start and stop methods', () => {
     const d = new Discovery();

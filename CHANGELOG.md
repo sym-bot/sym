@@ -2,6 +2,19 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.13 — 2026-06-27
+
+### Fixed
+
+- **Loopback registry self-cleans on abrupt exit.** A node writes
+  `~/.sym/loopback/<nodeId>.json` on start and `stop()` unlinks it on graceful
+  teardown — but a process that exits or is killed without calling `stop()`
+  (test runs that just finish, Ctrl-C) left the registration behind as a stale
+  "group" until a pid-liveness check filtered it out. Now a one-shot sync unlink
+  is registered on `process.on('exit')` so the common case self-cleans; the
+  listener is removed again in `stop()`. (SIGKILL still can't be caught — that
+  residue is what the pid-liveness check in readers is for.)
+
 ## 0.7.12 — 2026-06-25
 
 ### Added
