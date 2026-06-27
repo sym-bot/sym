@@ -495,7 +495,7 @@ async function standaloneObserve(fields, opts) {
 }
 
 /**
- * Federated recall — scan all local node meshmem stores directly from
+ * Federated recall — scan all local node cmbs stores directly from
  * the CLI process. The CLI-host daemon does not store CMBs (cliHostMode);
  * each running agent stores its own copy. We dedupe by CMB key (each CMB
  * has a unique content-addressable key, so the same CMB landing in 5
@@ -537,7 +537,7 @@ function cmdRecall() {
 
   const seen = new Map(); // cmbKey → entry
   for (const nodeName of nodeNames) {
-    const memDir = path.join(nodesDir, nodeName, 'meshmem');
+    const memDir = path.join(nodesDir, nodeName, 'cmbs');
     if (!fs.existsSync(memDir)) continue;
     let files;
     try { files = fs.readdirSync(memDir); } catch { continue; }
@@ -722,7 +722,7 @@ function gatherMeshMemory(question, limit) {
   } catch { return []; }
 
   for (const nodeName of nodeNames) {
-    const memDir = path.join(nodesDir, nodeName, 'meshmem');
+    const memDir = path.join(nodesDir, nodeName, 'cmbs');
     if (!fs.existsSync(memDir)) continue;
     let files;
     try { files = fs.readdirSync(memDir); } catch { continue; }

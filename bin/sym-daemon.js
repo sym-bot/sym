@@ -42,7 +42,7 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { SymNode } = require('../lib/node');
+const { SymNode, migrateStores } = require('../lib/node');
 
 // ── Global error handlers ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
@@ -121,6 +121,10 @@ if (!isValidGroup(GROUP)) {
 log(`Mesh group: ${GROUP} (${groupServiceType(GROUP)})`);
 
 // ── SYM Node ───────────────────────────────────────────────────
+
+// One-time bulk store migration (meshmem/ → cmbs/) for all non-live nodes,
+// run on daemon start so readers use the cmbs/ name with no fallback.
+try { const n = migrateStores(); if (n) log(`Migrated ${n} node store(s): meshmem → cmbs`); } catch { /* non-fatal */ }
 
 const node = new SymNode({
   name: NODE_NAME,

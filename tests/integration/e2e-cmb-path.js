@@ -11,7 +11,7 @@
  *   2. The wire frame reaches nodeB's frame-handler (a `message` event
  *      or `mood-delivered` event fires on nodeB — either proves SVAF
  *      ran on the inbound frame).
- *   3. If SVAF admits the CMB, nodeB's meshmem contains a remix entry
+ *   3. If SVAF admits the CMB, nodeB's cmbs contains a remix entry
  *      with `svaf.{decision, totalDrift, fieldDrifts}` populated and
  *      `lineage.parents` pointing back to nodeA's CMB key.
  *

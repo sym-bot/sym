@@ -31,7 +31,7 @@ function runAsk(homeDir, argv) {
 }
 
 function seedMemory(homeDir, nodeName, key, entry) {
-  const dir = path.join(homeDir, '.sym', 'nodes', nodeName, 'meshmem');
+  const dir = path.join(homeDir, '.sym', 'nodes', nodeName, 'cmbs');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `cmb-${key}.json`), JSON.stringify(entry));
 }

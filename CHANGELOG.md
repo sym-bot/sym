@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.16 — 2026-06-27
+
+### Changed
+
+- **Per-node CMB store dir renamed `meshmem/` → `cmbs/`** (it stores CMBs). A fresh node self-migrates its own dir on construct; `migrateStores()` (exported) bulk-renames every NON-live node at sym/mesh-channel install (live nodes are skipped — they self-migrate on restart). Readers read `cmbs/` only — clean break, no fallback. Very old `memories/` stores still migrate via the field-mapped path.
+
 ## 0.7.15 — 2026-06-27
 
 ### Changed
