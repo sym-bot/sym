@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.18 — 2026-06-28
+
+### Fixed
+
+- **Inbox pull path preserves the opaque payload.** A CMB's `payload` is a sibling of `cmb.fields`, but `_pushInbox` copied only `fields` — so any CMB pulled via `node.inbox()` (the `sym_receive` / `sym_fetch` path) silently lost its payload, while the channel-push path (reading `entry.cmb.payload`) kept it. Structured agent-to-agent data now survives cross-device directed delivery on both paths. Regression-tested in `tests/inbox.test.js`.
+
 ## 0.7.17 — 2026-06-27
 
 ### Notes
