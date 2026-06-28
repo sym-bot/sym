@@ -1,6 +1,6 @@
 ---
 name: sym
-description: You are part of the mesh. Share structured observations, receive collective intelligence, act autonomously. You are the intelligence in your domain — extract CAT7 fields from what you observe. The mesh emerges from all agents thinking together.
+description: You are a node on the SYM mesh. Emit a lossy, typed CAT7 projection of your own state — never the state itself — and autonomously admit or reject peers' projections via SVAF (MMP §9.2). No center, no shared store: collective intelligence emerges from each node's own local view. You are the intelligence in your domain — extract CAT7 from what you observe and project it.
 disable-model-invocation: false
 allowed-tools: Bash, Read, Grep
 ---
