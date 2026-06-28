@@ -77,4 +77,29 @@ describe('node.inbox() — pull-based receive', () => {
       assert.strictEqual(node.inboxGet('in9999'), null, 'unknown id → null');
     });
   });
+
+  it('preserves the opaque payload on the pulled message', async () => {
+    // Regression: the payload sits at cmb.payload (sibling of cmb.fields), and
+    // _pushInbox used to copy only fields — so structured agent-to-agent data
+    // silently vanished on the pull (sym_receive/sym_fetch) path while surviving
+    // the channel-push path. It must reach the inbox message intact.
+    await withNode('inbox-payload', async (node) => {
+      const payload = { request_id: 'r1', prompt: 'beyond CAT7', nested: { n: 42 } };
+      node.emit('cmb-accepted', {
+        source: 'peerA',
+        content: 'focus: with-payload',
+        cmb: { key: 'cmb-pl', fields: { focus: { text: 'with-payload' } }, payload },
+      });
+      const { messages } = node.inbox();
+      assert.strictEqual(messages.length, 1);
+      assert.deepStrictEqual(messages[0].payload, payload, 'payload survives the inbox pull path');
+
+      node.emit('cmb-accepted', {
+        source: 'peerA',
+        content: 'focus: no-payload',
+        cmb: { key: 'cmb-np', fields: { focus: { text: 'no-payload' } } },
+      });
+      assert.strictEqual(node.inbox().messages[0].payload, null, 'no payload → null, not undefined');
+    });
+  });
 });
