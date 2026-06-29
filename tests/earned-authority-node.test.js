@@ -10,10 +10,24 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
+const crypto = require('crypto');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir, loadOrCreateIdentity } = require('../lib/config');
-const { verifyAttestationRole } = require('@sym-bot/core');
+const { verifyAttestationRole, signAttestation } = require('@sym-bot/core');
+
+function kp(nodeId) {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  return {
+    nodeId,
+    priv: privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(16).toString('base64url'),
+    pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
+  };
+}
+function att(by, role, verdict, fields, priv) {
+  const a = { of: 'cmb-agg', by, at: Date.now(), roster: 'g', method: 'heuristic', verdict, fields, role, seq: 1, prev: null };
+  return signAttestation(a, priv);
+}
 
 // A node configured as its OWN anchor (the founder-anchor case): pre-create the
 // identity so we can pin it as the anchor before constructing the node.
@@ -112,6 +126,61 @@ describe('§6.5 enforcement — validate/canonize gated on earned authority (EA4
       assert.strictEqual(node._store.getLifecycle(key), 'validated');
       assert.strictEqual(node._store.canonizeCMB(key, { byRole: 'validator' }).reason, 'insufficient-authority');
       assert.strictEqual(node._store.getLifecycle(key), 'validated', 'canonize blocked — stays validated');
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+});
+
+describe('aggregateAttestations — weighted by earned authority (EA6)', () => {
+  it('weights verdicts by resolved rank, excludes unverifiable, flags over-claims', () => {
+    const { node, name } = anchorNode('ea-agg');
+    try {
+      const V = kp('val'), P = kp('part'), O = kp('overclaim'), U = kp('unknown');
+      // teach the node every attester's key, then grant V validator (so V resolves up)
+      for (const x of [V, P, O]) node._roster.pin(x.nodeId, x.pub, 'handshake');
+      node.grantRole(V.nodeId, 'validator');
+
+      // anchor (self, weight 4) + validator (weight 2) admit; participant (weight 1) rejects;
+      // an over-claimer asserts anchor but resolves participant (weight 1, mismatch); and an
+      // attestation whose key we don't have (excluded entirely).
+      node._attestations.record(att(node.nodeId, 'anchor', 'aligned', { focus: 'admit' }, node._identity.privateKey));
+      node._attestations.record(att(V.nodeId, 'validator', 'aligned', { focus: 'admit' }, V.priv));
+      node._attestations.record(att(P.nodeId, 'participant', 'rejected', { focus: 'reject' }, P.priv));
+      node._attestations.record(att(O.nodeId, 'anchor', 'rejected', { focus: 'reject' }, O.priv));
+      node._attestations.record(att(U.nodeId, 'participant', 'aligned', { focus: 'admit' }, U.priv));
+
+      const agg = node.aggregateAttestations('cmb-agg');
+      assert.strictEqual(agg.total, 4, 'four verifiable attestations');
+      assert.strictEqual(agg.weight, 8, '4 + 2 + 1 + 1');
+      assert.deepStrictEqual(agg.byRole, { participant: 2, validator: 1, anchor: 1 });
+      assert.strictEqual(agg.overall.dominant, 'aligned');
+      assert.strictEqual(agg.overall.tally.aligned, 6);
+      assert.strictEqual(agg.overall.tally.rejected, 2);
+      assert.strictEqual(agg.overall.confidence, 0.75, '6/8');
+      assert.strictEqual(agg.fields.focus.dominant, 'admit');
+      assert.strictEqual(agg.fields.focus.tally.admit, 6);
+      // the over-claimer is down-weighted to participant AND surfaced as evidence
+      assert.strictEqual(agg.mismatches.length, 1);
+      assert.strictEqual(agg.mismatches[0].by, O.nodeId);
+      assert.deepStrictEqual({ claimed: agg.mismatches[0].claimed, resolved: agg.mismatches[0].resolved }, { claimed: 'anchor', resolved: 'participant' });
+      // the unverifiable attestation never votes
+      assert.strictEqual(agg.excluded.length, 1);
+      assert.strictEqual(agg.excluded[0].by, U.nodeId);
+      assert.strictEqual(agg.excluded[0].reason, 'unknown-key');
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  it('a tampered attestation is excluded as bad-signature, not weighted', () => {
+    const { node, name } = anchorNode('ea-agg-tamper');
+    try {
+      const P = kp('p');
+      node._roster.pin(P.nodeId, P.pub, 'handshake');
+      const a = att(P.nodeId, 'participant', 'aligned', { focus: 'admit' }, P.priv);
+      a.verdict = 'rejected'; // tamper after signing
+      node._attestations.record(a);
+      const agg = node.aggregateAttestations('cmb-agg');
+      assert.strictEqual(agg.total, 0);
+      assert.strictEqual(agg.excluded.length, 1);
+      assert.strictEqual(agg.excluded[0].reason, 'bad-signature');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
