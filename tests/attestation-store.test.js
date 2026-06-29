@@ -110,3 +110,24 @@ describe('AttestationStore — index by CMB + by attester chain', () => {
     assert.ok(st.has('s3'));
   });
 });
+
+describe('AttestationStore — checkpoints + witnesses', () => {
+  it('records + dedups checkpoints, ordered by upto_seq', () => {
+    const st = new AttestationStore();
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' }).stored, true);
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 16, root: 'r16', sig: 'c16' }).stored, true);
+    assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' }), { stored: false, reason: 'duplicate' });
+    assert.deepStrictEqual(st.checkpointsOf('A').map(c => c.upto_seq), [8, 16]);
+    assert.strictEqual(st.latestCheckpoint('A').upto_seq, 16);
+    assert.strictEqual(st.latestCheckpoint('nobody'), null);
+  });
+
+  it('records witnesses keyed by (attester, upto_seq, witness) and filters by root', () => {
+    const st = new AttestationStore();
+    st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig: 'w1' });
+    st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W2', sig: 'w2' });
+    assert.deepStrictEqual(st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig: 'w1' }), { stored: false, reason: 'duplicate' });
+    assert.strictEqual(st.witnessesFor('A', 8, 'r8').length, 2, 'two distinct witnesses');
+    assert.strictEqual(st.witnessesFor('A', 8, 'r-other').length, 0, 'filtered by the committed root');
+  });
+});

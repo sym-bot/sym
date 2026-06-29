@@ -99,3 +99,26 @@ describe('node indexes its own attestations (every gating event)', () => {
     });
   });
 });
+
+describe('node checkpoints its chain; reconciliation catches omission (D3)', () => {
+  it('commits a checkpoint at the interval; reconcile is consistent, then detects a dropped attestation', () => {
+    withNode('att-cp', { lifecycleRole: 'participant', group: 'g', checkpointInterval: 4 }, (node) => {
+      for (let i = 1; i <= 4; i++) node._buildAdmissionAttestation(`cmb-${i}`, 'aligned', verdicts, 'heuristic');
+      const cp = node._attestations.latestCheckpoint(node.nodeId);
+      assert.ok(cp, 'a checkpoint was committed at the interval');
+      assert.strictEqual(cp.upto_seq, 4);
+
+      let r = node.reconcileChain(node.nodeId);
+      assert.strictEqual(r.consistent, true, 'committed root matches the held chain');
+      assert.strictEqual(r.complete, true);
+      assert.deepStrictEqual(r.gaps, []);
+
+      // Suppress seq 2 from the held chain — the omission test must catch it.
+      node._attestations._byAttester.get(node.nodeId).delete(2);
+      r = node.reconcileChain(node.nodeId);
+      assert.strictEqual(r.complete, false);
+      assert.deepStrictEqual(r.gaps, [2], 'the dropped seq is a detectable gap');
+      assert.strictEqual(r.consistent, false, 'recomputed root no longer matches the witnessed-committed root');
+    });
+  });
+});
