@@ -2,6 +2,16 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.21 — 2026-06-29
+
+### Added
+
+- **Admission Attestation gossip + cross-mesh audit trail with omission-evidence** (Phases D1–D3; requires `@sym-bot/core` `^0.3.43`).
+  - **D1 — index + every gate attested.** `lib/attestation-store.js`: a per-node index keyed by gated-CMB (the audit trail for a CMB) and by attester chain (`seq`). The gate now attests `reject` and `redundant` too (a refusal is the compliance-critical event), so the per-attester chain covers every gating event. `verifyChain` flags `seq` gaps and `prev` breaks — local omission-detection.
+  - **D2 — roster gossip.** Every attestation is gossiped on a dedicated `attestation` frame to roster peers (same-group by mDNS isolation). On receipt the node verifies the attester's *original* Ed25519 signature against its authenticated identity key (a relay never vouches), rate-limits per `(of,by)` against a flood, records, and relays once (epidemic spread). Forged/invalid dropped.
+  - **D3 — checkpoints + witnessing.** The node periodically commits a signed Merkle checkpoint over its attestation chain (`merkleRoot` of the ordered signatures to seq N); roster peers verify and *countersign* it (witness). `reconcileChain(by)` recomputes the root over the held chain vs the witnessed commitment — so dropping any attestation ≤ N after it is witnessed makes the root diverge. Cross-node omission-evidence.
+  - Guarantee: **tamper-evident + omission-evident to the last witnessed checkpoint**, not real-time completeness. Remaining (D4): roster key registry for *relayed*-attester verification + role-at-time, witness-quorum tuning, durable persistence.
+
 ## 0.7.20 — 2026-06-29
 
 ### Added
