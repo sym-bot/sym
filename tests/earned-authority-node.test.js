@@ -69,3 +69,49 @@ describe('node earned-authority wiring (EA2/EA3)', () => {
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
+
+describe('§6.5 enforcement — validate/canonize gated on earned authority (EA4)', () => {
+  // Seed a CMB straight into the store so we have a key to act on.
+  function seed(node) {
+    const key = 'cmb-to-validate';
+    node._store._cache.set(key, { key, lifecycle: 'remixed', anchorWeight: 1.0 });
+    return key;
+  }
+
+  it('a participant cannot validate or canonize — the CMB is left untouched', () => {
+    const name = `ea65-part-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g', anchor: { nodeId: 'someone-else', publicKey: 'AAAA' } });
+    try {
+      const key = seed(node);
+      assert.strictEqual(node._resolvedRole(), 'participant');
+      const v = node.validateCMB(key);
+      assert.deepStrictEqual(v, { ok: false, reason: 'insufficient-authority' });
+      assert.strictEqual(node._store.getLifecycle(key), 'remixed', 'lifecycle unchanged');
+      const c = node.canonizeCMB(key);
+      assert.deepStrictEqual(c, { ok: false, reason: 'insufficient-authority' });
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  it('an anchor can validate AND canonize', () => {
+    const { node, name } = anchorNode('ea65-anchor');
+    try {
+      const key = seed(node);
+      assert.strictEqual(node.validateCMB(key).ok, true);
+      assert.strictEqual(node._store.getLifecycle(key), 'validated');
+      assert.strictEqual(node.canonizeCMB(key).ok, true);
+      assert.strictEqual(node._store.getLifecycle(key), 'canonical');
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  it('validator rank can validate but NOT canonize (canonization is anchor-only)', () => {
+    const { node, name } = anchorNode('ea65-rank');
+    try {
+      const key = seed(node);
+      // exercise the store gate at validator rank directly — validate passes, canonize blocked
+      assert.strictEqual(node._store.validateCMB(key, { byRole: 'validator' }).ok, true);
+      assert.strictEqual(node._store.getLifecycle(key), 'validated');
+      assert.strictEqual(node._store.canonizeCMB(key, { byRole: 'validator' }).reason, 'insufficient-authority');
+      assert.strictEqual(node._store.getLifecycle(key), 'validated', 'canonize blocked — stays validated');
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+});
