@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.19 — 2026-06-29
+
+### Fixed
+
+- **Opaque payload survives the SVAF-admit remix path.** A directed CMB's `payload` (the substrate-level data riding alongside CAT7 — e.g. the LLM request/response primitive) was dropped whenever the *receiver* SVAF-**admitted** it: the fused remix is rebuilt from CAT7 fields and the heuristic fusion returns a fresh `cmb` with no payload, so the payload vanished before reaching the inbox. The same CMB **rejected**-but-directed surfaced the raw message and kept its payload — so payload delivery silently depended on the receiver's per-node SVAF drift. That was the root of the cross-device "payload arrives on some peers, not others" asymmetry (a receiver that admits drops it; one that rejects keeps it) — not an OS or transport difference. `_preserveIncomingPayload` re-attaches the incoming payload onto the fused remix on both the neural and heuristic store paths; payload rides alongside CAT7 and is never part of the `cmbKey` hash, so an admitted `llm-request`/`llm-response` remix correctly carries its substrate data. Regression-tested in `tests/frame-handler-payload.test.js` (unit) and `tests/integration/e2e-payload-receive.js` (two-node e2e). Completes the cross-device payload fix begun in 0.7.18 (which covered only the inbox pull path).
+
 ## 0.7.18 — 2026-06-28
 
 ### Fixed
