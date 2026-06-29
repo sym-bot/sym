@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.20 — 2026-06-29
+
+### Added
+
+- **Admission Attestations persisted on the gated remix** (Phase C; requires `@sym-bot/core` `^0.3.42`). When the SVAF gate ADMITS a CMB, the node signs an Admission Attestation and attaches it to the stored remix (`cmb.admission`) as the durable, attributable audit record: `{ of, by, at, roster, method, verdict, fields, role, seq, prev }`, signed with the node's Ed25519 identity key. `of` binds the original gated CMB key; the per-field `fields` come from the gate's verdict (heuristic) or `field_drifts` mapped through `computeFieldVerdicts` (neural). A per-attester hash-chain (`seq` monotonic, `prev` = sha256 of the previous signature) makes a dropped attestation a detectable gap (omission-evidence backbone; in-memory for now). `role` is the node's *claimed* lifecycle role — consumers verify it against the rooted role-grant chain, never the stamp. The attestation is a CMB-envelope sibling, so it does not affect `cmbKey` or any existing signature. (Reject/redundant attestation, the queryable index, and mesh-wide gossip are the next phase.)
+
 ## 0.7.19 — 2026-06-29
 
 ### Fixed
