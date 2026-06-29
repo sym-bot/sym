@@ -2,6 +2,17 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.23 — 2026-06-29
+
+### Added
+
+- **Earned authority — the lifecycle role a node claims is now earned and verifiable, not self-asserted (MMP §6.5).** A node's validator/anchor authority flows only along signed role-grant chains that terminate at a pinned, non-earnable **anchor** (the founder root); over-reaching, unrooted, and cyclic grants confer nothing (Douceur — authority must bottom out at a pinned root).
+  - `lib/role-grant-store.js` — `RoleGrantStore` holds signed role-grant / role-revoke records and resolves "what role did node N hold at time T" by walking the chain. Signatures verify on ingest against the grantor's announced key (anchor key pinned); whether the grantor actually *held* the rank is a resolve-time, role-at-time property, so an unentitled grant is stored but inert. Persisted append-only, reloaded on construction.
+  - `lib/node.js` — the node pins an anchor (`opts.anchor` or `SYM_FOUNDER_ANCHOR="nodeId:publicKey"`), holds the grant store, and stamps its **resolved** role into attestations + witnesses (so `verifyAttestationRole` checks the stamp against the chain). `grantRole` / `revokeRole` sign + gossip a grant; `resolveRole(nodeId, at)` exposes chain resolution. With no anchor configured the node falls back to the static `lifecycleRole` (backward compatible).
+  - `lib/frame-handler.js` — ingests `role-grant` / `role-revoke` frames (store verifies, relay-once).
+  - **§6.5 enforcement** — `MemoryStore.validateCMB` now requires the caller's resolved role to rank validator-or-above; `canonizeCMB` requires anchor. `node.validateCMB` / `node.canonizeCMB` resolve this node's earned role and let the store enforce, so a participant can advance no CMB's lifecycle.
+  - 17 tests (10 store + 7 node). Earned authority is **dormant until an anchor is pinned** — until then every node uses its static role, unchanged.
+
 ## 0.7.22 — 2026-06-29
 
 ### Added
