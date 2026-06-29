@@ -85,3 +85,17 @@ describe('memory-store persists cmb.admission on the remix', () => {
     });
   });
 });
+
+describe('node indexes its own attestations (every gating event)', () => {
+  it('records each built attestation; chain verifies; CMB trail is queryable', () => {
+    withNode('att-index', { lifecycleRole: 'participant', group: 'g' }, (node) => {
+      const a1 = node._buildAdmissionAttestation('cmb-1', 'aligned', verdicts, 'heuristic');
+      const a2 = node._buildAdmissionAttestation('cmb-2', 'rejected', verdicts, 'neural'); // reject is attested too
+      const a3 = node._buildAdmissionAttestation('cmb-1', 'guarded', verdicts, 'heuristic'); // re-gate cmb-1
+      assert.strictEqual(node.attestationsFor('cmb-1').length, 2, 'both gatings of cmb-1 are in its trail');
+      assert.strictEqual(node.attestationsFor('cmb-2').length, 1);
+      assert.deepStrictEqual([a1.seq, a2.seq, a3.seq], [1, 2, 3], 'one contiguous chain across admit + reject');
+      assert.deepStrictEqual(node.verifyAttestationChain(), { ok: true, gaps: [], breaks: [] });
+    });
+  });
+});
