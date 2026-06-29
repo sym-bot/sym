@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { RoleGrantStore } = require('../lib/role-grant-store');
+const { RosterKeyRegistry } = require('../lib/roster-keys');
 const { signGrant } = require('@sym-bot/core');
 
 function kp(nodeId) {
@@ -126,5 +127,43 @@ describe('RoleGrantStore — signature gate + persistence', () => {
       assert.strictEqual(s2.resolveRole(V.nodeId, T + 1), 'validator', 'reloaded grant still confers');
       assert.strictEqual(s2.size(), 1);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('RoleGrantStore — relayed key learning (grant vouches for grantee key)', () => {
+  // A third node C knows only the anchor's key. It relays a grant A→V that binds V's
+  // key. Because the grant roots at the anchor, C learns V's key end-to-end — without
+  // ever handshaking V — and an unrooted grant teaches it nothing.
+  function grantWithKey(grantee, role, grantor, at) {
+    return signGrant({ type: 'role-grant', grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at, granteeKey: grantee.pub }, grantor.priv);
+  }
+
+  it('a rooted grant pins the grantee key; an unrooted grant pins nothing', () => {
+    const A = kp('A'), V = kp('V'), X = kp('X'), Y = kp('Y');
+    const reg = new RosterKeyRegistry({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
+    const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, keys: reg });
+
+    // anchor → V validator, vouching V's key. C never met V.
+    assert.strictEqual(reg.has(V.nodeId), false);
+    assert.strictEqual(store.record(grantWithKey(V, 'validator', A, T)).stored, true);
+    assert.strictEqual(reg.get(V.nodeId), V.pub, 'learnt V key from the rooted grant');
+    assert.strictEqual(reg.source(V.nodeId), 'grant');
+
+    // X (a participant) grants Y, vouching Y's key — X's key is in the registry (say via
+    // some handshake) so the grant verifies, but X is unrooted so it confers nothing AND
+    // vouches for no key.
+    reg.pin(X.nodeId, X.pub, 'handshake');
+    assert.strictEqual(store.record(grantWithKey(Y, 'validator', X, T)).stored, true);
+    assert.strictEqual(reg.has(Y.nodeId), false, 'unrooted grantor vouches for no key');
+  });
+
+  it('a grant-vouched key cannot override a key already pinned by handshake', () => {
+    const A = kp('A'), V = kp('V');
+    const reg = new RosterKeyRegistry({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
+    const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, keys: reg });
+    reg.pin(V.nodeId, 'real-handshake-key', 'handshake');
+    // a rooted grant vouching a DIFFERENT key for V must not repoint the handshake binding
+    store.record(grantWithKey(V, 'validator', A, T));
+    assert.strictEqual(reg.get(V.nodeId), 'real-handshake-key', 'handshake binding stands');
   });
 });
