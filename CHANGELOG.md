@@ -2,6 +2,15 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.24 — 2026-06-29
+
+### Added
+
+- **Roster key registry (EA5) — verify signatures from peers you never directly met.** A `nodeId` is a uuidv7, independent of its Ed25519 key, so until now a node could only verify CMBs/attestations/grants from *direct* handshake peers; a relayed frame from a non-adjacent node failed as unknown-key (invisible on a fully connected LAN, but it capped the protocol at direct connectivity).
+  - `lib/roster-keys.js` — `RosterKeyRegistry` pins `nodeId→publicKey` by **source precedence** (`anchor` > `handshake` > `grant`-vouched). A weaker-or-equal source can never repoint a stronger binding; equal-strength key conflicts are refused and recorded as evidence; duck-types `Map` `get`/`set` so it drops in where the raw key map was used. Persisted append-only.
+  - **Keys ride the rooted authority chain.** A grant now binds the grantee's key into its *signed* payload (`granteeKey`, `@sym-bot/core` 0.3.45), so a node that never handshook the grantee learns its key from a rooted grant — tamper-evidently, because swapping the key breaks the grantor's signature (the relayer never vouches). The store pins a grantee key only when the grant is **role-effective** (grantor actually held the rank), so an unrooted or over-reaching grant vouches for nothing and cannot poison the registry.
+  - **Node wiring** — handshake pins at `handshake` strength (`_pinPeerKey`, writing both the legacy CMB map and the registry); attestation / checkpoint / witness verification now resolves keys via `_identityKey` (registry first, covering relayed + persisted bindings); `grantRole` binds the grantee's known key. 9 tests; suite 253/253.
+
 ## 0.7.23 — 2026-06-29
 
 ### Added
