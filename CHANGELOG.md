@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.25 — 2026-06-29
+
+### Added
+
+- **Earned-authority-weighted attestation aggregation (EA6).** `node.aggregateAttestations(cmbKey)` folds every attestation about a CMB into a single roster verdict weighted by who actually holds rank. Each attestation is signature-gated against the attester's key from the roster registry (unverifiable ones are *excluded* as evidence, never weighted), then its attester's role is resolved at its own attestation time (role-at-time) from the rooted grant chain; weight is `2^rank` (participant 1, validator 2, anchor 4). Overall and per-CAT7-field verdicts become weighted tallies with a deterministic `dominant` + `confidence` (dominant's share of total weight); over-claims (claimed role ≠ resolved) are down-weighted to the resolved rank and surfaced in `mismatches`. So an anchor's admit outweighs a participant's and a node asserting unearned authority cannot inflate consensus. With no anchor pinned, every attester resolves to participant (uniform weight 1) and this reduces to an unweighted tally — it sharpens the moment authority is activated. 2 tests; suite 255/255.
+
 ## 0.7.24 — 2026-06-29
 
 ### Added
