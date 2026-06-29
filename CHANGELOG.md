@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.22 — 2026-06-29
+
+### Added
+
+- **Admission Attestation audit trail is now durable across restarts.** The attestation index persists every record append-only under the node dir (`attestations.jsonl` / `checkpoints.jsonl` / `witnesses.jsonl`) and reloads it on startup, so the cross-mesh audit trail — attestations, Merkle checkpoints, and witness countersignatures — no longer evaporates from memory when a node restarts. Append-only matches the compliance model (never rewrite); a corrupt line is skipped, never fatal; persistence failures never break gating. On reload the node restores its per-attester chain cursor (`seq`/`head`) from its own reloaded chain, so `seq` stays monotonic and `prev` keeps linking across the restart boundary — otherwise a restart would reset the chain to genesis and read as a false omission. The guarantee is now: tamper-evident + omission-evident to the last witnessed checkpoint, **and durable across restarts**.
+
 ## 0.7.21 — 2026-06-29
 
 ### Added
