@@ -85,6 +85,20 @@ describe('AttestationStore — index by CMB + by attester chain', () => {
     assert.deepStrictEqual(r.breaks, [3]);
   });
 
+  it('rate-limits INGESTED attestations per (of,by); own gating output is never limited', () => {
+    const st = new AttestationStore({ ratePerWindow: 2, rateWindowMs: 1000 });
+    const now = 10000;
+    assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 1, prev: 'genesis', sig: 'i1' }, { ingested: true, now }).stored, true);
+    assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 2, prev: 'x', sig: 'i2' }, { ingested: true, now }).stored, true);
+    assert.deepStrictEqual(st.record({ of: 'c', by: 'A', seq: 3, prev: 'y', sig: 'i3' }, { ingested: true, now }), { stored: false, reason: 'rate-limited' });
+    // a different (of,by) is independent
+    assert.strictEqual(st.record({ of: 'c2', by: 'A', seq: 1, prev: 'genesis', sig: 'i4' }, { ingested: true, now }).stored, true);
+    // own (non-ingested) output is never rate-limited
+    assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 9, prev: 'z', sig: 'own1' }, { ingested: false, now }).stored, true);
+    // window slides: after it elapses, ingest is allowed again
+    assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 4, prev: 'w', sig: 'i5' }, { ingested: true, now: now + 1001 }).stored, true);
+  });
+
   it('bounds memory by evicting the oldest', () => {
     const st = new AttestationStore({ max: 2 });
     st.record({ of: 'c1', by: 'A', seq: 1, prev: 'genesis', sig: 's1' });
