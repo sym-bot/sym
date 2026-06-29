@@ -7,6 +7,9 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { AttestationStore, chainHash } = require('../lib/attestation-store');
 
 /** A well-linked chain of `n` attestations from one attester (seq 1..n, prev links). */
@@ -129,5 +132,48 @@ describe('AttestationStore — checkpoints + witnesses', () => {
     assert.deepStrictEqual(st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig: 'w1' }), { stored: false, reason: 'duplicate' });
     assert.strictEqual(st.witnessesFor('A', 8, 'r8').length, 2, 'two distinct witnesses');
     assert.strictEqual(st.witnessesFor('A', 8, 'r-other').length, 0, 'filtered by the committed root');
+  });
+});
+
+describe('AttestationStore — durable persistence (append-only, reload on construct)', () => {
+  function tmpdir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'att-store-')); }
+
+  it('reloads attestations, checkpoints, and witnesses from disk into a fresh store', () => {
+    const dir = tmpdir();
+    try {
+      const s1 = new AttestationStore({ dir });
+      s1.record({ of: 'cmb-1', by: 'A', seq: 1, prev: 'genesis', sig: 's1' });
+      s1.record({ of: 'cmb-1', by: 'B', seq: 1, prev: 'genesis', sig: 's2' });
+      s1.record({ of: 'cmb-2', by: 'A', seq: 2, prev: chainHash('s1'), sig: 's3' });
+      s1.recordCheckpoint({ by: 'A', upto_seq: 2, root: 'r2', sig: 'cp' });
+      s1.recordWitness({ attester: 'A', upto_seq: 2, root: 'r2', by: 'B', sig: 'wit' });
+
+      const s2 = new AttestationStore({ dir }); // "restart" — reload from disk
+      assert.strictEqual(s2.byCmb('cmb-1').length, 2, 'both cmb-1 attestations reloaded');
+      assert.deepStrictEqual(s2.chainOf('A').map(a => a.seq), [1, 2], 'A chain reloaded in order');
+      assert.deepStrictEqual(s2.verifyChain('A'), { ok: true, gaps: [], breaks: [] }, 'reloaded chain verifies');
+      assert.strictEqual(s2.latestCheckpoint('A')?.upto_seq, 2, 'checkpoint reloaded');
+      assert.strictEqual(s2.witnessesFor('A', 2, 'r2').length, 1, 'witness reloaded');
+      assert.strictEqual(s2.size(), 3);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('reload does not re-append (append-only file is unchanged)', () => {
+    const dir = tmpdir();
+    try {
+      const s1 = new AttestationStore({ dir });
+      s1.record({ of: 'c', by: 'A', seq: 1, prev: 'genesis', sig: 's1' });
+      const file = path.join(dir, 'attestations.jsonl');
+      const before = fs.readFileSync(file, 'utf8');
+      new AttestationStore({ dir }); // reload must not write
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), before, 'reload appended nothing');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('with no dir, nothing is persisted (pure in-memory)', () => {
+    const st = new AttestationStore();
+    assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 1, prev: 'genesis', sig: 's1' }).stored, true);
+    // no throw, no files — purely in-memory
+    assert.strictEqual(st.size(), 1);
   });
 });

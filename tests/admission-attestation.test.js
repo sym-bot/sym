@@ -100,6 +100,32 @@ describe('node indexes its own attestations (every gating event)', () => {
   });
 });
 
+describe('attestation persistence — the audit trail survives a restart', () => {
+  it('reloads the chain and continues seq/prev across a fresh node on the same dir', () => {
+    const name = `att-restart-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    try {
+      const n1 = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g' });
+      const a1 = n1._buildAdmissionAttestation('cmb-1', 'aligned', verdicts, 'heuristic');
+      const a2 = n1._buildAdmissionAttestation('cmb-2', 'rejected', verdicts, 'neural'); // reject attested too
+      assert.deepStrictEqual([a1.seq, a2.seq], [1, 2]);
+
+      // "Restart": a fresh node with the same name → same dir → reloads the trail.
+      const n2 = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g' });
+      assert.strictEqual(n2.attestationsFor('cmb-1').length, 1, 'pre-restart attestation reloaded');
+      assert.strictEqual(n2.attestationsFor('cmb-2').length, 1);
+
+      // The chain cursor continued — the next attestation is seq 3 and links a2,
+      // not a reset to seq 1 (which would read as a gap / false omission).
+      const a3 = n2._buildAdmissionAttestation('cmb-3', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(a3.seq, 3, 'seq continues across restart');
+      assert.strictEqual(a3.prev, crypto.createHash('sha256').update(a2.sig).digest('hex'), 'prev links the pre-restart attestation');
+      assert.deepStrictEqual(n2.verifyAttestationChain(), { ok: true, gaps: [], breaks: [] }, 'no gap/break across the restart boundary');
+    } finally {
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
+});
+
 describe('node checkpoints its chain; reconciliation catches omission (D3)', () => {
   it('commits a checkpoint at the interval; reconcile is consistent, then detects a dropped attestation', () => {
     withNode('att-cp', { lifecycleRole: 'participant', group: 'g', checkpointInterval: 4 }, (node) => {
