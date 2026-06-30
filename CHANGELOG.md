@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.26 — 2026-06-30
+
+### Added
+
+- **Nodes self-report their memory stats over the mesh.** A node is sovereign over its store, so an observer on another machine can never read it — it could only see a node's broadcasts, never what it admitted. Each node now EMITS its own tally to the roster as a lightweight `node-stats` frame (metadata, NOT a CAT7 CMB — it never enters a cognition stream or SVAF): `emitted` = CMBs it authored (store local count), `admitted` = CMBs it accepted from peers (store peer count), `memory` = total. Gossiped on start and every `statsInterval` (default 15s). `frame-handler` ingests a peer's `node-stats` and the node re-emits it as a `node-stats` event for hosts (e.g. the Mesh Edge observer) to render. Self-reported and unsigned — a convenience metric, not stored or treated as authority. Lets any observer show real emitted/admitted counts for every node, including cross-machine agents whose stores are unreadable locally. 3 tests; suite 258/258.
+
 ## 0.7.25 — 2026-06-29
 
 ### Added
