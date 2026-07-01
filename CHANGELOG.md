@@ -2,6 +2,15 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.27 — 2026-07-01
+
+### Fixed
+
+- **Stop a cross-node echo/replay storm — own-only anchors + reload-durable dedup.** Two in-memory safeguards that a plugin reload or process restart wiped, plus a missing origin filter, let already-seen CMBs re-circulate across a multi-node mesh:
+  - **Origin filter on anchor exchange (`node.js`).** On peer connect a node sent its 5 most-recent *store* entries as SVAF anchors with no origin check, so it re-forwarded CMBs it had merely *received* from other peers — the A→B→C→A amplifier. Anchors are now the node's **own** emissions only (`peerId == null`); a peer learns each node's state from that node directly, so own-origin anchors suffice.
+  - **Reload-durable receive dedup (`frame-handler.js`).** The receive-path dedup cache (`_seenCmbKeys`) was in-memory only, so a reload made every already-processed CMB look new again. It now persists to a dotfile beside the store (TTL-pruned on load, throttled write, best-effort — any FS error degrades to in-memory), so reloads and version skew are non-fatal.
+  - Verified: own-only anchors forward 0 peer CMBs; the dedup cache rehydrates across a simulated reload; expired keys prune on load. Suite 258/258.
+
 ## 0.7.26 — 2026-06-30
 
 ### Added
