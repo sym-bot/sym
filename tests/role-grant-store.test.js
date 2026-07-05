@@ -105,6 +105,62 @@ describe('RoleGrantStore.resolveRole — anchor-rooted, Sybil-resistant', () => 
   });
 });
 
+describe('RoleGrantStore — revocation actually contains a compromised grantor', () => {
+  it('backdating cannot resurrect a revoked grantor\'s authority', () => {
+    // A grants B validator (t1); A revokes B (t3). B still holds its key and signs a
+    // fresh grant to X BACKDATED to t2 < t3 (when B was a validator). It must not
+    // confer: the grantor is re-resolved at query time and is revoked.
+    const A = kp('A'), B = kp('B'), X = kp('X');
+    const st = storeWith(A, [B, X]);
+    st.record(grant('role-grant', B, 'validator', A, T));
+    st.record(grant('role-revoke', B, undefined, A, T + 300));
+    assert.strictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)).stored, true, 'backdated grant is stored (signature is valid)');
+    assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'but it confers nothing — backdating cannot bypass revocation');
+  });
+
+  it('revoking a grantor cascades to everything it granted', () => {
+    // A→B validator (t1); B→C validator (t2); A revokes B (t3). C loses validator.
+    const A = kp('A'), B = kp('B'), C = kp('C');
+    const st = storeWith(A, [B, C]);
+    st.record(grant('role-grant', B, 'validator', A, T));
+    st.record(grant('role-grant', C, 'validator', B, T + 100));
+    assert.strictEqual(st.resolveRole(C.nodeId, T + 150), 'validator', 'C is a validator while B is');
+    st.record(grant('role-revoke', B, undefined, A, T + 200));
+    assert.strictEqual(st.resolveRole(C.nodeId, T + 500), 'participant', 'revoking B cascades: C\'s B-derived authority is gone');
+  });
+
+  it('a grant from a node with independent anchor-rooted authority survives the cascade', () => {
+    // C is granted validator by BOTH B and the anchor A. Revoking B leaves C's
+    // A-rooted grant intact.
+    const A = kp('A'), B = kp('B'), C = kp('C');
+    const st = storeWith(A, [B, C]);
+    st.record(grant('role-grant', B, 'validator', A, T));
+    st.record(grant('role-grant', C, 'validator', B, T + 100));
+    st.record(grant('role-grant', C, 'validator', A, T + 100));
+    st.record(grant('role-revoke', B, undefined, A, T + 200));
+    assert.strictEqual(st.resolveRole(C.nodeId, T + 500), 'validator', 'C keeps its independent A-rooted validator role');
+  });
+});
+
+describe('RoleGrantStore — the grant file is integrity-checked on load', () => {
+  it('a file-forged anchor grant (garbage signature) is rejected on reload', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rg-forge-'));
+    try {
+      const A = kp('A'), attacker = kp('attacker');
+      // An attacker who can write the file — but cannot sign as the anchor — forges an
+      // anchor→attacker anchor grant with a bogus signature.
+      const forged = { type: 'role-grant', grantee: attacker.nodeId, role: 'anchor',
+        grantedBy: A.nodeId, grantedAt: T, granteeKey: attacker.pub,
+        sig: Buffer.alloc(64, 7).toString('base64url'), sigAlg: 'ed25519' };
+      fs.writeFileSync(path.join(dir, 'role-grants.jsonl'), JSON.stringify(forged) + '\n');
+      // Fresh store over the tampered file, anchor pinned from env/config (not the file).
+      const st = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, dir });
+      assert.strictEqual(st.resolveRole(attacker.nodeId, T + 1), 'participant', 'forged grant is not trusted on load');
+      assert.strictEqual(st.size(), 0, 'the forged record is dropped, not stored');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('RoleGrantStore — signature gate + persistence', () => {
   it('rejects a forged grant and an unknown grantor', () => {
     const A = kp('A'), V = kp('V'), imposter = kp('imp');
