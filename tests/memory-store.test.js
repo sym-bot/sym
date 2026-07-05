@@ -227,6 +227,43 @@ describe('MemoryStore', () => {
     }
   });
 
+  it('Canon tier (validated/canonical) never expires — persistent Canon (GAP-A)', () => {
+    // A validated CMB must survive compaction AND purge even when ancient, so the Sym
+    // Canon compounds across days; an observed CMB of the same age is evicted.
+    const dir = path.join(os.tmpdir(), `sym-test-canon-${Date.now()}`);
+    const store = new MemoryStore(dir, 'test-agent');
+    try {
+      const observed = store.write('ephemeral chatter', { tags: ['canon-test'] });
+      const canon = store.write('grounded knowledge', { tags: ['canon-test'] });
+
+      // Promote one to the Canon tier (validator authority required).
+      const res = store.validateCMB(canon.key, { byRole: 'validator' });
+      assert.ok(res.ok, 'validateCMB should succeed with validator role');
+      assert.strictEqual(store.getLifecycle(canon.key), 'validated');
+
+      // Backdate both far past any freshness window.
+      const ancient = Date.now() - 10 * 86_400_000; // 10 days
+      store._index.get(observed.key).storedAt = ancient;
+      store._index.get(canon.key).storedAt = ancient;
+
+      // Aggressive compaction: everything past cutoff → cold, EXCEPT Canon tier.
+      store.compactByOrigin(0, 0);
+      assert.strictEqual(store._index.get(observed.key).tier, 'cold',
+        'observed CMB compacts to cold when ancient');
+      assert.strictEqual(store._index.get(canon.key).tier, 'hot',
+        'validated CMB stays hot — Canon tier exempt from compaction');
+
+      // Purge removes cold-without-descendants; Canon tier survives regardless.
+      store.purge();
+      assert.strictEqual(store.get(observed.key), null,
+        'observed CMB is purged');
+      assert.ok(store.get(canon.key), 'validated CMB survives purge — persists in Canon');
+      assert.strictEqual(store.getLifecycle(canon.key), 'validated');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('should receive from peer', () => {
     const peerEntry = {
       key: 'peer-mem-1',
