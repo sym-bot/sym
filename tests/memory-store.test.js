@@ -242,4 +242,20 @@ describe('MemoryStore', () => {
     const results = store.search('peer observation');
     assert.ok(results.length >= 1, 'should find peer memory');
   });
+
+  it('preserves the wire ancestor chain — the root is not dropped across hops (MMP §15.2)', () => {
+    // C receives B's remix, which carries the full chain [root-A] on the wire, but
+    // B's key is not in C's index (C stores its own remix, never the incoming CMB).
+    // The stored ancestors MUST keep root-A — recomputing from the index alone
+    // would drop it and break offline-remix detection.
+    const cmb = {
+      createdBy: 'peer-c', createdAt: Date.now(),
+      fields: { focus: { text: 'c remix of b' }, mood: { text: 'steady' } },
+      lineage: { parents: ['remix-B'], ancestors: ['root-A', 'remix-B'], method: 'SVAF-v2' },
+    };
+    const stored = store.receiveFromPeer('peer-c', { cmb, content: 'c remix of b', source: 'peer-c' });
+    assert.ok(stored, 'stored');
+    assert.ok(stored.lineage.ancestors.includes('root-A'), 'root-A preserved from the wire chain');
+    assert.ok(stored.lineage.ancestors.includes('remix-B'), 'parent B included');
+  });
 });
