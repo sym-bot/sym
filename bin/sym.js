@@ -542,7 +542,7 @@ function cmdRecall() {
     let files;
     try { files = fs.readdirSync(memDir); } catch { continue; }
     for (const file of files) {
-      if (!file.startsWith('cmb-') || !file.endsWith('.json')) continue;
+      if (!file.startsWith('cmb') || !file.endsWith('.json')) continue;
       const key = file.slice(0, -5);
       if (seen.has(key)) continue;
       try {
@@ -727,7 +727,7 @@ function gatherMeshMemory(question, limit) {
     let files;
     try { files = fs.readdirSync(memDir); } catch { continue; }
     for (const file of files) {
-      if (!file.startsWith('cmb-') || !file.endsWith('.json')) continue;
+      if (!file.startsWith('cmb') || !file.endsWith('.json')) continue;
       const key = file.slice(0, -5);
       if (seen.has(key)) continue;
       try {
