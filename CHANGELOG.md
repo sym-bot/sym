@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.7.30 (2026-07-07)
+
+- **fix (cross-peer grounding):** `remember()` with parents now mints the
+  REMIX-scheme `cmb1-` key (§8.2.1 role dispatch). Previously a lineage-bearing
+  authored CMB carried a root-scheme key, failed the receiver's content
+  re-verification, and was hard-rejected as forged — agent-authored grounding
+  CMBs silently never landed on any peer. Two-node regression test included.
+- **feat (`sym emit` + `sym/emit`):** MMP Class 1 Emitter (§17.1) — one-shot,
+  signed CAT7 emission to a remote mesh node with the emitter's own persistent
+  identity. No daemon, no store, no identity lock. CLI:
+  `sym emit --server <host:port> [--group] [--name] [--to] [--parents] '{...}'`;
+  programmatic: `require('sym').emit` → `emitOnce()` / `connect()`. LAN TCP;
+  relay emission lands with one-shot E2E (§18.2.1). Real-TCP e2e tests.
+- deps: @sym-bot/core ^0.3.48 (tether attestations, recomputeKey export,
+  retroactive-audit evaluation, conformance vectors + schemas).
+
 ## 0.7.27 — 2026-07-01
 
 ### Fixed
