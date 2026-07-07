@@ -25,7 +25,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady } = require('@sym-bot/core');
+const { createCMB, isSemanticReady, verifyTetherAttestation, kernelId } = require('@sym-bot/core');
 
 // The tether's reject-floor calibration assumes the semantic kernel (the
 // production default — §9.2.1: thresholds are meaningful only within a pinned
@@ -112,6 +112,17 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       assert.strictEqual(cmb.provenance.tether.severed, true);
       assert.ok(cmb.provenance.tether.drift > 0.5, `drift ${cmb.provenance.tether.drift} exceeds the reject floor`);
       assert.ok(cmb.provenance.tether.departedFrom, 'departed source recorded informally');
+
+      // §15.8 tether attestation: the integrator's signed record of this exact
+      // evaluation rides the remix, verifiable against the node's identity key,
+      // and names the kernel the verdict was made in.
+      const att = cmb.tether;
+      assert.ok(att, 'tether attestation attached');
+      assert.strictEqual(att.verdict, 'severed');
+      assert.strictEqual(att.of, cmb.key);
+      assert.strictEqual(att.kernelId, kernelId(), 'attestation names the evaluating kernel');
+      const v = verifyTetherAttestation(att, node._identity.publicKey);
+      assert.deepStrictEqual({ signed: v.signed, valid: v.valid }, { signed: true, valid: true });
     });
   });
 
@@ -124,6 +135,7 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       assert.ok(cmb.lineage.ancestors.includes(root.key), 'chain still reaches its root');
       assert.strictEqual(cmb.provenance.tether.severed, false);
       assert.ok(cmb.provenance.tether.drift <= 0.5);
+      assert.strictEqual(cmb.tether?.verdict, 'tethered', 'kept chains carry a tethered attestation');
     });
   });
 
