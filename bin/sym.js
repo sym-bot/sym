@@ -16,6 +16,9 @@
  *                                     #   --standalone: daemon-less one-shot SymNode (auto-fallback if daemon is down)
  *                                     #   --name <id>:  mesh identity for standalone mode (default: sym-cli)
  *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
+ *   sym emit [flags] <json>           # One-shot Class 1 emit to a REMOTE mesh node (no daemon, §17.1)
+ *                                     #   --server <host:port> (required), --group <g>, --name <id>,
+ *                                     #   --to <node>, --parents <keys>
  *   sym recall <query>                # Search mesh memory
  *   sym ask "<question>"              # Ask the whole mesh; get one synthesized answer
  *   sym insight                       # Get xMesh collective intelligence
@@ -77,6 +80,7 @@ switch (command) {
   case 'peers':   cmdIPC({ type: 'peers' }, jsonFlag ? formatJSON : formatPeers); break;
   case 'metrics': cmdIPC({ type: 'metrics' }, jsonFlag ? formatJSON : formatMetrics); break;
   case 'publish': cmdPublish(); break;
+  case 'emit':    cmdEmit().catch((e) => { console.error(e.message); process.exit(1); }); break;
   case 'recall':  cmdRecall(); break;
   case 'ask':     cmdAsk().catch((e) => { console.error(e.message); process.exit(1); }); break;
   case 'insight': cmdIPC({ type: 'xmesh-context' }, formatInsight); break;
@@ -321,6 +325,46 @@ function parseObserveFlags(argv) {
     else { out.positional.push(a); }
   }
   return out;
+}
+
+/**
+ * sym emit — one-shot MMP Class 1 emitter (§17.1): deliver a signed CAT7
+ * block to a REMOTE mesh node over TCP. No daemon, no store, no identity
+ * lock — the light door for CI jobs, sensors, and scripts. Contrast with
+ * `sym publish`, which speaks AS this machine's resident node via IPC.
+ */
+async function cmdEmit() {
+  const flags = { server: null, group: 'default', name: 'emitter', to: null, parents: [] };
+  const positional = [];
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--server') flags.server = args[++i];
+    else if (a === '--group') flags.group = args[++i];
+    else if (a === '--name') flags.name = args[++i];
+    else if (a === '--to') flags.to = args[++i];
+    else if (a === '--parents') flags.parents = String(args[++i] || '').split(',').filter(Boolean);
+    else positional.push(a);
+  }
+  const content = positional.join(' ');
+  if (!flags.server || !content) {
+    console.error('Usage: sym emit --server <host:port> [--group <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+    console.error('  Emits ONE signed cmb1- block to a remote mesh node and exits (MMP §17.1 Class 1).');
+    console.error('  Grounding from CI: --parents <cmb-key> with fields {"intent":"ground","commitment":"verified: ..."}');
+    process.exit(1);
+  }
+  let fields;
+  try { fields = JSON.parse(content); } catch {
+    console.error('Error: content must be a JSON object with CAT7 fields.');
+    process.exit(1);
+  }
+  const { emitOnce } = require('../lib/emit');
+  const { key } = await emitOnce(
+    { server: flags.server, group: flags.group, name: flags.name },
+    fields,
+    { to: flags.to || undefined, parents: flags.parents },
+  );
+  console.log(`Emitted ${key}`);
+  console.log(`  as ${flags.name} → ${flags.server} (group: ${flags.group}${flags.to ? `, to: ${flags.to}` : ''})`);
 }
 
 function cmdPublish() {

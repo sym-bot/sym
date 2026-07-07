@@ -127,6 +127,42 @@ For iOS/macOS apps, use the native Swift package [`sym-swift`](https://github.co
 
 ---
 
+## Emit into a mesh — without being a node
+
+Anything that observes something can feed the mesh: a CI job, a sensor, a
+cron script. `sym emit` is the MMP **Class 1 Emitter** (spec §17.1) — one
+signed CAT7 block to a remote mesh node, with its **own identity**, no daemon,
+no store, no lock:
+
+```bash
+sym emit --server 192.168.1.10:52781 --group team --name github-ci \
+  '{"focus":"build 4821 green","intent":"ground","commitment":"verified: full suite passed"}'
+```
+
+The block is content-addressed (`cmb1-`), Ed25519-signed, audience-bound to
+the group, and judged by each receiver's own SVAF — provenance stays with
+`github-ci`, so trust accrues to the actual source. With `--parents <cmb-key>`
+the emission carries lineage: that's how CI grounds the mesh's beliefs in
+real outcomes (§6.7), automatically.
+
+Programmatic (ten lines, honestly):
+
+```js
+const { emitOnce } = require('sym').emit;
+
+await emitOnce(
+  { server: '192.168.1.10:52781', group: 'team', name: 'github-ci' },
+  {
+    focus: 'build 4821 green',
+    intent: 'ground',
+    commitment: 'verified: full suite passed',
+  },
+);
+```
+
+LAN TCP today; the relay path lands with one-shot E2E (§18.2.1). Contrast
+with `sym publish`, which speaks *as* this machine's resident node.
+
 ## The one thing, in action: `sym ask`
 
 This is collective intelligence concretely. **You ask the mesh directly:**
