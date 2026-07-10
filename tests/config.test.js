@@ -12,6 +12,7 @@ const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
   normalizeMdnsHostname, pidIsAlive, lockHolderPid, resolveAvailableName, log,
+  acquireIdentityLock, readLockFile, processStartTime,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -306,6 +307,129 @@ describe('lockHolderPid', () => {
     ensureDir(nodeDir(name));
     fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), 'not-a-pid');
     assert.strictEqual(lockHolderPid(name), null);
+  });
+  it('parses the PID from the v2 pid+metadata format', () => {
+    ensureDir(nodeDir(name));
+    fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), '4242\n{"start":"Mon Jan  5 10:00:00 2026","createdAt":1}\n');
+    assert.strictEqual(lockHolderPid(name), 4242);
+  });
+});
+
+describe('acquireIdentityLock', () => {
+  const DEAD_PID = 2147483646; // implausible → ESRCH
+  let liveChild;
+  const made = [];
+  const mkName = () => {
+    const n = `test-lock-${Date.now()}-${made.length}`;
+    made.push(n);
+    return n;
+  };
+  const lockPathOf = (name) => path.join(nodeDir(name), 'lock.pid');
+  const writeLock = (name, content) => {
+    ensureDir(nodeDir(name));
+    fs.writeFileSync(lockPathOf(name), content);
+  };
+  before(() => {
+    liveChild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  });
+  after(() => {
+    if (liveChild) { try { liveChild.kill('SIGKILL'); } catch {} }
+    for (const n of made) fs.rmSync(nodeDir(n), { recursive: true, force: true });
+  });
+
+  it('acquires a free identity and writes pid + start-time metadata', () => {
+    const name = mkName();
+    const release = acquireIdentityLock(name);
+    const lock = readLockFile(lockPathOf(name));
+    assert.strictEqual(lock.pid, process.pid);
+    assert.strictEqual(lock.start, processStartTime(process.pid));
+    release();
+    assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
+  });
+
+  it('reclaims a stale lock whose holder PID is dead', () => {
+    const name = mkName();
+    writeLock(name, String(DEAD_PID));
+    const release = acquireIdentityLock(name); // must NOT throw
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('throws EIDENTITYLOCK when a live foreign process holds the lock', () => {
+    const name = mkName();
+    writeLock(name, String(liveChild.pid));
+    assert.throws(() => acquireIdentityLock(name), (e) => e.code === 'EIDENTITYLOCK' && e.holderPid === liveChild.pid);
+  });
+
+  it('reclaims a lock whose PID is alive but was recycled (start-time mismatch)', () => {
+    const name = mkName();
+    // A live PID recorded with a DIFFERENT process start time = the PID
+    // was reused by an unrelated process after the real holder died.
+    writeLock(name, `${liveChild.pid}\n{"start":"Thu Jan  1 00:00:00 2004","createdAt":1}\n`);
+    const release = acquireIdentityLock(name); // must NOT throw
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('reclaims a legacy pid-only lock written before the current boot', () => {
+    const name = mkName();
+    writeLock(name, String(liveChild.pid)); // "alive" PID…
+    const old = new Date(Date.now() - 365 * 24 * 3600 * 1000);
+    fs.utimesSync(lockPathOf(name), old, old); // …but the lock predates boot
+    const release = acquireIdentityLock(name); // must NOT throw
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('reclaims an aged-out corrupt lockfile but respects a fresh one', () => {
+    const name = mkName();
+    writeLock(name, 'garbage');
+    assert.throws(() => acquireIdentityLock(name), /already locked/); // fresh: maybe mid-write
+    const old = new Date(Date.now() - 60 * 1000);
+    fs.utimesSync(lockPathOf(name), old, old);
+    const release = acquireIdentityLock(name); // aged out: reclaim
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('allows same-process re-acquisition', () => {
+    const name = mkName();
+    const r1 = acquireIdentityLock(name);
+    const r2 = acquireIdentityLock(name); // same PID → allowed
+    r2();
+    r1();
+    assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
+  });
+
+  it('releases the lock on plain process exit (no explicit release call)', async () => {
+    const name = mkName();
+    const script = `require(${JSON.stringify(require.resolve('../lib/config'))}).acquireIdentityLock(${JSON.stringify(name)});`;
+    await new Promise((resolve, reject) => {
+      const c = spawn(process.execPath, ['-e', script], { stdio: 'ignore', env: process.env });
+      c.on('error', reject);
+      c.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`child exited ${code}`))));
+    });
+    assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
+  });
+
+  it('releases the lock on SIGTERM when the host has no handler', async () => {
+    const name = mkName();
+    const script = `
+      require(${JSON.stringify(require.resolve('../lib/config'))}).acquireIdentityLock(${JSON.stringify(name)});
+      console.log('locked');
+      setInterval(() => {}, 1000);`;
+    await new Promise((resolve, reject) => {
+      const c = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'ignore'], env: process.env });
+      c.on('error', reject);
+      c.stdout.on('data', (d) => {
+        if (String(d).includes('locked')) {
+          assert.strictEqual(readLockFile(lockPathOf(name)).pid, c.pid);
+          c.kill('SIGTERM');
+        }
+      });
+      c.on('close', () => resolve());
+    });
+    assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
   });
 });
 
