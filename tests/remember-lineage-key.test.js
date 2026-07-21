@@ -1,7 +1,7 @@
 'use strict';
 require('./_isolate-home');
 
-// Regression: remember() with parents must mint the REMIX-scheme cmb1- key.
+// Regression: remember() with parents must mint the REMIX-scheme v1 key.
 // recomputeKey dispatches by role (lineage present → remix), so a root-keyed
 // block carrying parents fails content verification at every peer and is
 // hard-rejected as forged — i.e., authored grounding CMBs silently never
@@ -73,7 +73,8 @@ describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch
       await until(() => acceptedKeys.length > 0 || rejected > 0);
       assert.equal(rejected, 0, 'no signature rejection for the authored grounding');
       assert.equal(acceptedKeys.length > 0, true, 'the grounding CMB landed on the peer');
-      assert.ok(emittedKey.startsWith('cmb1-'));
+      // Scheme, not spelling — v1 keys carry a 64-hex digest under either prefix.
+      assert.match(emittedKey, /^cmb1?-[0-9a-f]{64}$/);
     } finally {
       await A.stop();
       await B.stop();

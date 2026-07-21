@@ -348,7 +348,7 @@ async function cmdEmit() {
   const content = positional.join(' ');
   if (!flags.server || !content) {
     console.error('Usage: sym emit --server <host:port> [--group <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
-    console.error('  Emits ONE signed cmb1- block to a remote mesh node and exits (MMP §17.1 Class 1).');
+    console.error('  Emits ONE signed v1 block to a remote mesh node and exits (MMP §17.1 Class 1).');
     console.error('  Grounding from CI: --parents <cmb-key> with fields {"intent":"ground","commitment":"verified: ..."}');
     process.exit(1);
   }

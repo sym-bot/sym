@@ -2,7 +2,7 @@
 require('./_isolate-home');
 
 // sym/emit — the Class 1 emitter (§17.1) against a REAL node over REAL TCP:
-// connect → §5.2 handshake → signed cmb1- `cmb` frame → SVAF admission on the
+// connect → §5.2 handshake → signed v1 `cmb` frame → SVAF admission on the
 // receiver. This is the wire-compat proof for the thin emitter: nothing is
 // injected into the frame handler; every byte crosses a socket.
 
@@ -50,7 +50,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     assert.throws(() => parseServer('h:0'));
   });
 
-  it('emitOnce delivers a signed cmb1- block the receiver admits', async () => {
+  it('emitOnce delivers a signed v1 block the receiver admits', async () => {
     await withReceiver('emit-rx', async (node, port) => {
       const accepted = once(node, 'cmb-accepted');
       const { key, cmb } = await emitOnce(
@@ -58,7 +58,9 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
         { focus: 'build 4821 green', intent: 'ground', commitment: 'verified: test suite passed' },
       );
 
-      assert.match(key, /^cmb1-[0-9a-f]{64}$/, 'v1 content address');
+      // v1 is identified by its 64-hex digest, not by which prefix it wears: the
+      // cmb1- -> cmb- migration moves the spelling while the scheme is unchanged.
+      assert.match(key, /^cmb1?-[0-9a-f]{64}$/, 'v1 content address (either prefix)');
       assert.equal(cmb.createdBy, 'ci-emitter');
       assert.equal(cmb.group, 'emit-g', 'audience-bound to the authoring group');
       assert.equal(cmb.sigAlg, 'ed25519');
