@@ -46,7 +46,7 @@ SYM is the runtime and CLI. It implements the open [Mesh Memory Protocol (MMP)](
 
 There is no central orchestrator deciding which agent matters. Each receiving peer evaluates incoming fields against its own state and retains its own decision boundary.
 
-> For headless, model-configured peers that run without a host IDE, see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent). It is an open-source runtime component, distinct from the enterprise [xMesh](https://xmesh.bot) product.
+> For headless, model-configured peers that run without a host IDE, see the public [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) runtime. For enterprise AI integration, visit [xmesh.bot](https://xmesh.bot). The xMesh enterprise product and its codebase are private.
 
 ## Why do you need it?
 

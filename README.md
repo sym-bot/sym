@@ -100,9 +100,10 @@ Run `sym --help` for the full command surface.
 
 - **[MMP](https://meshcognition.org/spec/mmp)** is the open wire protocol.
 - **SYM** is this open-core runtime and CLI.
-- **[xMesh](https://xmesh.bot)** is the enterprise product.
+- **[xmesh-agent](https://github.com/sym-bot/xmesh-agent)** is the public open-source runtime for headless, model-configured peers.
+- **Enterprise AI integration:** visit **[xmesh.bot](https://xmesh.bot)**.
 
-The npm runtimes are reference components. They are not the enterprise xMesh product.
+The xMesh enterprise product and its codebase are private. The public npm runtimes are separate reference components.
 
 ## Current boundaries
 
