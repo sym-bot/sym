@@ -2,7 +2,7 @@
 
 # SYM
 
-### Ask one agent, get one answer.<br>Ask the _mesh_ — every agent that knows something relevant answers, as one.
+### Let Codex, Claude Code, and the agents you already use share what they know.
 
 <p>
   <a href="https://www.npmjs.com/package/@sym-bot/sym"><img src="https://img.shields.io/npm/v/@sym-bot/sym" alt="npm"></a>
@@ -14,35 +14,37 @@
   <a href="README_zh.md"><img src="https://img.shields.io/badge/%E8%AF%AD%E8%A8%80-%E4%B8%AD%E6%96%87-red" alt="中文"></a>
 </p>
 
-**observe&nbsp; → &nbsp;ask the mesh&nbsp; → &nbsp;answer as one, cited&nbsp; → &nbsp;act**
+**connect&nbsp; → &nbsp;contribute&nbsp; → &nbsp;ask the mesh&nbsp; → &nbsp;answer with sources**
 
 `npm install -g @sym-bot/sym`
 
-**▸ [Open the one-page overview](https://htmlpreview.github.io/?https://github.com/sym-bot/sym/blob/main/docs/overview.html)**
+**[SYM.BOT](https://sym.bot) · [Claude Code channel](https://github.com/sym-bot/sym-mesh-channel) · [MMP specification](https://meshcognition.org/spec/mmp)**
 
 </div>
 
-> You run Claude Code in your repo, Cursor in your editor, Copilot in GitHub, a script or two on the side — each knows a different slice, none of them share. `sym ask` puts your question to all of them at once: the agents that know contribute, the rest stay silent, and you get back **one synthesized answer with its sources**. No routing, no orchestrator.
+Your agents already have useful context. The problem is that each one works alone.
+
+SYM is the open-core runtime and CLI that connects those agents through a shared mesh. Each agent keeps its own context, model, and point of view. It can exchange typed, traceable observations with peers across tools, vendors, processes, and machines.
 
 ```bash
 sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 ```
 
----
+The relevant peers contribute. SYM returns one answer with its sources. You do not maintain a routing graph or copy context between windows.
 
-> ⚡ **Running two or more Claude Code sessions?** They can talk in **real time** over the mesh — a peer's finding lands mid-conversation, no tool call, no polling, and they review and ship together. → **[Claude Code Mesh — real-time communication and collaboration among Claude Code sessions](https://github.com/sym-bot/sym-mesh-channel)**
+> **Use the right surface.** Codex, Cursor, scripts, and other agents use this runtime plus the SYM skill. Claude Code can also receive peer events mid-turn through [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel); that push experience currently requires Claude Code's development-channels flag. Every participant must join the same mesh group.
 
 ## What is SYM?
 
-**SYM turns the AI agents you already run into one collective intelligence — so they answer as one mind instead of four strangers.**
+**SYM makes separate AI agents available to one another without making one vendor or orchestrator the center.**
 
-First, the word: **the mesh is just all your agents connected directly to each other** — agent-to-agent, no central server in the middle. Each agent runs SYM; that's what puts it on the mesh. It's called a *mesh* because every agent talks to every other agent directly, not through a hub.
+The mesh is the set of agents connected through the same group. On a LAN they discover one another directly. An optional relay extends that reach across networks.
 
-SYM is the protocol + CLI that does this. You install it once per machine. Each agent keeps its own UI, its own context window, its own job — SYM just gives them the shared mesh to read and write. When one agent learns something, every other agent that would find it relevant gets it. And when you run **`sym ask "<question>"`**, the question goes to the whole mesh: every agent that knows part of the answer contributes, the ones that don't stay quiet, and you get back a single answer — the mesh speaking as one mind.
+SYM is the runtime and CLI. It implements the open [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). You install it once per machine, then give each agent the SYM skill. Agents keep their existing UI and model while gaining a common way to publish, listen, recall, and ask.
 
-No central server. No routing rules you maintain. No orchestrator deciding who talks. Each agent decides, on its own, whether an incoming signal matters to it. That autonomous decision is the whole product.
+There is no central orchestrator deciding which agent matters. Each receiving peer evaluates incoming fields against its own state and retains its own decision boundary.
 
-> SYM is the open-source reference implementation of the [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). For **autonomous LLM peers** that wake on incoming messages and call any model on their own (no host IDE), see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) — same mesh, built on SYM.
+> For headless, model-configured peers that run without a host IDE, see [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent). It is an open-source runtime component, distinct from the enterprise [xMesh](https://xmesh.bot) product.
 
 ## Why do you need it?
 
@@ -52,7 +54,7 @@ Your support agent doesn't know what your inventory agent just learned. Your wri
 
 The usual fix is to wire agents together — frameworks, routing graphs, an orchestrator you configure and maintain. That's integration code between every pair of agents, and it only connects the agents you thought to wire.
 
-**SYM removes the wiring.** Agents share through a common mesh and self-select on relevance. An agent you forgot you had can still answer. An agent that has nothing to add costs you nothing. You stop being the integration layer.
+**SYM removes the pair-by-pair wiring.** Agents share through a common mesh and receivers evaluate relevance locally. An agent you did not explicitly route to can still contribute. You stop being the copy-paste layer.
 
 ## How do you use it?
 
@@ -201,8 +203,8 @@ rollout rather than a hard cutover [data-agent].
 |---|---|---|
 | **Who decides which agent answers?** | You configure routing | The receiving agent decides, per message |
 | **Unknown agents contribute?** | No — only agents you wired up | Yes — any coupled peer |
-| **Irrelevant agents waste tokens?** | Often — broadcast to all | Never — rejected silently |
-| **Answer traceable?** | Depends on implementation | Always — lineage DAG |
+| **How is irrelevant input handled?** | Depends on the configured graph | Receiver-side relevance gate |
+| **How is provenance represented?** | Depends on implementation | Source identity + lineage fields |
 | **Cross-process / cross-device?** | Single-process (usually) | Native — Bonjour LAN + WebSocket relay |
 | **Protocol open?** | Framework-specific | Open spec ([MMP](https://meshcognition.org/spec/mmp)) + reference arXiv papers |
 
@@ -350,9 +352,11 @@ You're a valid audience — this README is written for you too. To put your huma
 
 Then `sym ask` / `sym recall` before answering anything the mesh might know. **Autonomous, not automated:** the mesh gives you the full picture; you act through your own lens.
 
-## Privacy
+## Data boundary
 
-**Does SYM collect your code or data?** No. On your machine and your LAN, everything stays local — communication and storage never leave your own network. To reach across networks you connect through a relay, which forwards CMBs whose bodies are **end-to-end encrypted** between your peers: the relay routes them, it can't read them — only outer-frame metadata (sender, timestamp, lineage) is visible, enough to deliver. Local is free and private by default; remote is *your* authenticated relay, never a third party reading your data.
+On one machine and a local network, SYM can operate without a hosted coordination service. State is held by the participating nodes. To connect different networks, configure an optional relay.
+
+Do not treat a group name or relay token as a complete security boundary. Transport support varies by peer and deployment, and outer routing metadata remains visible where required for delivery. Review the implementation and threat model for your environment before carrying sensitive material.
 
 ## References
 
@@ -370,4 +374,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). All changes must comply with the [MMP sp
 
 Apache 2.0 — see [LICENSE](LICENSE).
 
-**[SYM.BOT](https://sym.bot)** — Glasgow, Scotland.
+Built and owned by **[SYM.BOT](https://sym.bot)**, the trading name of SYMBOT LTD — Glasgow, Scotland.
