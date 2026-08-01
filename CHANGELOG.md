@@ -2,6 +2,12 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.10.1 (2026-08-01)
+
+- **Pinned to `@sym-bot/core` 0.7.0.** Shadow samples are now persisted per node rather than
+  reduced to counts in a log line — the receive path writes one row per admission, carrying the
+  receiving node and per-field values. No behaviour change to admission.
+
 ## 0.10.0 (2026-08-01)
 
 - **Pinned to `@sym-bot/core` 0.6.0.** Brings design C's shadow gate into the receive path: a
