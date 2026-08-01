@@ -2,6 +2,21 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.10.0 (2026-08-01)
+
+- **Pinned to `@sym-bot/core` 0.6.0.** Brings design C's shadow gate into the receive path: a
+  binary redundancy cut computes alongside the five-valued band on every admission, is logged
+  beside it, and **decides nothing**. No peer can observe it — it never enters the signed
+  attestation payload — so nothing on the mesh can come to depend on its behaviour.
+- **feat:** `svafRedundancyThreshold` node option. Every other SVAF threshold has been settable
+  for a long time; the redundancy floor was not settable anywhere, and it is the whole of the
+  redundancy cut. Deliberately carries **no default here** — unset, core applies its own, so the
+  value keeps exactly one home across the two packages.
+- **⚠ Note on that option:** while C is derived from the five-valued band, C's floor *is* the
+  acting gate's floor. Setting `svafRedundancyThreshold` therefore changes what the node
+  **admits**, not just what the shadow records. Treat it as a production gating change until C
+  becomes an independent cut.
+
 ## 0.7.30 (2026-07-07)
 
 - **fix (cross-peer grounding):** `remember()` with parents now mints the
