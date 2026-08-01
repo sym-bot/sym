@@ -70,18 +70,18 @@ describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch
       await until(() => A._peers.size > 0);
 
       A._hasNewDomainData = true;
-      const parent = { key: 'cmb1-' + 'b'.repeat(64), lineage: { ancestors: [] } };
+      const parent = { metadata: { key: 'cmb-' + 'b'.repeat(64) } };
       const res = A.remember(
         { focus: 'grounding outcome', intent: 'ground', commitment: 'failed: regression seen' },
         { parents: [parent] },
       );
-      const emittedKey = (res.cmb || res).key;
+      const emittedKey = (res.cmb || res).metadata?.key ?? (res.cmb || res).key;
 
       await until(() => acceptedKeys.length > 0 || rejected > 0);
       assert.equal(rejected, 0, 'no signature rejection for the authored grounding');
       assert.equal(acceptedKeys.length > 0, true, 'the grounding CMB landed on the peer');
-      // Scheme, not spelling — v1 keys carry a 64-hex digest under either prefix.
-      assert.match(emittedKey, /^cmb1?-[0-9a-f]{64}$/);
+      // The frozen form: bare cmb- + 64 lowercase hex. `cmb1-` is rejected post-cutover.
+      assert.match(emittedKey, /^cmb-[0-9a-f]{64}$/);
     } finally {
       await A.stop();
       await B.stop();
