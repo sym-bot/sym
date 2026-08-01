@@ -72,8 +72,8 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
         focus: 'ship the release', issue: 'x', intent: 'x', motivation: 'x',
         commitment: 'x', perspective: node.name, mood: { text: 'neutral', valence: 0, arousal: 0 },
       });
-      assert.ok(entry.cmb.sig, 'authored CMB carries a signature');
-      assert.strictEqual(entry.cmb.sigAlg, 'ed25519');
+      assert.ok(entry.cmb.metadata.sig, 'authored CMB carries a signature');
+      assert.strictEqual(entry.cmb.metadata.sigAlg, 'ed25519');
       const v = verifyCMB(entry.cmb, node._identity.publicKey);
       assert.ok(v.signed && v.valid, "signature verifies against the node's own public key");
     });
@@ -132,7 +132,9 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
       let surfaced = 0;
       node.on('cmb-accepted', () => { surfaced++; });
       const frame = wire(signedCmbFrame(rawKeypair().priv));
-      delete frame.cmb.sig; delete frame.cmb.sigAlg; // strip signature
+      // The signature lives in metadata now — deleting the old top-level fields was a
+      // no-op, so this fixture was still signed and the test proved nothing.
+      delete frame.cmb.metadata.sig; delete frame.cmb.metadata.sigAlg;
       node._frameHandler.handle('peerA', 'peerA', frame);
       await settle();
       assert.strictEqual(surfaced, 1, 'unsigned CMB still surfaces (interop default)');
