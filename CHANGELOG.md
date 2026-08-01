@@ -17,6 +17,26 @@
   **admits**, not just what the shadow records. Treat it as a production gating change until C
   becomes an independent cut.
 
+## 0.9.0 (2026-08-01)
+
+> *Entry written retroactively on 2026-08-01. This version and 0.8.0 were published without a
+> changelog entry or a git tag; both tags were created after the fact at their own release
+> commits.*
+
+- **Pinned to `@sym-bot/core` 0.5.0 — the boundary record model.** Two-section records,
+  content-only addressing, per-field keys, and signatures that verify against the author's key
+  rather than the delivering peer's.
+- **Every consumer read migrated.** Authorship is resolved from the signed author field; an
+  unattributed block is skipped rather than published under an invented name.
+- **Pre-boundary history stays readable** — older blocks carried as unverified-legacy, not
+  refused.
+
+## 0.8.0 (2026-07-31)
+
+> *Entry written retroactively on 2026-08-01 — see the note above.*
+
+- **cmb-only cutover.** v1 key derivation throughout; pinned to `@sym-bot/core` 0.4.0.
+
 ## 0.7.30 (2026-07-07)
 
 - **fix (cross-peer grounding):** `remember()` with parents now mints the
