@@ -2,7 +2,7 @@
 
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
-const { describe, it, after } = require('node:test');
+const { describe, it, after, afterEach } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const { nodeDir } = require('../lib/config');
@@ -14,9 +14,42 @@ const nodeName = `test-node-${Date.now()}-${Math.random().toString(36).slice(2, 
 describe('SymNode', () => {
   let SymNode;
 
+  // TEARDOWN MUST SURVIVE A FAILING ASSERTION.
+  //
+  // Every lifecycle test here ended with `await node.stop()` as its last statement, so any
+  // assertion that threw skipped it. SymNode.start() installs four intervals (heartbeat,
+  // re-encode, stats, retention purge) and stop() is the only thing that clears them — and
+  // stop() early-returns on `!this._running`, so nothing else can. One failed assertion
+  // therefore left four live timers and the process never exited.
+  //
+  // That is what the "intermittent hang in node.test.js" was: NOT a separate flake living
+  // alongside a failing test, but the SAME EVENT. The failure and the hang are one defect,
+  // and the hang is what hid the failure — a suite that hangs reports nothing, so the
+  // assertion underneath it went unread. Diagnosed by tracing every setInterval to its
+  // creation site and listing which were still live at exit: four, all from start(), all
+  // from the node created at the primer test.
+  //
+  // Registering on start (rather than at construction) is deliberate: an unstarted node holds
+  // no timers, and the tests that assert on constructor behaviour must not be forced to stop
+  // something that never ran.
+  const liveNodes = new Set();
+
+  afterEach(async () => {
+    for (const n of liveNodes) {
+      try { await n.stop(); } catch { /* teardown is best-effort; never mask the real failure */ }
+    }
+    liveNodes.clear();
+  });
+
   it('should load SymNode', () => {
-    SymNode = require('../lib/node').SymNode;
-    assert.ok(SymNode, 'SymNode should be exported');
+    const Base = require('../lib/node').SymNode;
+    // One wrapper instead of a registration call at each of the 16 construction sites: a fix
+    // that has to be remembered at every call site is one the next test will forget.
+    SymNode = class extends Base {
+      async start(...a) { liveNodes.add(this); return super.start(...a); }
+      async stop(...a) { liveNodes.delete(this); return super.stop(...a); }
+    };
+    assert.ok(Base, 'SymNode should be exported');
   });
 
   it('should require a name', () => {
@@ -140,6 +173,14 @@ describe('SymNode', () => {
     assert.ok(capped.text.includes('1 older entries elided'), 'primer reports dropped count');
 
     // Recency cap — maxAgeMs=1ms should elide everything.
+    //
+    // The cutoff is `Date.now() - maxAgeMs` and entries are kept when `storedAt >= cutoff`, so
+    // an entry written in the SAME MILLISECOND as the query survives a 1ms window. The three
+    // writes above are seeded immediately before this call, so on a fast machine the last one
+    // is not yet stale and `count` is 1 rather than 0 — a race against clock granularity, not
+    // a defect in the recency cap. Wait past one whole millisecond so the assertion tests the
+    // cap rather than the machine.
+    await new Promise((r) => setTimeout(r, 5));
     const stale = node.buildStartupPrimer({ maxAgeMs: 1 });
     assert.strictEqual(stale.count, 0, 'recency cap elides all entries');
     assert.strictEqual(stale.dropped, 3);
