@@ -16,7 +16,7 @@ const { recordCreatedBy } = require('../lib/record');
  *   sym peers                         # List connected peers
  *   sym publish [flags] <json>        # Publish a projection (CAT7 fields as JSON)
  *                                     #   --standalone: daemon-less one-shot SymNode (auto-fallback if daemon is down)
- *                                     #   --name <id>:  mesh identity for standalone mode (default: sym-cli)
+ *                                     #   --name <id>:  mesh identity for standalone mode (REQUIRED — no default)
  *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
  *   sym emit [flags] <json>           # One-shot Class 1 emit to a REMOTE mesh node (no daemon, §17.1)
  *                                     #   --server <host:port> (required), --group <g>, --name <id>,
@@ -305,7 +305,8 @@ function cmdStop() {
  *                         Also automatically enabled when the daemon
  *                         is not running, or when --parents is used.
  *   --name <id>           Node name / mesh identity for standalone
- *                         emission. Defaults to `sym-cli`. Claude Code
+ *                         emission. NO DEFAULT — falls back to SYM_NODE_NAME,
+ *                         and refuses if neither is set. Claude Code
  *                         users typically pass --name claude-code-mac
  *                         (or claude-code-win) so their CMBs are
  *                         attributable on the mesh grid.
@@ -315,7 +316,11 @@ function cmdStop() {
  *                         does not accept lineage parents.
  */
 function parseObserveFlags(argv) {
-  const out = { positional: [], standalone: false, name: 'sym-cli', parents: [] };
+  // NO INVENTED DEFAULT IDENTITY (D-04). This used to default to the literal string `sym-cli`,
+  // which meant that whenever the daemon was down the CLI published under an agent nobody chose
+  // and nobody had earned anything as. Resolve a REAL identity or resolve nothing; the caller
+  // below refuses rather than inventing one.
+  const out = { positional: [], standalone: false, name: process.env.SYM_NODE_NAME || null, parents: [] };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--standalone') { out.standalone = true; }
@@ -377,7 +382,7 @@ function cmdPublish() {
     console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
     console.error('  The calling agent (LLM) extracts CAT7 fields. The protocol does not parse raw text.');
     console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
-    console.error('  --name:       mesh identity for standalone mode (default: sym-cli).');
+    console.error('  --name:       mesh identity for standalone mode. REQUIRED (or set SYM_NODE_NAME).');
     console.error('                Claude Code users: --name claude-code-mac (or claude-code-win).');
     console.error('  --parents:    comma-separated parent CMB keys for remix lineage. Implies --standalone.');
     process.exit(1);
@@ -398,6 +403,33 @@ function cmdPublish() {
   //   - Daemon not running     → standalone (graceful fallback, not a failure)
   //   - Otherwise              → daemon IPC (fast path, preserves local CfC state)
   const useStandalone = parsed.standalone || !isDaemonRunning();
+
+  // REFUSE RATHER THAN INVENT AN IDENTITY (D-04).
+  //
+  // Standalone emission mints a CMB signed by whatever identity it is told to use. When that
+  // defaulted to `sym-cli`, a daemon that happened to be down silently rerouted a node's whole
+  // output through an agent it never chose — the CMBs are real, signed and delivered, and
+  // attributed to somebody else. On 2026-08-01 an entire day of CTO-seat coordination went out
+  // this way: peers received rulings and gate verdicts from `sym-cli`, and they only made sense
+  // because the author's name happened to be repeated in the CAT7 text. That is the
+  // holder-vs-author defect the record model removed `source` to prevent, reintroduced one layer
+  // up — identity carried in prose instead of in a key.
+  //
+  // This is the same ruling as halt-on-missing-identity, applied to emission rather than to
+  // startup: an agent with no identity does not get a substitute, it gets an error. Note the
+  // lease is NOT the failure mode being handled here — if another process holds the requested
+  // identity, SymNode already refuses loudly and correctly. The failure being closed is the
+  // quiet one, where nothing refuses because a name was manufactured to satisfy the call.
+  if (useStandalone && !parsed.name) {
+    console.error('Refusing to publish: no mesh identity resolved.');
+    console.error('');
+    console.error('  Standalone emission signs the CMB as some agent, and this command will not');
+    console.error('  invent one. A block attributed to an agent nobody chose is worse than no');
+    console.error('  block: it is indistinguishable from a real assertion by a real peer.');
+    console.error('');
+    console.error('  Pass --name <agent@mesh>, or set SYM_NODE_NAME.');
+    process.exit(2);
+  }
 
   if (useStandalone) {
     standaloneObserve(fields, { name: parsed.name, parents: parsed.parents })
