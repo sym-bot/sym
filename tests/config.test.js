@@ -11,7 +11,7 @@ const { spawn } = require('child_process');
 const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
-  normalizeMdnsHostname, pidIsAlive, lockHolderPid, resolveAvailableName, log,
+  normalizeMdnsHostname, pidIsAlive, lockHolderPid, log,
   acquireIdentityLock, readLockFile, processStartTime,
 } = require('../lib/config');
 
@@ -212,70 +212,20 @@ describe('nodeDir', () => {
   });
 });
 
-describe('resolveAvailableName', () => {
-  const base = `test-resolve-${Date.now()}`;
-  const writeLock = (name, pid) => {
-    ensureDir(nodeDir(name));
-    fs.writeFileSync(path.join(nodeDir(name), 'lock.pid'), String(pid));
-  };
-  // A real, live, foreign process (our child — alive, pid !== process.pid).
-  let liveChild;
-  before(() => {
-    liveChild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-  });
-  after(() => {
-    if (liveChild) { try { liveChild.kill('SIGKILL'); } catch {} }
-    for (let i = 1; i <= 4; i++) {
-      const n = i === 1 ? base : `${base}-${i}`;
-      fs.rmSync(nodeDir(n), { recursive: true, force: true });
-    }
-    fs.rmSync(nodeDir(`${base}-long`), { recursive: true, force: true });
+describe('name-suffixing is gone (B-3 / AC-3.2)', () => {
+  // The suffix resolver used to turn a same-host collision into `<name>-2`, minting a
+  // SECOND IDENTITY for what is one agent — its own keypair, its own store, invisible to
+  // peers still addressing the original. A collision is now decided by the single-writer
+  // lease, which refuses the second process instead of inventing a name for it.
+  it('exports no name-resolving escape hatch', () => {
+    const cfg = require('../lib/config');
+    assert.strictEqual(cfg.resolveAvailableName, undefined,
+      'a suffixing resolver must not exist — a different agent id is a different agent');
   });
 
-  it('returns the base name when no lockfile exists', () => {
-    assert.strictEqual(resolveAvailableName(base), base);
-  });
-
-  it('returns the base name when the holder PID is dead (stale lock)', () => {
-    writeLock(base, 2147483646); // implausible PID → ESRCH → treated as free
-    assert.strictEqual(resolveAvailableName(base), base);
-  });
-
-  it('returns the base name when the holder is our own process', () => {
-    writeLock(base, process.pid);
-    assert.strictEqual(resolveAvailableName(base), base);
-  });
-
-  it('suffixes to -2 when the base is held by a live foreign process', () => {
-    writeLock(base, liveChild.pid);
-    assert.strictEqual(resolveAvailableName(base), `${base}-2`);
-  });
-
-  it('skips multiple live holders to the next free suffix', () => {
-    writeLock(base, liveChild.pid);
-    writeLock(`${base}-2`, liveChild.pid);
-    assert.strictEqual(resolveAvailableName(base), `${base}-3`);
-  });
-
-  it('keeps a suffixed slot whose prior holder has died', () => {
-    writeLock(base, liveChild.pid);     // base: live → skip
-    writeLock(`${base}-2`, 2147483646); // -2: dead → reclaimable
-    assert.strictEqual(resolveAvailableName(base), `${base}-2`);
-  });
-
-  it('does not overflow the 64-byte name limit (skips over-long candidates)', () => {
-    // A base near the limit: appending "-2" would exceed 64 bytes, so that
-    // candidate is skipped. With the base held live and no room to suffix,
-    // it falls back to the base (acquireIdentityLock then hard-fails).
-    const longBase = 'x'.repeat(63); // 63 bytes; "-2" → 65 bytes, over limit
-    ensureDir(nodeDir(longBase));
-    fs.writeFileSync(path.join(nodeDir(longBase), 'lock.pid'), String(liveChild.pid));
-    assert.strictEqual(resolveAvailableName(longBase), longBase);
-    fs.rmSync(nodeDir(longBase), { recursive: true, force: true });
-  });
-
-  it('validates the base name (throws on invalid input)', () => {
-    assert.throws(() => resolveAvailableName(''), /non-empty string/);
+  it('the source carries no suffixing path', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'config.js'), 'utf8');
+    assert.ok(!/function\s+resolveAvailableName/.test(src), 'the function must be deleted, not merely unexported');
   });
 });
 
@@ -384,7 +334,10 @@ describe('acquireIdentityLock', () => {
   it('reclaims an aged-out corrupt lockfile but respects a fresh one', () => {
     const name = mkName();
     writeLock(name, 'garbage');
-    assert.throws(() => acquireIdentityLock(name), /already locked/); // fresh: maybe mid-write
+    // Assert the CODE, not the prose: the lease's operator-facing wording changed with the
+    // agent-id ruling (it used to advise picking a different name, which is now precisely
+    // the thing that must not be done — a different agent id is a different agent).
+    assert.throws(() => acquireIdentityLock(name), (e) => e.code === 'EIDENTITYLOCK'); // fresh: maybe mid-write
     const old = new Date(Date.now() - 60 * 1000);
     fs.utimesSync(lockPathOf(name), old, old);
     const release = acquireIdentityLock(name); // aged out: reclaim

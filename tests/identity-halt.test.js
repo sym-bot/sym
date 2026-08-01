@@ -141,3 +141,44 @@ test('SYM_IDENTITY_DIR puts the keypair outside the node dir — the rebuild pat
     assert.equal(afterRebuild.nodeId, id.nodeId);
   } finally { restore(); fs.rmSync(durable, { recursive: true, force: true }); }
 });
+
+test('AC-3.2: no `-2` identity can be created by any path', () => {
+  // The suffixing resolver is gone, so a SymNode takes the agent id it was configured with
+  // and nothing else. A second live process of the same agent is refused by the lease
+  // (EIDENTITYLOCK) rather than quietly becoming a different agent.
+  const { SymNode } = require('../lib/node');
+  const dir = tmp();
+  const { restore } = freshConfig(dir);
+  try {
+    const node = new SymNode({ name: 'agent-g@mesh', silent: true, autoSuffix: true });
+    assert.equal(node.name, 'agent-g@mesh',
+      'even an explicit autoSuffix request must not produce a second identity');
+    assert.equal(node.requestedName, 'agent-g@mesh');
+    assert.ok(!/-\d+$/.test(node.name), 'no numeric suffix may appear in an agent id');
+  } finally { restore(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the lease refuses a second holder and never suggests renaming', () => {
+  // The old error advised "set a different SYM_NODE_NAME", which under agent-id-is-identity
+  // is advice to become a different agent — the exact move the ruling forbids.
+  const dir = tmp();
+  const { cfg, restore } = freshConfig(dir);
+  const name = `agent-lease-${process.pid}@mesh`;
+  const lockPath = path.join(cfg.nodeDir(name), 'lock.pid');
+  try {
+    fs.mkdirSync(cfg.nodeDir(name), { recursive: true });
+    // A live foreign holder: PID 1 always exists and is never us.
+    fs.writeFileSync(lockPath, `1\n${JSON.stringify({ startTime: 0 })}`);
+    assert.throws(() => cfg.acquireIdentityLock(name), (e) => {
+      assert.equal(e.code, 'EIDENTITYLOCK');
+      assert.ok(!/different SYM_NODE_NAME/.test(e.message),
+        'must not advise renaming — that is advice to become a different agent');
+      assert.match(e.message, /same agent/);
+      return true;
+    });
+  } finally {
+    restore();
+    try { fs.rmSync(cfg.nodeDir(name), { recursive: true, force: true }); } catch {}
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
