@@ -13,7 +13,7 @@ const fs = require('node:fs');
 
 const { SymNode } = require('../lib/node');
 const { BonjourDiscovery } = require('../lib/discovery');
-const { recomputeKey } = require('@sym-bot/core');
+const { blockKeyV2 } = require('@sym-bot/core');
 const { nodeDir } = require('../lib/config');
 
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, field_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
@@ -25,19 +25,26 @@ function mkNode(name) {
 }
 
 describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch)', () => {
-  it('mints a self-consistent remix key that recomputeKey confirms', async () => {
+  it('a lineage-bearing block is addressed CONTENT-ONLY — no remix re-key', async () => {
+    // This asserted a self-consistent REMIX key under §8.2.1 role dispatch: a block carrying
+    // parents was re-keyed under a derivation that bound the parents and the author's NAME.
+    // That derivation is retired. The v2 address is the Merkle root over the seven fieldKeys
+    // and is content-only, so a lineage-bearing block is addressed exactly like any other block
+    // with the same content — which IS the collapse property, and it is the condition Rule A's
+    // soundness depends on (a self-re-assertion cites rather than minting key K with parent K).
     const node = mkNode('rmx-key');
     await node.start();
     try {
       node._hasNewDomainData = true;
-      const parent = { key: 'cmb1-' + 'a'.repeat(64), lineage: { ancestors: [] } };
+      const parent = { metadata: { key: 'cmb-' + 'a'.repeat(64) } };
       const res = node.remember(
         { focus: 'outcome', intent: 'ground', commitment: 'verified: it held' },
         { parents: [parent] },
       );
       const cmb = res.cmb || res;
-      assert.ok(cmb.lineage && cmb.lineage.parents.length === 1, 'lineage present');
-      assert.equal(recomputeKey(cmb), cmb.key, 'key matches the role-dispatched recompute');
+      assert.ok(cmb.metadata.lineage?.parents.length === 1, 'lineage present');
+      assert.ok(!('ancestors' in cmb.metadata.lineage), 'ancestors is retired, not carried');
+      assert.equal(cmb.metadata.key, blockKeyV2(cmb.fields), 'address is the content root, unchanged by lineage');
     } finally {
       await node.stop();
       fs.rmSync(nodeDir('rmx-key'), { recursive: true, force: true });
@@ -53,7 +60,7 @@ describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch
       let rejected = 0;
       const acceptedKeys = [];
       B.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected++; });
-      B.on('cmb-accepted', (s) => acceptedKeys.push((s.cmb || s).key));
+      B.on('cmb-accepted', (s) => acceptedKeys.push((s.cmb || s).metadata?.key ?? (s.cmb || s).key));
 
       A._connectToPeer('127.0.0.1', B._port, 'rmx-b-id', 'rmx-b');
       const until = async (cond, ms = 5000) => {

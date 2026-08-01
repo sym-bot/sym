@@ -88,7 +88,9 @@ describe('MemoryStore', () => {
 
     for (const cmb of cmbs) {
       assert.ok(cmb.fields, 'each CMB should have fields');
-      assert.ok(cmb.createdBy, 'each CMB should have createdBy');
+      // §7.2: authorship lives in metadata and is REQUIRED to survive the receive path —
+      // a record whose author is dropped on storage cannot be verified against its author's key.
+      assert.ok(cmb.metadata?.createdBy ?? cmb.createdBy, 'each CMB should carry its author');
     }
   });
 
