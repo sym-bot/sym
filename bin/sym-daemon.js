@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const { recordCreatedBy } = require('../lib/record');
+
 // ── EPIPE/EIO Safety (must be first — OpenClaw issue #4632) ────
 // launchd may close stdout/stderr pipes during restart. Without this,
 // Node.js throws uncaught EPIPE and enters a crash loop with exponential
@@ -847,7 +849,7 @@ async function main() {
       type: 'event', event: 'cmb-accepted',
       data: {
         key: entry.key,
-        source: entry.source || entry.cmb?.createdBy || 'unknown',
+        source: entry.source || recordCreatedBy(entry.cmb) || 'unknown',
         focus: entry.cmb?.fields?.focus?.text || entry.content || '',
         fields: entry.cmb?.fields || null, // Section 13.9.2: needed for subscriber field weight filtering
         timestamp: entry.timestamp || Date.now(),

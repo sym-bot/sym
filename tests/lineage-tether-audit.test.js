@@ -38,11 +38,15 @@ function storeLegacyRemix(node, rootKey, topicText) {
   // NOTE: createCMB mints content-only keys, so fixtures must use distinct
   // texts — two identical texts collide on one key and dedup.
   const cmb = createCMB({ fields: cat7(topicText), createdBy: 'legacy-peer' });
-  cmb.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
+  // Lineage goes in the section this record ACTUALLY carries. The fixture used to staple a flat
+  // `cmb.lineage` onto a record createCMB had already built with metadata — a hybrid that is
+  // neither generation, whose key read back undefined and whose lineage nothing walked.
+  cmb.metadata.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
+  const key = cmb.metadata.key;
   const entry = node._store.receiveFromPeer('legacy-peer', {
-    key: cmb.key, content: topicText, source: 'legacy-peer', cmb, storedAt: Date.now(),
+    key, content: topicText, source: 'legacy-peer', cmb, storedAt: Date.now(),
   });
-  return { key: cmb.key, entry };
+  return { key, entry };
 }
 
 const TOPIC_A = 'quarterly financial audit of the accounting ledger and tax filings';
@@ -70,7 +74,7 @@ describe('MMP §15.8 retroactive tether audit', () => {
       assert.strictEqual(r1.severed, 0, 'severance is opt-in');
 
       const l1 = node._store.get(laundered.key);
-      assert.ok(l1.cmb.lineage && (l1.cmb.lineage.parents || []).length === 1, 'lineage kept in annotate-only mode');
+      assert.ok(l1.cmb.metadata.lineage && (l1.cmb.metadata.lineage.parents || []).length === 1, 'lineage kept in annotate-only mode');
       assert.strictEqual(l1.cmb.provenance.tether.audited, true);
       assert.ok(l1.cmb.provenance.tether.drift > 0.5);
       const att = l1.cmb.tether;
@@ -81,13 +85,13 @@ describe('MMP §15.8 retroactive tether audit', () => {
       const r2 = await node.auditLineageTethers({ sever: true });
       assert.strictEqual(r2.severed, 1);
       const l2 = node._store.get(laundered.key);
-      assert.ok(!l2.cmb.lineage || (l2.cmb.lineage.parents || []).length === 0, 'laundered chain severed');
+      assert.ok(!l2.cmb.metadata.lineage || (l2.cmb.metadata.lineage.parents || []).length === 0, 'laundered chain severed');
       assert.strictEqual(l2.cmb.provenance.tether.departedFrom, rootA.key);
       assert.ok(![...node._store._index.byAncestor.get(rootA.key) ?? []].includes(laundered.key),
         'ancestor index no longer lists the severed remix');
 
       const f2 = node._store.get(faithful.key);
-      assert.ok(f2.cmb.lineage && f2.cmb.lineage.ancestors.includes(rootB.key), 'faithful chain untouched');
+      assert.ok(f2.cmb.metadata.lineage && f2.cmb.metadata.lineage.ancestors.includes(rootB.key), 'faithful chain untouched');
       assert.strictEqual(f2.cmb.tether.verdict, 'tethered');
     } finally {
       await node.stop();
@@ -106,7 +110,7 @@ describe('MMP §15.8 retroactive tether audit', () => {
       assert.strictEqual(r.unchecked, 1);
       assert.strictEqual(r.severed, 0);
       const e = node._store.get(orphan.key);
-      assert.ok(e.cmb.lineage && (e.cmb.lineage.parents || []).length === 1, 'orphan chain untouched');
+      assert.ok(e.cmb.metadata.lineage && (e.cmb.metadata.lineage.parents || []).length === 1, 'orphan chain untouched');
     } finally {
       await node.stop();
       fs.rmSync(nodeDir(name), { recursive: true, force: true });

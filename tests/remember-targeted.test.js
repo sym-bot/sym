@@ -61,7 +61,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       assert.strictEqual(cmbFrames[1].length, 1, 'peer B should receive exactly one CMB frame');
       assert.strictEqual(cmbFrames[2].length, 1, 'peer C should receive exactly one CMB frame');
       for (const frames of cmbFrames) {
-        assert.strictEqual(frames[0].cmb.key, entry.key, 'broadcast frame should carry the stored CMB key');
+        assert.strictEqual(frames[0].cmb.metadata.key, entry.key, 'broadcast frame should carry the stored CMB key');
       }
     });
   });
@@ -89,7 +89,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       assert.strictEqual(tA.frames.filter(f => f.type === 'cmb').length, 0, 'peer A should receive NO CMB');
       const bFrames = tB.frames.filter(f => f.type === 'cmb');
       assert.strictEqual(bFrames.length, 1, 'peer B should receive exactly one CMB');
-      assert.strictEqual(bFrames[0].cmb.key, entry.key, 'targeted frame should carry the stored CMB key');
+      assert.strictEqual(bFrames[0].cmb.metadata.key, entry.key, 'targeted frame should carry the stored CMB key');
       assert.strictEqual(tC.frames.filter(f => f.type === 'cmb').length, 0, 'peer C should receive NO CMB');
     });
   });

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const { recordCreatedBy } = require('../lib/record');
+
 /**
  * sym — CLI for the SYM mesh.
  *
@@ -598,7 +600,7 @@ function cmdRecall() {
           key,
           timestamp: entry.storedAt || entry.timestamp || 0,
           content,
-          source: entry.source || (entry.cmb && entry.cmb.createdBy) || 'unknown',
+          source: entry.source || recordCreatedBy(entry.cmb) || 'unknown',
           tags: entry.tags,
           _node: nodeName,
         });
@@ -783,7 +785,7 @@ function gatherMeshMemory(question, limit) {
         for (const w of words) { if (lc.includes(w)) score++; }
         seen.set(key, {
           content,
-          source: entry.source || (entry.cmb && entry.cmb.createdBy) || nodeName,
+          source: entry.source || recordCreatedBy(entry.cmb) || nodeName,
           _node: nodeName,
           timestamp: entry.storedAt || entry.timestamp || 0,
           score,

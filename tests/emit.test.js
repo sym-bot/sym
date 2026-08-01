@@ -61,12 +61,14 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
       // v1 is identified by its 64-hex digest, not by which prefix it wears: the
       // cmb1- -> cmb- migration moves the spelling while the scheme is unchanged.
       assert.match(key, /^cmb1?-[0-9a-f]{64}$/, 'v1 content address (either prefix)');
-      assert.equal(cmb.createdBy, 'ci-emitter');
-      assert.equal(cmb.group, 'emit-g', 'audience-bound to the authoring group');
-      assert.equal(cmb.sigAlg, 'ed25519');
+      assert.equal(cmb.metadata.createdBy, 'ci-emitter');
+      // `group` became `room` and moved into metadata in the same signing-scheme change — the
+      // audience is signature-bound, so it belongs in the section the signature covers.
+      assert.equal(cmb.metadata.room, 'emit-g', 'audience-bound to the authoring group');
+      assert.equal(cmb.metadata.sigAlg, 'ed25519');
 
       const stored = await accepted;
-      assert.equal((stored.cmb || stored).createdBy, 'ci-emitter', 'provenance is the emitter, not a resident node');
+      assert.equal((stored.cmb?.metadata ?? stored.cmb ?? stored).createdBy, 'ci-emitter', 'provenance is the emitter, not a resident node');
       assert.equal(stored.remixed, true, 'admitted into the receiver store as a remix');
     });
   });
@@ -98,7 +100,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
           { parents: [first.key] },
         );
         assert.notEqual(first.key, second.key);
-        assert.deepEqual(second.cmb.lineage.parents, [first.key], 'grounding cites its parent');
+        assert.deepEqual(second.cmb.metadata.lineage.parents, [first.key], 'grounding cites its parent');
         const deadline = Date.now() + 5000;
         while (seen.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
         assert.equal(seen.length >= 2, true, `receiver admitted both (got ${seen.length})`);

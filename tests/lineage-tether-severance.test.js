@@ -84,7 +84,7 @@ function isRootShaped(lineage) {
 
 function inboundFrame(topicText, rootKey) {
   const cmb = createCMB({ fields: cat7(topicText), createdBy: 'peerA' });
-  cmb.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
+  cmb.metadata.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
   return { type: 'cmb', timestamp: Date.now(), content: topicText, source: 'peerA', cmb };
 }
 
@@ -107,7 +107,7 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       const { accepted } = await seedAndReceive(node, TOPIC_A, TOPIC_B_NEW);
       assert.strictEqual(accepted.length, 1, 'incoming admits (aligned with recent topic-B anchors)');
       const cmb = accepted[0].cmb;
-      assert.ok(isRootShaped(cmb.lineage), 'lineage severed — stored as a fresh root');
+      assert.ok(isRootShaped(cmb.metadata.lineage), 'lineage severed — stored as a fresh root');
       assert.ok(cmb.provenance.tether, 'tether recorded in provenance');
       assert.strictEqual(cmb.provenance.tether.severed, true);
       assert.ok(cmb.provenance.tether.drift > 0.5, `drift ${cmb.provenance.tether.drift} exceeds the reject floor`);
@@ -119,7 +119,7 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       const att = cmb.tether;
       assert.ok(att, 'tether attestation attached');
       assert.strictEqual(att.verdict, 'severed');
-      assert.strictEqual(att.of, cmb.key);
+      assert.strictEqual(att.of, cmb.metadata.key);
       assert.strictEqual(att.kernelId, kernelId(), 'attestation names the evaluating kernel');
       const v = verifyTetherAttestation(att, node._identity.publicKey);
       assert.deepStrictEqual({ signed: v.signed, valid: v.valid }, { signed: true, valid: true });
@@ -131,8 +131,8 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       const { root, accepted } = await seedAndReceive(node, TOPIC_B_ROOT, TOPIC_B_NEW);
       assert.strictEqual(accepted.length, 1, 'incoming admits');
       const cmb = accepted[0].cmb;
-      assert.ok(!isRootShaped(cmb.lineage), 'lineage intact');
-      assert.ok(cmb.lineage.ancestors.includes(root.key), 'chain still reaches its root');
+      assert.ok(!isRootShaped(cmb.metadata.lineage), 'lineage intact');
+      assert.ok(cmb.metadata.lineage.ancestors.includes(root.key), 'chain still reaches its root');
       assert.strictEqual(cmb.provenance.tether.severed, false);
       assert.ok(cmb.provenance.tether.drift <= 0.5);
       assert.strictEqual(cmb.tether?.verdict, 'tethered', 'kept chains carry a tethered attestation');
@@ -153,7 +153,7 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       await node._frameHandler._processHeuristicSVAF(
         inboundFrame(TOPIC_B_NEW, root.key), 'peerA', 'peerA', now, now, 0);
       assert.strictEqual(accepted.length, 1);
-      assert.ok(!isRootShaped(accepted[0].cmb.lineage), 'lineage untouched when the tether is disabled');
+      assert.ok(!isRootShaped(accepted[0].cmb.metadata.lineage), 'lineage untouched when the tether is disabled');
     } finally {
       await node.stop();
       fs.rmSync(nodeDir(name), { recursive: true, force: true });

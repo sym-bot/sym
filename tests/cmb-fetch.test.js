@@ -50,7 +50,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       const res = sent.find((f) => f.type === 'cmb-fetch-result');
       assert.ok(res, 'responds');
       assert.strictEqual(res.found, true);
-      assert.strictEqual(res.cmb.key, root.key);
+      assert.strictEqual(res.cmb.metadata.key, root.key);
       assert.ok(res.cmb.fields.focus.text.length > 0, 'text served');
       assert.strictEqual(res.cmb.fields.focus.vector, undefined, 'vectors stripped — re-verifiers re-encode');
     });
@@ -93,7 +93,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
         const hit = await p;
         assert.ok(hit, 'verified response resolves');
         assert.strictEqual(hit.from, 'peerA', 'the forged response did not win');
-        assert.strictEqual(hit.cmb.key, root.key);
+        assert.strictEqual(hit.cmb.metadata.key, root.key);
       });
     });
   });

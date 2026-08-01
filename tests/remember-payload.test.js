@@ -130,7 +130,17 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
       }, { payload: { v: 2 } });
 
       assert.ok(entry1, 'first emit should land');
-      assert.strictEqual(entry2, null, 'second emit with identical CAT7 should dedupe (cmbKey unchanged by payload)');
+
+      // The payload is NOT addressed: identical CAT7 with a different payload is the same
+      // content and therefore the same address. This used to assert `null` — "nothing came
+      // back" — which the collapse contract replaced with something stronger: the second call
+      // returns a CITATION of the address that already says it, so a caller can tell
+      // "already held" apart from "refused", which `null` conflated.
+      assert.ok(entry2?.collapsed, 'the second emit collapses rather than minting a sibling');
+      assert.strictEqual(entry2.key, entry1.key, 'and cites the address the payload did not change');
+      // The assertion that actually distinguishes a mint-level refusal from a store-level dedup:
+      // a dedup writes nothing while HEAD has already moved.
+      assert.strictEqual(node._head, entry1.key, 'HEAD MUST NOT advance — nothing new was said');
     });
   });
 });
