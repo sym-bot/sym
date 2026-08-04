@@ -2,6 +2,19 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.10.2 (2026-08-04)
+
+### Fixed
+
+- **The delivery inbox survives a session restart.** Communication is addressed to the NODE, and a
+  new session relinks to it — including what was delivered while no session was attached. The inbox
+  was process memory only, so a restart silently wiped the delivery feed while every sender believed
+  it had delivered (observed live: four gate requests, and separately five broadcasts, vanished into
+  restarted peers that showed as live on Bonjour throughout). Ring, sequence and drain cursor now
+  persist together in the node directory: messages without the cursor would replay what was already
+  drained; the cursor without the messages would silently skip the backlog. A missing or corrupt
+  inbox file starts fresh, exactly like the old behaviour.
+
 ## 0.10.1 (2026-08-01)
 
 - **Pinned to `@sym-bot/core` 0.7.0.** Shadow samples are now persisted per node rather than
