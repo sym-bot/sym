@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "node --test --test-force-exit tests/*.test.js",
-    "test:integration": "node --test --test-timeout=30000 --test-concurrency=1 tests/integration/*.js"
+    "test:integration": "node --test --test-timeout=30000 --test-concurrency=1 tests/integration/*.js",
+    "prepublishOnly": "npm test"
   },
   "keywords": [
     "mesh",
