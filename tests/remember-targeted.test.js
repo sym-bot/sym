@@ -122,7 +122,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       // words, were lost for three days under this green.
       assert.strictEqual(entry.delivery.undelivered, true,
         'a directed send that reached no peer must be reported as undelivered');
-      assert.strictEqual(entry.delivery.delivered, 0, 'nothing was actually sent');
+      assert.strictEqual(entry.delivery.dispatched, 0, 'no frame was even handed to a transport');
     });
   });
 

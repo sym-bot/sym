@@ -25,7 +25,9 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  *   reporting success.
  *
  * The fix makes the delivery outcome part of what the caller is handed:
- * `entry.delivery` carries { directed, targets, delivered, undelivered }.
+ * `entry.delivery` carries { directed, targets, dispatched, undelivered }.
+ * `dispatched` counts frames handed to a transport — NOT frames received; the
+ * word `delivered` stays reserved until an ack earns it.
  * It is defined NON-ENUMERABLE on purpose — the store persists entries with
  * JSON.stringify, and a delivery outcome is a fact about one send, not part of
  * the durable record. Persisting it would be its own defect class (a stored
@@ -81,7 +83,7 @@ describe('directed delivery accountability (bl-a6e63608c8c)', () => {
       assert.ok(entry.delivery, 'the caller must be handed a delivery outcome');
       assert.strictEqual(entry.delivery.directed, true);
       assert.strictEqual(entry.delivery.targets, 0, 'the addressee was not connected');
-      assert.strictEqual(entry.delivery.delivered, 0, 'nothing was sent');
+      assert.strictEqual(entry.delivery.dispatched, 0, 'no frame was even handed to a transport');
       assert.strictEqual(
         entry.delivery.undelivered, true,
         'THE WHOLE POINT: zero peers reached must not be indistinguishable from delivered',
