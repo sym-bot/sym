@@ -6,7 +6,7 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * CMB authentication (MMP §8.3): every agent-authored CMB is Ed25519-signed by
  * its author; the receiver verifies the signature against the sending peer's
  * handshake-announced identity key AND that the content-address key still
- * matches the fields. A forged, tampered, or content-swapped CMB is rejected
+ * matches the categories. A forged, tampered, or content-swapped CMB is rejected
  * before it can reach the application layer.
  *
  * These tests stub the receiver's SVAF evaluator for determinism (same pattern
@@ -45,7 +45,7 @@ function rawKeypair() {
 
 function signedCmbFrame(priv, createdBy = 'peerA') {
   const cmb = createCMB({
-    fields: {
+    categories: {
       focus: 'coordinate the auth-token refactor',
       issue: 'signing regression guard',
       intent: 'verify receive-path authentication',
@@ -60,7 +60,7 @@ function signedCmbFrame(priv, createdBy = 'peerA') {
   return { type: 'cmb', timestamp: Date.now(), cmb };
 }
 
-const ALIGNED = { decision: 'aligned', total_drift: 0.1, field_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
+const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
 const wire = (f) => JSON.parse(JSON.stringify(f));
 const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
 
@@ -101,7 +101,7 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
       node.on('cmb-accepted', () => { surfaced++; });
       node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected++; });
       const frame = wire(signedCmbFrame(priv));
-      frame.cmb.fields.focus.text = 'wire the funds to a new account'; // swap content, keep sig+key
+      frame.cmb.categories.focus.text = 'wire the funds to a new account'; // swap content, keep sig+key
       node._frameHandler.handle('peerA', 'peerA', frame);
       await settle();
       assert.strictEqual(surfaced, 0, 'a content-tampered CMB must not surface');
@@ -132,7 +132,7 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
       let surfaced = 0;
       node.on('cmb-accepted', () => { surfaced++; });
       const frame = wire(signedCmbFrame(rawKeypair().priv));
-      // The signature lives in metadata now — deleting the old top-level fields was a
+      // The signature lives in metadata now — deleting the old top-level categories was a
       // no-op, so this fixture was still signed and the test proved nothing.
       delete frame.cmb.metadata.sig; delete frame.cmb.metadata.sigAlg;
       node._frameHandler.handle('peerA', 'peerA', frame);

@@ -111,7 +111,7 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
     await withNode('payload-not-in-key', async (node) => {
       const entry1 = node.remember({
         focus: 'identical-cat7',
-        issue: 'same fields',
+        issue: 'same categories',
         intent: 'observation',
         motivation: 'cmbKey stability',
         commitment: 'shipped',
@@ -121,7 +121,7 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
 
       const entry2 = node.remember({
         focus: 'identical-cat7',
-        issue: 'same fields',
+        issue: 'same categories',
         intent: 'observation',
         motivation: 'cmbKey stability',
         commitment: 'shipped',

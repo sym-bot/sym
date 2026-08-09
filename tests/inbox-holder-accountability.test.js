@@ -52,7 +52,7 @@ function arrival(focusText, { directed = false, from = 'peer-x' } = {}) {
     content: focusText,
     directed,
     remixed: false,
-    cmb: { fields: { focus: { text: focusText } } },
+    cmb: { categories: { focus: { text: focusText } } },
   };
 }
 

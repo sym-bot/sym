@@ -24,8 +24,8 @@ function kp(nodeId) {
     pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
   };
 }
-function att(by, role, verdict, fields, priv) {
-  const a = { of: 'cmb-agg', by, at: Date.now(), roster: 'g', method: 'heuristic', verdict, fields, role, seq: 1, prev: null };
+function att(by, role, verdict, categories, priv) {
+  const a = { of: 'cmb-agg', by, at: Date.now(), roster: 'g', method: 'heuristic', verdict, categories, role, seq: 1, prev: null };
   return signAttestation(a, priv);
 }
 
@@ -35,7 +35,7 @@ function anchorNode(base) {
   const name = `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const id = loadOrCreateIdentity(name);
   const node = new SymNode({
-    name, silent: true, discovery: new NullDiscovery(), group: 'g',
+    name, silent: true, discovery: new NullDiscovery(), room: 'g',
     anchor: { nodeId: id.nodeId, publicKey: id.publicKey },
   });
   return { node, name };
@@ -69,7 +69,7 @@ describe('node earned-authority wiring (EA2/EA3)', () => {
 
   it('a node with an anchor but no grants resolves itself to participant', () => {
     const name = `ea-plain-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g', anchor: { nodeId: 'someone-else', publicKey: 'AAAA' } });
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: 'g', anchor: { nodeId: 'someone-else', publicKey: 'AAAA' } });
     try {
       assert.strictEqual(node._resolvedRole(), 'participant', 'no grant → participant, not self-asserted');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
@@ -94,7 +94,7 @@ describe('§6.5 enforcement — validate/canonize gated on earned authority (EA4
 
   it('a participant cannot validate or canonize — the CMB is left untouched', () => {
     const name = `ea65-part-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g', anchor: { nodeId: 'someone-else', publicKey: 'AAAA' } });
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: 'g', anchor: { nodeId: 'someone-else', publicKey: 'AAAA' } });
     try {
       const key = seed(node);
       assert.strictEqual(node._resolvedRole(), 'participant');
@@ -156,8 +156,8 @@ describe('aggregateAttestations — weighted by earned authority (EA6)', () => {
       assert.strictEqual(agg.overall.tally.aligned, 6);
       assert.strictEqual(agg.overall.tally.rejected, 2);
       assert.strictEqual(agg.overall.confidence, 0.75, '6/8');
-      assert.strictEqual(agg.fields.focus.dominant, 'admit');
-      assert.strictEqual(agg.fields.focus.tally.admit, 6);
+      assert.strictEqual(agg.categories.focus.dominant, 'admit');
+      assert.strictEqual(agg.categories.focus.tally.admit, 6);
       // the over-claimer is down-weighted to participant AND surfaced as evidence
       assert.strictEqual(agg.mismatches.length, 1);
       assert.strictEqual(agg.mismatches[0].by, O.nodeId);

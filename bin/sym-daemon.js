@@ -105,22 +105,43 @@ if (args.includes('--status')) {
   process.exit(0);
 }
 
-// ── Mesh group (MMP §5.8) ──────────────────────────────────────
-// Resolve which group this node joins, in precedence order:
-//   1. SYM_GROUP env   2. persisted ~/.sym/group (written by `sym join`)   3. default
+// ── Mesh room (MMP §5.8) ──────────────────────────────────────
+// Resolve which room this node joins, in precedence order:
+//   1. SYM_ROOM env   2. persisted ~/.sym/room (written by `sym join`)   3. default
 // The persisted file is the source of truth across launchd/spawn restarts;
-// env overrides it for one run. group -> service type matches the MCP node +
-// sym-swift, so CLI peers discover app/Claude peers in the same group.
-const { groupServiceType, isValidGroup } = require('../lib/groups');
-const GROUP_FILE = path.join(SYM_DIR, 'group');
-let GROUP = process.env.SYM_GROUP
-  || (() => { try { return fs.readFileSync(GROUP_FILE, 'utf8').trim(); } catch { return ''; } })()
+// env overrides it for one run. room -> service type matches the MCP node +
+// sym-swift, so CLI peers discover app/Claude peers in the same room.
+const { roomServiceType, isValidRoom } = require('../lib/rooms');
+const ROOM_FILE = path.join(SYM_DIR, 'room');
+// The room used to persist under a different filename. That file is NOT read — one name, no
+// fallback — but its presence is ANNOUNCED, because the alternative is the worst outcome
+// available: a node that silently drops to the default room, stops seeing every peer it had, and
+// reports nothing. A membership that vanishes without a message is indistinguishable from a mesh
+// that has gone quiet. Naming it costs one line and turns a mystery into an instruction.
+const RETIRED_ROOM_FILE = path.join(SYM_DIR, 'group');
+let ROOM = process.env.SYM_ROOM
+  || (() => { try { return fs.readFileSync(ROOM_FILE, 'utf8').trim(); } catch { return ''; } })()
   || 'default';
-if (!isValidGroup(GROUP)) {
-  log(`Invalid group "${GROUP}" — must be kebab-case or "default". Falling back to default.`);
-  GROUP = 'default';
+// Announce the retired file if it is still there and we did NOT inherit its value. Refusing to
+// read it is the rule; leaving the operator to guess why their mesh went quiet is not.
+if (ROOM === 'default' && !process.env.SYM_ROOM) {
+  try {
+    const stale = fs.readFileSync(RETIRED_ROOM_FILE, 'utf8').trim();
+    if (stale && stale !== 'default') {
+      console.error(
+        `sym: found a retired room file at ${RETIRED_ROOM_FILE} naming "${stale}", and it is NOT read. ` +
+        `This node has started in "default" and will not see the peers it had. ` +
+        `Run \`sym join ${stale}\` to restore it, then delete that file.`,
+      );
+    }
+  } catch { /* absent is the normal case */ }
 }
-log(`Mesh group: ${GROUP} (${groupServiceType(GROUP)})`);
+
+if (!isValidRoom(ROOM)) {
+  log(`Invalid room "${ROOM}" — must be kebab-case or "default". Falling back to default.`);
+  ROOM = 'default';
+}
+log(`Mesh room: ${ROOM} (${roomServiceType(ROOM)})`);
 
 // ── SYM Node ───────────────────────────────────────────────────
 
@@ -132,8 +153,8 @@ const node = new SymNode({
   name: NODE_NAME,
   cognitiveProfile: `Local CLI-host for ${os.hostname()}. Hosts IPC surface for sym CLI. Forwards frames, no storage, no SVAF.`,
   cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
-  group: GROUP,
-  discoveryServiceType: groupServiceType(GROUP),
+  room: ROOM,
+  discoveryServiceType: roomServiceType(ROOM),
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,
@@ -401,9 +422,9 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'remember':
-      if (msg.fields) {
+      if (msg.categories) {
         try {
-          const entry = node.remember(msg.fields, { tags: msg.tags, parents: msg.parents });
+          const entry = node.remember(msg.categories, { tags: msg.tags, parents: msg.parents });
           if (entry) {
             sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
           } else {
@@ -446,9 +467,9 @@ function handleIPCMessage(socketId, socket, msg) {
       // MMP Section 13.9: Local Event Interface.
       // Register this socket for real-time mesh events.
       // Subscriber MAY declare field weights for domain-specific filtering.
-      listeners.set(socketId, { socket, fieldWeights: msg.fieldWeights || null });
+      listeners.set(socketId, { socket, categoryWeights: msg.categoryWeights || null });
       sendIPC(socket, { type: 'result', action: 'listen', status: 'subscribed' });
-      log(`Listener registered (socket ${socketId}${msg.fieldWeights ? ', with field weights' : ''})`);
+      log(`Listener registered (socket ${socketId}${msg.categoryWeights ? ', with field weights' : ''})`);
       break;
 
     case 'peers': {
@@ -539,19 +560,19 @@ function broadcastToHostedAgents(msg) {
 // MMP Section 13.9.2: Subscriber Field Weights.
 // If subscriber declared field weights, evaluate CMB relevance before delivery.
 function shouldDeliverToListener(listener, msg) {
-  if (!listener.fieldWeights) return true; // no weights = receive everything
+  if (!listener.categoryWeights) return true; // no weights = receive everything
   if (msg.event !== 'cmb-accepted') return true; // non-CMB events always delivered
 
-  const fields = msg.data?.fields;
-  if (!fields) return true;
+  const categories = msg.data?.categories;
+  if (!categories) return true;
 
   // Weighted relevance: sum(α_f * hasContent_f) / sum(α_f)
   // Deliver if any high-weight field has content
-  const weights = listener.fieldWeights;
+  const weights = listener.categoryWeights;
   let weightedScore = 0, totalWeight = 0;
   for (const [field, weight] of Object.entries(weights)) {
     totalWeight += weight;
-    const text = fields[field]?.text || '';
+    const text = categories[field]?.text || '';
     if (text && text !== 'none' && text !== 'neutral') {
       weightedScore += weight;
     }
@@ -792,32 +813,32 @@ function log(msg) {
 
 // ── Startup ────────────────────────────────────────────────────
 
-// ── Group discovery beacon (MMP §5.8) ──────────────────────────
-// Advertise this node's group on one shared service type so `sym groups` can
-// list live groups cross-platform — bonjour-service browse works where Apple
+// ── Room discovery beacon (MMP §5.8) ──────────────────────────
+// Advertise this node's room on one shared service type so `sym rooms` can
+// list live rooms cross-platform — bonjour-service browse works where Apple
 // dns-sd is absent (e.g. Windows). Discovery-only: comms stay isolated on the
-// group's own `_<group>._tcp`. The group name is whatever the user chose and
+// room's own `_<room>._tcp`. The room name is whatever the user chose and
 // can be an anonymous/opaque code, so the broadcast need not reveal its purpose.
-let groupBeacon = null;
-function startGroupBeacon() {
+let roomBeacon = null;
+function startRoomBeacon() {
   try {
     const { Bonjour } = require('bonjour-service');
-    groupBeacon = new Bonjour();
-    groupBeacon.publish({
+    roomBeacon = new Bonjour();
+    roomBeacon.publish({
       name: NODE_NAME,
-      type: 'symgroups',
+      type: 'symrooms',
       port: node._port || 7777,
-      txt: { group: GROUP, node: NODE_NAME },
+      txt: { room: ROOM, node: NODE_NAME },
     });
-    log(`Group beacon: group="${GROUP}" on _symgroups._tcp`);
+    log(`Room beacon: room="${ROOM}" on _symrooms._tcp`);
   } catch (e) {
-    log(`Group beacon unavailable (sym groups listing limited): ${e.message}`);
+    log(`Room beacon unavailable (sym rooms listing limited): ${e.message}`);
   }
 }
-function stopGroupBeacon() {
-  if (!groupBeacon) return;
-  try { groupBeacon.unpublishAll(() => { try { groupBeacon.destroy(); } catch {} }); } catch {}
-  groupBeacon = null;
+function stopRoomBeacon() {
+  if (!roomBeacon) return;
+  try { roomBeacon.unpublishAll(() => { try { roomBeacon.destroy(); } catch {} }); } catch {}
+  roomBeacon = null;
 }
 
 async function main() {
@@ -828,7 +849,7 @@ async function main() {
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
 
-  startGroupBeacon();
+  startRoomBeacon();
 
   loadTasks();
   log(`Loaded ${tasks.size} task(s)`);
@@ -850,8 +871,8 @@ async function main() {
       data: {
         key: entry.key,
         source: entry.source || recordCreatedBy(entry.cmb) || 'unknown',
-        focus: entry.cmb?.fields?.focus?.text || entry.content || '',
-        fields: entry.cmb?.fields || null, // Section 13.9.2: needed for subscriber field weight filtering
+        focus: entry.cmb?.categories?.focus?.text || entry.content || '',
+        categories: entry.cmb?.categories || null, // Section 13.9.2: needed for subscriber field weight filtering
         timestamp: entry.timestamp || Date.now(),
       },
     });
@@ -888,7 +909,7 @@ async function main() {
   // Graceful shutdown (launchd sends SIGTERM, then SIGKILL after ExitTimeOut)
   const shutdown = () => {
     log('Shutting down...');
-    stopGroupBeacon();
+    stopRoomBeacon();
     node.stop();
     ipcServer.close();
     if (fs.existsSync(SOCKET_PATH)) {

@@ -8,7 +8,7 @@
  *
  *   wire frame → frame-handler → SVAF → cmb-accepted → _pushInbox → inbox()
  *
- * The fleet symptom (sym-coo, Mac→Windows bonjour): CAT7 fields arrive intact
+ * The fleet symptom (sym-coo, Mac→Windows bonjour): CAT7 categories arrive intact
  * but `m.payload` is empty on the receiver's inbox drain. The asymmetry
  * (research-bot→Mac carried payload; Mac→coo dropped it) is NOT OS-specific —
  * SVAF admit vs reject depends on the receiver's own memory drift, and the two
@@ -111,7 +111,7 @@ describe('E2E payload receive — payload survives to receiver inbox (§4.4.4 + 
     assert.ok(surfaced, 'directed CMB must surface on nodeB.inbox() regardless of SVAF verdict');
 
     const msgs = nodeB.inbox().messages;
-    const mine = msgs.find(m => m.key === entry.key || m.fields?.focus?.text?.includes('rcv-test-1') || String(m.content).includes('rcv-test-1'));
+    const mine = msgs.find(m => m.key === entry.key || m.categories?.focus?.text?.includes('rcv-test-1') || String(m.content).includes('rcv-test-1'));
     assert.ok(mine, 'the directed CMB is present on nodeB inbox');
 
     // THE ASSERTION THAT WAS NEVER MADE: payload survived to the inbox message.

@@ -37,7 +37,7 @@ function cat7(t) {
 function storeLegacyRemix(node, rootKey, topicText) {
   // NOTE: createCMB mints content-only keys, so fixtures must use distinct
   // texts — two identical texts collide on one key and dedup.
-  const cmb = createCMB({ fields: cat7(topicText), createdBy: 'legacy-peer' });
+  const cmb = createCMB({ categories: cat7(topicText), createdBy: 'legacy-peer' });
   // Lineage goes in the section this record ACTUALLY carries. The fixture used to staple a flat
   // `cmb.lineage` onto a record createCMB had already built with metadata — a hybrid that is
   // neither generation, whose key read back undefined and whose lineage nothing walked.

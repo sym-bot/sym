@@ -32,8 +32,8 @@ describe('E2E Admission Attestation gossip (D2)', () => {
   it('an attestation gossips to the roster, verifies, and records; a forgery is dropped', async () => {
     const aName = `e2e-gos-a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const bName = `e2e-gos-b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const A = new SymNode({ name: aName, silent: true, discovery: new NullDiscovery(), group: 'sym-bot-team' });
-    const B = new SymNode({ name: bName, silent: true, discovery: new NullDiscovery(), group: 'sym-bot-team' });
+    const A = new SymNode({ name: aName, silent: true, discovery: new NullDiscovery(), room: 'sym-bot-team' });
+    const B = new SymNode({ name: bName, silent: true, discovery: new NullDiscovery(), room: 'sym-bot-team' });
     await A.start(); await B.start();
     A._svafEvaluator.evaluate = async () => null;
     B._svafEvaluator.evaluate = async () => null;
@@ -66,7 +66,7 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     const before = B._attestations.size();
     B._frameHandler.handle(A.nodeId, aName, {
       type: 'attestation',
-      attestation: { of: K, by: A.nodeId, at: Date.now(), roster: 'sym-bot-team', verdict: 'aligned', fields: {}, role: 'participant', seq: 99, prev: 'x', sig: 'AAAAforged', sigAlg: 'ed25519' },
+      attestation: { of: K, by: A.nodeId, at: Date.now(), roster: 'sym-bot-team', verdict: 'aligned', categories: {}, role: 'participant', seq: 99, prev: 'x', sig: 'AAAAforged', sigAlg: 'ed25519' },
     });
     await sleep(50);
     assert.strictEqual(B._attestations.size(), before, 'a forged attestation is rejected, not recorded');

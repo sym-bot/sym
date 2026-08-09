@@ -12,7 +12,7 @@
  *      or `mood-delivered` event fires on nodeB — either proves SVAF
  *      ran on the inbound frame).
  *   3. If SVAF admits the CMB, nodeB's cmbs contains a remix entry
- *      with `svaf.{decision, totalDrift, fieldDrifts}` populated and
+ *      with `svaf.{decision, totalDrift, categoryDrifts}` populated and
  *      `lineage.parents` pointing back to nodeA's CMB key.
  *
  * The test accepts either "admitted" or "rejected/mood-delivered" as a
@@ -104,7 +104,7 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
     nodeB.on('memory-received', (evt) => { outcomes.memoryReceived = evt; });
     nodeB.on('mood-delivered', (evt) => { outcomes.moodDelivered = evt; });
 
-    const fields = {
+    const categories = {
       focus: 'E2E CMB-path validation between in-process SymNode peers',
       issue: 'verify targeted send → wire → frame-handler → SVAF chain',
       intent: 'exercise MMP §4.4.4 targeted routing end-to-end',
@@ -113,8 +113,8 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
       perspective: 'nodeA sender',
       mood: { text: 'procedural', valence: 0, arousal: 0 },
     };
-    const entry = nodeA.remember(fields, { to: nodeB.nodeId });
-    assert.ok(entry, 'nodeA.remember(fields, {to}) returns a local entry');
+    const entry = nodeA.remember(categories, { to: nodeB.nodeId });
+    assert.ok(entry, 'nodeA.remember(categories, {to}) returns a local entry');
     assert.ok(entry.key, 'local entry has a CMB key');
 
     // Wait until SVAF has run on B — either remix-store (accept) or
@@ -142,7 +142,7 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
       assert.ok(storedEntry.svaf, 'admitted remix MUST have svaf block (§9.2)');
       assert.ok(typeof storedEntry.svaf.decision === 'string', 'svaf.decision is a string');
       assert.ok(typeof storedEntry.svaf.totalDrift === 'number', 'svaf.totalDrift is numeric');
-      assert.ok(storedEntry.svaf.fieldDrifts && typeof storedEntry.svaf.fieldDrifts === 'object', 'svaf.fieldDrifts is an object');
+      assert.ok(storedEntry.svaf.categoryDrifts && typeof storedEntry.svaf.categoryDrifts === 'object', 'svaf.categoryDrifts is an object');
       const parents = storedEntry.cmb?.lineage?.parents || [];
       assert.ok(parents.length >= 1, 'lineage.parents must include at least one parent key (§14)');
       assert.strictEqual(parents[0], entry.key, 'parent key points back to nodeA\'s original CMB');

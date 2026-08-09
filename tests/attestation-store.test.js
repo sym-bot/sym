@@ -18,7 +18,7 @@ function makeChain(by, n) {
   let prev = 'genesis';
   for (let s = 1; s <= n; s++) {
     const sig = `sig-${by}-${s}`;
-    atts.push({ of: `cmb-${s}`, by, seq: s, prev, sig, verdict: 'aligned', fields: {} });
+    atts.push({ of: `cmb-${s}`, by, seq: s, prev, sig, verdict: 'aligned', categories: {} });
     prev = chainHash(sig);
   }
   return atts;

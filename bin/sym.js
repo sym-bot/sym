@@ -14,20 +14,20 @@ const { recordCreatedBy } = require('../lib/record');
  *   sym stop                          # Stop daemon
  *   sym status                        # Show mesh status
  *   sym peers                         # List connected peers
- *   sym publish [flags] <json>        # Publish a projection (CAT7 fields as JSON)
+ *   sym publish [flags] <json>        # Publish a projection (CAT7 categories as JSON)
  *                                     #   --standalone: daemon-less one-shot SymNode (auto-fallback if daemon is down)
  *                                     #   --name <id>:  mesh identity for standalone mode (REQUIRED — no default)
  *                                     #   --parents <keys>: comma-separated parent CMB keys (lineage, implies --standalone)
  *   sym emit [flags] <json>           # One-shot Class 1 emit to a REMOTE mesh node (no daemon, §17.1)
- *                                     #   --server <host:port> (required), --group <g>, --name <id>,
+ *                                     #   --server <host:port> (required), --room <g>, --name <id>,
  *                                     #   --to <node>, --parents <keys>
  *   sym recall <query>                # Search mesh memory
  *   sym ask "<question>"              # Ask the whole mesh; get one synthesized answer
  *   sym insight                       # Get xMesh collective intelligence
  *   sym send <message>                # Send message to all peers
- *   sym group                         # Show current mesh group
- *   sym groups                        # Discover groups live on the LAN
- *   sym join <name>                   # Switch into a group ("group chat")
+ *   sym room                         # Show current mesh room
+ *   sym rooms                        # Discover rooms live on the LAN
+ *   sym join <name>                   # Switch into a room ("room chat")
  *   sym leave                         # Return to the default global mesh
  *   sym logs                          # Tail daemon logs
  *   sym version                       # Show version
@@ -42,12 +42,12 @@ const os = require('os');
 const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
-const { isValidGroup, groupServiceType } = require('../lib/groups');
-const GROUP_FILE = path.join(os.homedir(), '.sym', 'group');
+const { isValidRoom, roomServiceType } = require('../lib/rooms');
+const ROOM_FILE = path.join(os.homedir(), '.sym', 'room');
 const PID_FILE = path.join(os.homedir(), '.sym', 'daemon.pid');
 
 // Portable synchronous sleep — no shell dependency (`sleep` is POSIX-only and
-// absent on Windows). Used between daemon stop/start on a group switch.
+// absent on Windows). Used between daemon stop/start on a room switch.
 function sleepMs(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
 }
@@ -90,8 +90,8 @@ switch (command) {
   case 'listen':  cmdListen(); break;
   case 'join':    cmdJoin(); break;
   case 'leave':   cmdLeave(); break;
-  case 'groups':  cmdGroups(); break;
-  case 'group':   cmdGroup(); break;
+  case 'rooms':  cmdRooms(); break;
+  case 'room':   cmdRoom(); break;
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
@@ -104,35 +104,35 @@ switch (command) {
 // ── Command Implementations ───────────────────────────────────
 
 function cmdStart() {
-  applyStartFlags();                       // parse + persist --group / --relay-* first
+  applyStartFlags();                       // parse + persist --room / --relay-* first
   if (isDaemonRunning()) {
     console.log('sym-daemon is already running.');
-    console.log(`group: ${readGroup()}`);
+    console.log(`room: ${readRoom()}`);
     return;
   }
   spawnDaemon();
 }
 
-// ── Mesh groups (MMP §5.8) ─────────────────────────────────────
-// A group is the "group chat" boundary. The persisted ~/.sym/group file is
+// ── Mesh rooms (MMP §5.8) ─────────────────────────────────────
+// A room is the "room chat" boundary. The persisted ~/.sym/room file is
 // the source of truth across launchd/spawn restarts; the daemon reads it (or
-// SYM_GROUP env) at startup and maps the name to a Bonjour service type that
-// matches the MCP node + sym-swift, so peers in the same group discover each
-// other. See lib/groups.js.
+// SYM_ROOM env) at startup and maps the name to a Bonjour service type that
+// matches the MCP node + sym-swift, so peers in the same room discover each
+// other. See lib/rooms.js.
 
 function flagValue(name) {
   const i = args.indexOf(name);
   return i !== -1 ? (args[i + 1] || '') : null;
 }
 
-function persistGroup(group) {
-  const dir = path.dirname(GROUP_FILE);
+function persistRoom(room) {
+  const dir = path.dirname(ROOM_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(GROUP_FILE, group + '\n');
+  fs.writeFileSync(ROOM_FILE, room + '\n');
 }
 
-function readGroup() {
-  try { return fs.readFileSync(GROUP_FILE, 'utf8').trim() || 'default'; }
+function readRoom() {
+  try { return fs.readFileSync(ROOM_FILE, 'utf8').trim() || 'default'; }
   catch { return 'default'; }
 }
 
@@ -152,26 +152,26 @@ function persistRelay(url, token) {
   fs.writeFileSync(f, Object.entries(kv).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
 }
 
-// Validate + persist --group / --relay-url / --relay-token before a launch.
+// Validate + persist --room / --relay-url / --relay-token before a launch.
 function applyStartFlags() {
-  const g = flagValue('--group');
+  const g = flagValue('--room');
   if (g !== null) {
-    if (!isValidGroup(g)) {
-      console.error(`Invalid group "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+    if (!isValidRoom(g)) {
+      console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
       process.exit(1);
     }
-    persistGroup(g);
+    persistRoom(g);
   }
   const url = flagValue('--relay-url');
   const token = flagValue('--relay-token');
   if (url || token) persistRelay(url, token);
 }
 
-// Launch the daemon (no running-check). Passes SYM_GROUP in env for the
+// Launch the daemon (no running-check). Passes SYM_ROOM in env for the
 // spawn path (Linux/immediate); the persisted file covers launchd (macOS).
 function spawnDaemon() {
   const daemonPath = path.join(__dirname, 'sym-daemon.js');
-  const env = { ...process.env, SYM_GROUP: readGroup() };
+  const env = { ...process.env, SYM_ROOM: readRoom() };
   if (process.platform === 'darwin') {
     try {
       execSync(`node "${daemonPath}" --install`, { stdio: 'inherit', env });
@@ -186,12 +186,12 @@ function spawnDaemon() {
     try { fs.writeFileSync(PID_FILE, String(child.pid)); } catch {}
     console.log(`sym-daemon started (pid ${child.pid})`);
   }
-  console.log(`group: ${readGroup()}`);
+  console.log(`room: ${readRoom()}`);
 }
 
-// Restart the daemon into a (newly persisted) group.
-function restartIntoGroup(group, doneMsg) {
-  persistGroup(group);
+// Restart the daemon into a (newly persisted) room.
+function restartIntoRoom(room, doneMsg) {
+  persistRoom(room);
   if (isDaemonRunning()) {
     cmdStop();
     sleepMs(1000);   // let the old node fully release the socket (portable)
@@ -202,66 +202,66 @@ function restartIntoGroup(group, doneMsg) {
 
 function cmdJoin() {
   const g = args[1];
-  if (!g) { console.error('Usage: sym join <group>   (kebab-case, or "default")'); process.exit(1); }
-  if (!isValidGroup(g)) {
-    console.error(`Invalid group "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+  if (!g) { console.error('Usage: sym join <room>   (kebab-case, or "default")'); process.exit(1); }
+  if (!isValidRoom(g)) {
+    console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
     process.exit(1);
   }
-  restartIntoGroup(g, `joined group "${g}".`);
+  restartIntoRoom(g, `joined room "${g}".`);
 }
 
 function cmdLeave() {
-  restartIntoGroup('default', 'left — back on the default mesh (_sym._tcp).');
+  restartIntoRoom('default', 'left — back on the default mesh (_sym._tcp).');
 }
 
-function cmdGroup() {
-  const g = readGroup();
-  console.log(`current group: ${g}   (${groupServiceType(g)})`);
+function cmdRoom() {
+  const g = readRoom();
+  console.log(`current room: ${g}   (${roomServiceType(g)})`);
 }
 
-// Discover SYM-mesh groups with at least one node online on this LAN.
+// Discover SYM-mesh rooms with at least one node online on this LAN.
 // Mirrors the MCP node's discovery (dns-sd on macOS/Windows, avahi on Linux).
-// Discover SYM groups live on the LAN. Browses the shared `_symgroups._tcp`
-// beacon every running node advertises (group name in TXT) via the pure-JS
+// Discover SYM rooms live on the LAN. Browses the shared `_symrooms._tcp`
+// beacon every running node advertises (room name in TXT) via the pure-JS
 // bonjour-service — works cross-platform, including Windows where Apple's
-// dns-sd is absent. Each live node publishes its group; we list the distinct
-// groups (group names may be opaque/anonymous codes — we just show what's
-// advertised). Discovery-only; comms stay isolated per group.
-function cmdGroups() {
+// dns-sd is absent. Each live node publishes its room; we list the distinct
+// rooms (room names may be opaque/anonymous codes — we just show what's
+// advertised). Discovery-only; comms stay isolated per room.
+function cmdRooms() {
   let Bonjour;
   try { ({ Bonjour } = require('bonjour-service')); }
-  catch (e) { console.error(`group discovery unavailable: ${e.message}`); return; }
+  catch (e) { console.error(`room discovery unavailable: ${e.message}`); return; }
 
   const bonjour = new Bonjour();
-  const groups = new Map();   // group name -> Set(node names)
+  const rooms = new Map();   // room name -> Set(node names)
   let browser;
   try {
-    browser = bonjour.find({ type: 'symgroups' }, (svc) => {
+    browser = bonjour.find({ type: 'symrooms' }, (svc) => {
       const txt = svc.txt || {};
-      const g = txt.group != null ? String(txt.group) : null;
+      const g = txt.room != null ? String(txt.room) : null;
       const n = txt.node != null ? String(txt.node) : (svc.name || '?');
       if (g) {
-        if (!groups.has(g)) groups.set(g, new Set());
-        groups.get(g).add(n);
+        if (!rooms.has(g)) rooms.set(g, new Set());
+        rooms.get(g).add(n);
       }
     });
   } catch (e) {
     try { bonjour.destroy(); } catch {}
-    console.error(`group discovery failed: ${e.message}`);
+    console.error(`room discovery failed: ${e.message}`);
     return;
   }
 
   setTimeout(() => {
     try { if (browser && browser.stop) browser.stop(); bonjour.destroy(); } catch {}
-    const current = readGroup();
-    if (groups.size === 0) {
-      console.log('No SYM groups visible on the LAN right now (only groups with a live node appear).');
-      console.log(`Your group: ${current}  ·  switch with: sym join <name>`);
+    const current = readRoom();
+    if (rooms.size === 0) {
+      console.log('No SYM rooms visible on the LAN right now (only rooms with a live node appear).');
+      console.log(`Your room: ${current}  ·  switch with: sym join <name>`);
       return;
     }
-    console.log(`SYM groups live on the LAN (${groups.size}):`);
-    for (const [g, nodes] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const mark = g === current ? '   <- your group' : '';
+    console.log(`SYM rooms live on the LAN (${rooms.size}):`);
+    for (const [g, nodes] of [...rooms.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const mark = g === current ? '   <- your room' : '';
       console.log(`  ${g.padEnd(22)} ${nodes.size} node(s): ${[...nodes].join(', ')}${mark}`);
     }
   }, 2200);
@@ -341,12 +341,12 @@ function parseObserveFlags(argv) {
  * `sym publish`, which speaks AS this machine's resident node via IPC.
  */
 async function cmdEmit() {
-  const flags = { server: null, group: 'default', name: 'emitter', to: null, parents: [] };
+  const flags = { server: null, room: 'default', name: 'emitter', to: null, parents: [] };
   const positional = [];
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
     if (a === '--server') flags.server = args[++i];
-    else if (a === '--group') flags.group = args[++i];
+    else if (a === '--room') flags.room = args[++i];
     else if (a === '--name') flags.name = args[++i];
     else if (a === '--to') flags.to = args[++i];
     else if (a === '--parents') flags.parents = String(args[++i] || '').split(',').filter(Boolean);
@@ -354,24 +354,24 @@ async function cmdEmit() {
   }
   const content = positional.join(' ');
   if (!flags.server || !content) {
-    console.error('Usage: sym emit --server <host:port> [--group <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+    console.error('Usage: sym emit --server <host:port> [--room <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
     console.error('  Emits ONE signed v1 block to a remote mesh node and exits (MMP §17.1 Class 1).');
-    console.error('  Grounding from CI: --parents <cmb-key> with fields {"intent":"ground","commitment":"verified: ..."}');
+    console.error('  Grounding from CI: --parents <cmb-key> with categories {"intent":"ground","commitment":"verified: ..."}');
     process.exit(1);
   }
-  let fields;
-  try { fields = JSON.parse(content); } catch {
-    console.error('Error: content must be a JSON object with CAT7 fields.');
+  let categories;
+  try { categories = JSON.parse(content); } catch {
+    console.error('Error: content must be a JSON object with CAT7 categories.');
     process.exit(1);
   }
   const { emitOnce } = require('../lib/emit');
   const { key } = await emitOnce(
-    { server: flags.server, group: flags.group, name: flags.name },
-    fields,
+    { server: flags.server, room: flags.room, name: flags.name },
+    categories,
     { to: flags.to || undefined, parents: flags.parents },
   );
   console.log(`Emitted ${key}`);
-  console.log(`  as ${flags.name} → ${flags.server} (group: ${flags.group}${flags.to ? `, to: ${flags.to}` : ''})`);
+  console.log(`  as ${flags.name} → ${flags.server} (room: ${flags.room}${flags.to ? `, to: ${flags.to}` : ''})`);
 }
 
 function cmdPublish() {
@@ -380,7 +380,7 @@ function cmdPublish() {
 
   if (!content) {
     console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
-    console.error('  The calling agent (LLM) extracts CAT7 fields. The protocol does not parse raw text.');
+    console.error('  The calling agent (LLM) extracts CAT7 categories. The protocol does not parse raw text.');
     console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
     console.error('  --name:       mesh identity for standalone mode. REQUIRED (or set SYM_NODE_NAME).');
     console.error('                Claude Code users: --name claude-code-mac (or claude-code-win).');
@@ -388,12 +388,12 @@ function cmdPublish() {
     process.exit(1);
   }
 
-  let fields;
+  let categories;
   try {
-    fields = JSON.parse(content);
+    categories = JSON.parse(content);
   } catch {
-    console.error('Error: content must be a JSON object with CAT7 fields.');
-    console.error('  The agent LLM is responsible for extracting fields from observations.');
+    console.error('Error: content must be a JSON object with CAT7 categories.');
+    console.error('  The agent LLM is responsible for extracting categories from observations.');
     process.exit(1);
   }
 
@@ -432,7 +432,7 @@ function cmdPublish() {
   }
 
   if (useStandalone) {
-    standaloneObserve(fields, { name: parsed.name, parents: parsed.parents })
+    standaloneObserve(categories, { name: parsed.name, parents: parsed.parents })
       .catch((err) => {
         console.error('Standalone publish failed:', err.message || err);
         process.exit(2);
@@ -440,7 +440,7 @@ function cmdPublish() {
     return;
   }
 
-  cmdIPC({ type: 'remember', fields }, (res) => {
+  cmdIPC({ type: 'remember', categories }, (res) => {
     if (res.duplicate) {
       console.log('Already shared (duplicate CMB).');
     } else {
@@ -468,7 +468,7 @@ function cmdPublish() {
  * Ships CAT7 field vectors via SymNode's internal encoder — the caller
  * only needs to supply text (and valence/arousal for mood).
  */
-async function standaloneObserve(fields, opts) {
+async function standaloneObserve(categories, opts) {
   const { SymNode } = require('..');
 
   // Load relay credentials from ~/.sym/relay.env if the env vars are
@@ -489,8 +489,8 @@ async function standaloneObserve(fields, opts) {
     throw new Error(`SYM_RELAY_TOKEN not set (checked ~/.sym/relay.env)`);
   }
 
-  // Normalise CAT7 fields. Callers may pass scalar strings for the
-  // six non-mood fields (as the daemon-IPC path historically accepts),
+  // Normalise CAT7 categories. Callers may pass scalar strings for the
+  // six non-mood categories (as the daemon-IPC path historically accepts),
   // but the SymNode.remember() API expects { text, vector } objects —
   // the vector is synthesised on the node side by the encoder, so we
   // only need to lift scalar strings into { text } objects here.
@@ -502,11 +502,11 @@ async function standaloneObserve(fields, opts) {
   };
   const normalised = {};
   for (const key of ['focus', 'issue', 'intent', 'motivation', 'commitment', 'perspective', 'mood']) {
-    const v = normaliseField(fields[key]);
+    const v = normaliseField(categories[key]);
     if (v !== undefined) normalised[key] = v;
   }
   if (!normalised.mood || typeof normalised.mood.text !== 'string') {
-    throw new Error('fields.mood.text is required (MMP §9.3 protocol guarantee R5)');
+    throw new Error('categories.mood.text is required (MMP §9.3 protocol guarantee R5)');
   }
 
   const node = new SymNode({
@@ -1128,17 +1128,17 @@ function printUsage() {
 ${bold('sym')} — local AI mesh for collective intelligence
 
 ${bold('Usage:')}
-  sym start [--group <name>]         Start the mesh daemon (in a group; default = global mesh)
+  sym start [--room <name>]         Start the mesh daemon (in a room; default = global mesh)
                                      Flags: --relay-url <url>, --relay-token <token>
   sym stop                           Stop the mesh daemon
   sym status                         Show mesh status
   sym peers                          List connected peers
-  sym group                          Show the current group
-  sym groups                         Discover SYM-mesh groups live on the LAN
-  sym join <name>                    Switch into a group (kebab-case, or "default")
+  sym room                          Show the current room
+  sym rooms                         Discover SYM-mesh rooms live on the LAN
+  sym join <name>                    Switch into a room (kebab-case, or "default")
   sym leave                          Return to the default global mesh
   sym metrics                        Show protocol metrics and LLM cost
-  sym publish [flags] <json>         Publish a projection (CAT7 fields as JSON)
+  sym publish [flags] <json>         Publish a projection (CAT7 categories as JSON)
                                      Flags: --standalone, --name <id>, --parents <keys>
   sym ask "<question>"               Ask the whole mesh one question, get one answer
                                      Flags: --raw (skip synthesis, show contributions)
@@ -1148,7 +1148,7 @@ ${bold('Usage:')}
   sym logs                           Tail daemon logs
   sym version                        Show version
 
-${bold('CAT7 fields:')}
+${bold('CAT7 categories:')}
   focus         What the observation is centrally about
   issue         Risks, gaps, open questions
   intent        Desired change or purpose

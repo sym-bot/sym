@@ -51,8 +51,8 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       assert.ok(res, 'responds');
       assert.strictEqual(res.found, true);
       assert.strictEqual(res.cmb.metadata.key, root.key);
-      assert.ok(res.cmb.fields.focus.text.length > 0, 'text served');
-      assert.strictEqual(res.cmb.fields.focus.vector, undefined, 'vectors stripped — re-verifiers re-encode');
+      assert.ok(res.cmb.categories.focus.text.length > 0, 'text served');
+      assert.strictEqual(res.cmb.categories.focus.vector, undefined, 'vectors stripped — re-verifiers re-encode');
     });
   });
 
@@ -82,7 +82,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
         // Forged response first: same key, tampered text → recomputed address
         // mismatches → discarded (counted as a miss, does not resolve).
         const forged = JSON.parse(JSON.stringify(served));
-        forged.fields.focus.text = 'entirely different content under the same key';
+        forged.categories.focus.text = 'entirely different content under the same key';
         nodeB._frameHandler.handle('peerEvil', 'peerEvil',
           { type: 'cmb-fetch-result', reqId, key: root.key, found: true, cmb: forged });
 
@@ -114,9 +114,9 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
     const { cmbKeyV1 } = require('@sym-bot/core');
     await withNode('cfetch-legacy', async (nodeB) => {
       fakePeer(nodeB, 'peerA');
-      const fields = cat7('a pre-boundary block minted before the merkle cutover');
+      const categories = cat7('a pre-boundary block minted before the merkle cutover');
       // Pre-boundary wire shape: NO `metadata`, address at the top level, FLAT root derivation.
-      const legacy = { fields, key: cmbKeyV1(fields) };
+      const legacy = { categories, key: cmbKeyV1(categories) };
 
       const p = nodeB.fetchCMB(legacy.key, { timeoutMs: 2000 });
       const reqId = [...nodeB._cmbFetchPending.keys()][0];
@@ -139,9 +139,9 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       const metrics = [];
       nodeB.on('metric', (m) => { if (m.type === 'cmb-fetch-forged') metrics.push(m); });
 
-      const fields = cat7('content that will be served without any container at all');
+      const categories = cat7('content that will be served without any container at all');
       const { cmbKeyV1 } = require('@sym-bot/core');
-      const key = cmbKeyV1(fields);
+      const key = cmbKeyV1(categories);
 
       const p = nodeB.fetchCMB(key, { timeoutMs: 600 });
       const reqId = [...nodeB._cmbFetchPending.keys()][0];

@@ -50,12 +50,12 @@ async function withNode(baseName, fn) {
   }
 }
 
-const ALIGNED = { decision: 'aligned', total_drift: 0.1, field_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
-const REJECTED = { decision: 'rejected', total_drift: 9, field_drifts: {}, gate_values: { g: 0 } };
+const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
+const REJECTED = { decision: 'rejected', total_drift: 9, category_drifts: {}, gate_values: { g: 0 } };
 
 function cmbFrame(focusText, mood = { text: 'neutral', valence: 0, arousal: 0 }) {
   const cmb = createCMB({
-    fields: {
+    categories: {
       focus: focusText,
       issue: 'inbound surfacing regression',
       intent: 'verify receive path',
@@ -178,7 +178,7 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
  * A CMB addressed to this node (sym_send to=X → wire frame carries
  * directed:true + to:<nodeId>) is a request between two agents and MUST be
  * surfaced to the application layer regardless of the SVAF verdict — SVAF
- * governs MEMORY admission only, not delivery. A group-bound broadcast (no
+ * governs MEMORY admission only, not delivery. A room-bound broadcast (no
  * `to`) stays fully SVAF-gated for surfacing.
  *
  * The surfaced entry carries an ingestion indicator so the agent can tell the
@@ -213,12 +213,12 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
     });
   });
 
-  it('a group-bound broadcast that SVAF REJECTS does NOT surface (broadcast delivery stays SVAF-gated)', async () => {
+  it('a room-bound broadcast that SVAF REJECTS does NOT surface (broadcast delivery stays SVAF-gated)', async () => {
     await withNode('broadcast-reject', async (node) => {
       node._svafEvaluator.evaluate = async () => REJECTED;
       const surfaced = [];
       node.on('cmb-accepted', (e) => surfaced.push(e));
-      // No `to`/`directed` → group-bound. Neutral mood so the mood fast-path
+      // No `to`/`directed` → room-bound. Neutral mood so the mood fast-path
       // surfaces nothing either.
       node._frameHandler.handle('peerA', 'peerA', wireCopy(cmbFrame('ambient broadcast unrelated to my domain')));
       await settle();
