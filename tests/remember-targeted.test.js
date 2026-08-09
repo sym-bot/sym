@@ -113,6 +113,16 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       assert.strictEqual(tA.frames.filter(f => f.type === 'cmb').length, 0, 'connected peer A should receive nothing');
       const recalled = node.recall('targeted send to absent peer');
       assert.ok(recalled.length >= 1, 'CMB should be recallable from local store');
+
+      // Everything above was already true of the defect (bl-a6e63608c8c): this
+      // test asserted the local write and stopped, so a GREEN here certified a
+      // send that reached nobody and reported success. The store surviving a
+      // partition is necessary and was never the question — the question is
+      // whether the CALLER can tell. Five directed CMBs, two of them founder
+      // words, were lost for three days under this green.
+      assert.strictEqual(entry.delivery.undelivered, true,
+        'a directed send that reached no peer must be reported as undelivered');
+      assert.strictEqual(entry.delivery.delivered, 0, 'nothing was actually sent');
     });
   });
 
