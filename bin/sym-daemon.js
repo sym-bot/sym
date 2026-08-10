@@ -194,6 +194,16 @@ function saveTasks() {
 let nextSocketId = 1;
 const listeners = new Map(); // socketId → socket — real-time event subscribers
 
+// Hosted-agent delivery spool (duplex presence, 2026-08-10).
+// hostedAgents is keyed by socketId and holds the live socket — it is a LIVENESS
+// table. When a harness socket closes the agent ceased to exist as an addressable
+// entity, so a sender was REFUSED rather than queued. hostedDirectory splits
+// EXISTENCE from liveness: nodeId → name, written at registration, surviving the
+// socket. Keyed by immutable nodeId because names are claimed and nodeIds are
+// recorded.
+const { verifyIdentity, appendSpool, drainSpool, spoolStatus } = require('../lib/hosted-spool.js');
+const hostedDirectory = new Map(); // nodeId → { name, nodeId, registeredAt }
+
 /**
  * Start the Unix socket IPC server for virtual node connections.
  * See MMP v0.2.0 Section 13 (Application).
@@ -294,6 +304,30 @@ function handleIPCMessage(socketId, socket, msg) {
         sendIPC(socket, { type: 'error', message: 'register-agent requires nodeId and name' });
         break;
       }
+      // Bind the claimed pair to the identity ON DISK before creating any state.
+      // This is NOT proof of key possession — register-agent has none, and adding
+      // it is blocked ahead of any cross-daemon routing (CTO policy). It is the
+      // weaker, real check that stops a typo minting a permanent spool: the name
+      // must have a local identity AND its recorded nodeId must match the claim.
+      const ident = verifyIdentity(msg.name, msg.nodeId);
+      if (!ident.ok) {
+        sendIPC(socket, { type: 'error', message: `register-agent refused: ${ident.reason}` });
+        log(`Hosted agent REFUSED: ${msg.name} — ${ident.reason}`);
+        break;
+      }
+      // CONCURRENT REGISTRATION: two live sockets claiming one nodeId must not
+      // resolve by last-writer-wins. With a spool in play that is not a naming
+      // annoyance, it is a mail-theft path — the second claimant would drain the
+      // first's queued directed mail. Refuse the newcomer; the incumbent keeps
+      // the identity until its socket closes.
+      for (const [sid, live] of hostedAgents) {
+        if (sid !== socketId && live.nodeId === msg.nodeId) {
+          sendIPC(socket, { type: 'error', message: `register-agent refused: nodeId already registered on a live socket by "${live.name}"` });
+          log(`Hosted agent REFUSED: ${msg.name} — nodeId ${msg.nodeId.slice(0, 8)} already live as ${live.name}`);
+          return;
+        }
+      }
+      hostedDirectory.set(msg.nodeId, { name: msg.name, nodeId: msg.nodeId, registeredAt: Date.now() });
       hostedAgents.set(socketId, {
         socket,
         nodeId: msg.nodeId,
@@ -310,6 +344,34 @@ function handleIPCMessage(socketId, socket, msg) {
         peers: node.peers(),
       });
       log(`Hosted agent registered: ${msg.name} (${msg.nodeId.slice(0, 8)})`);
+
+      // Relink: hand over what arrived while nothing was attached, BEFORE any
+      // live traffic, so ordering at the agent is backlog-then-live. The cursor
+      // advances on the drain, not on the socket write — deleting on write loses
+      // the batch to a reconnect race.
+      try {
+        const backlog = drainSpool(msg.nodeId, { limit: 200 });
+        if (backlog.drained > 0) {
+          sendIPC(socket, { type: 'event', event: 'inbox-backlog', data: {
+            nodeId: msg.nodeId, name: msg.name,
+            messages: backlog.messages, remaining: backlog.remaining, cursor: backlog.cursor,
+          } });
+          log(`Hosted agent ${msg.name}: drained ${backlog.drained} spooled message(s), ${backlog.remaining} remaining`);
+        }
+      } catch (err) { log(`Spool drain failed for ${msg.name}: ${err.message}`); }
+      break;
+    }
+
+    // Explicit re-drain / peek. A NEW verb rather than overloading `catchup`:
+    // catchup asks PEERS to re-announce and has callers that depend on that, so
+    // renaming its behaviour would break them silently.
+    case 'drain': {
+      const who = msg.nodeId || (hostedAgents.get(socketId) || {}).nodeId;
+      if (!who) { sendIPC(socket, { type: 'error', message: 'drain requires a registered agent or a nodeId' }); break; }
+      try {
+        const r = drainSpool(who, { limit: msg.limit || 50, peek: msg.peek === true });
+        sendIPC(socket, { type: 'result', action: 'drain', ...r, status: spoolStatus(who) });
+      } catch (err) { sendIPC(socket, { type: 'error', message: `drain failed: ${err.message}` }); }
       break;
     }
 
@@ -323,9 +385,40 @@ function handleIPCMessage(socketId, socket, msg) {
         peer.transport.send(frame);
       }
       // Also forward to other hosted agents (local mesh)
+      const liveNodeIds = new Set();
       for (const [id, agent] of hostedAgents) {
         if (id !== socketId) {
+          liveNodeIds.add(agent.nodeId);
           sendIPC(agent.socket, { type: 'event', event: 'frame-received', data: { peerId: msg.from, peerName: msg.fromName, frame } });
+        }
+      }
+
+      // DUPLEX PRESENCE: a frame addressed to an agent this daemon KNOWS but that
+      // has no live socket is spooled, not lost. Before this, the addressee simply
+      // did not exist once its harness died — the sender was refused with "Peer not
+      // connected" and the message went nowhere. Only DIRECTED frames spool: a
+      // broadcast made no addressed promise, and spooling every broadcast for every
+      // detached agent would turn the mailbox into a firehose nobody drains.
+      const addressee = msg.to || (msg.cmb && msg.cmb.to) || null;
+      if (addressee && !liveNodeIds.has(addressee)) {
+        const known = hostedDirectory.get(addressee);
+        if (known) {
+          try {
+            // Store the envelope AS RECEIVED. The daemon is a custodian, not a
+            // recipient: it does not decrypt, does not run SVAF, and does not
+            // admit. Whatever the sender sealed is what the agent gets back.
+            const r = appendSpool(addressee, {
+              from: msg.from, fromName: msg.fromName || null, to: addressee,
+              cmb: msg.cmb, encrypted: !!(msg.cmb && msg.cmb.sealed),
+              key: msg.cmb && msg.cmb.metadata && msg.cmb.metadata.key,
+            });
+            log(`Spooled for detached agent ${known.name}: seq ${r.seq}, holding ${r.held}`);
+            // Loud, and itemised: unread mail destroyed to make room is real loss,
+            // and a count alone would let it pass for housekeeping.
+            for (const lost of r.evicted) {
+              log(`SPOOL OVERFLOW — DISCARDED UNREAD ${lost.id} for ${known.name} from ${lost.from}`);
+            }
+          } catch (err) { log(`Spool append failed for ${known.name}: ${err.message}`); }
         }
       }
       break;
