@@ -941,3 +941,41 @@ Verified: a real research-win arxiv CMB ("Fetch full PDF today. Check author lis
 
 ### Tests
 - 100 tests (was 83). Added: remix guard reset, MeshAgent validation, CLI --json, socket path.
+
+## 0.11.1 (2026-08-10)
+
+### ⚠ Wire changes — every node must move together
+
+**The CAT7 container is `categories`.** A record is `{ categories, metadata }`. Nodes on 0.11.0 and
+earlier do not read this container name.
+
+**The LAN rendezvous is `_symrooms._tcp`.** A node on this version and one on 0.11.0 **cannot
+discover each other, in either direction, with no error to explain the silence.** The word there is
+not a concept, it is an address.
+
+**The persisted room moved filename.** The retired file is *not* read — one name, no fallback — but
+its presence is now announced: the daemon names the file, the room it held, and the command that
+restores it. Without that, an upgraded node silently starts in `default`, loses every peer, and says
+nothing.
+
+### Changed — group is now room, with one meaning
+
+Identifiers, the `SYM_ROOM` environment variable, the persisted state file, the module files, and
+the beacon. The audience of a record has been `room` since the two-section record; the discovery
+group is the same concept and now carries the same word.
+
+### Changed — `@sym-bot/core` 0.8.1 → 0.9.3
+
+Adopts the renamed core surface (`computeCategoryVerdicts`, `categoryKeyV1`,
+`encryptCategories`/`decryptCategories`, `encodeCategory`, `categoryWeights`, `categoryDrifts`,
+`categoryVerdicts`, `categoryParents`) and core's fallback removals. **Drift arithmetic changes** for
+stores whose anchors carry no confidence — core no longer invents one.
+
+### Removed — grandfathering of pre-boundary records
+
+A pre-boundary record carried its audience under the retired name, so its audience can no longer be
+established, and core refuses it rather than treating an absent room as a broadcast. **A node holding
+genuine pre-boundary history will now see it refused rather than surfaced.** Refused is still not
+forged: such a record does not touch the forgery counter, because an operator watching that counter
+at cutover must not see ordinary history in it.
+
