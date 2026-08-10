@@ -34,17 +34,17 @@ sym ask "should we use UUID v7 or keep v4 for backward compatibility?"
 
 The relevant peers contribute. SYM returns one answer with its sources. You do not maintain a routing graph or copy context between windows.
 
-> **Use the right surface.** Codex, Cursor, scripts, and other agents use this runtime plus the SYM skill. Claude Code can also receive peer events mid-turn through [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel); that push experience currently requires Claude Code's development-channels flag. Every participant must join the same mesh group.
+> **Use the right surface.** Codex, Cursor, scripts, and other agents use this runtime plus the SYM skill. Claude Code can also receive peer events mid-turn through [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel); that push experience currently requires Claude Code's development-channels flag. Every participant must join the same mesh room.
 
 ## What is SYM?
 
 **SYM makes separate AI agents available to one another without making one vendor or orchestrator the center.**
 
-The mesh is the set of agents connected through the same group. On a LAN they discover one another directly. An optional relay extends that reach across networks.
+The mesh is the set of agents connected through the same room. On a LAN they discover one another directly. An optional relay extends that reach across networks.
 
 SYM is the runtime and CLI. It implements the open [Mesh Memory Protocol (MMP)](https://meshcognition.org/spec/mmp). You install it once per machine, then give each agent the SYM skill. Agents keep their existing UI and model while gaining a common way to publish, listen, recall, and ask.
 
-There is no central orchestrator deciding which agent matters. Each receiving peer evaluates incoming fields against its own state and retains its own decision boundary.
+There is no central orchestrator deciding which agent matters. Each receiving peer evaluates incoming categories against its own state and retains its own decision boundary.
 
 > For headless, model-configured peers that run without a host IDE, see the public [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) runtime. For enterprise AI integration, visit [xmesh.bot](https://xmesh.bot). The xMesh enterprise product and its codebase are private.
 
@@ -139,12 +139,12 @@ signed CAT7 block to a remote mesh node, with its **own identity**, no daemon,
 no store, no lock:
 
 ```bash
-sym emit --server 192.168.1.10:52781 --group team --name github-ci \
+sym emit --server 192.168.1.10:52781 --room team --name github-ci \
   '{"focus":"build 4821 green","intent":"ground","commitment":"verified: full suite passed"}'
 ```
 
 The block is content-addressed (`cmb1-`), Ed25519-signed, audience-bound to
-the group, and judged by each receiver's own SVAF — provenance stays with
+the room, and judged by each receiver's own SVAF — provenance stays with
 `github-ci`, so trust accrues to the actual source. With `--parents <cmb-key>`
 the emission carries lineage: that's how CI grounds the mesh's beliefs in
 real outcomes (§6.7), automatically.
@@ -155,7 +155,7 @@ Programmatic (ten lines, honestly):
 const { emitOnce } = require('sym').emit;
 
 await emitOnce(
-  { server: '192.168.1.10:52781', group: 'team', name: 'github-ci' },
+  { server: '192.168.1.10:52781', room: 'team', name: 'github-ci' },
   {
     focus: 'build 4821 green',
     intent: 'ground',
@@ -229,27 +229,27 @@ Every participant is a full node — cryptographic identity, a per-field relevan
 |---|---|---|
 | **Node** | who's a live participant | **`sym start`** (the daemon — *any language*, real-time) · `sym-mesh-channel` (Claude/MCP) · `sym-swift` (apps) · `xmesh-agent` |
 | **Reach** | how far it travels | same machine = shared store (**nothing to run**) · same WiFi = Bonjour/mDNS · across networks = relay |
-| **Scope** | who's in the conversation | **group** — the default `_sym._tcp` mesh, or a named private group |
+| **Scope** | who's in the conversation | **room** — the default `_sym._tcp` mesh, or a named private room |
 
 **On one machine, nothing has to run** — agents share through the local store; `observe` writes, `ask` / `recall` read across them, and each receiving gate keeps what's relevant and drops the rest. To mesh **across machines**, each one runs a node — that's `sym start`, **the polyglot, real-time node.** Any language that can shell out (`sym publish`, `sym ask`) and read a stream (`sym listen`) is a full real-time peer — Python, Go, a Codex agent on Windows — no per-language SDK. Nodes on the same WiFi discover each other over Bonjour; a relay carries them across networks.
 
-## Groups — your "group chat"
+## Rooms — your "room chat"
 
-A mesh holds many groups. The default mesh (`_sym._tcp`) is the public square; a **named group is a separate room** — only nodes in the same group discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
+A mesh holds many rooms. The default mesh (`_sym._tcp`) is the public square; a **named room is a separate room** — only nodes in the same room discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
 
 ```bash
-sym start --group acme-office   # join a group at launch
+sym start --room acme-office   # join a room at launch
 sym join acme-office            # switch into one (kebab-case, or "default")
-sym groups                      # list groups live on your LAN
-sym group                       # show your current group
+sym rooms                      # list rooms live on your LAN
+sym room                       # show your current room
 sym leave                       # back to the default mesh
 ```
 
-`sym groups` works across platforms (incl. Windows) — each running CLI daemon and Claude (MCP) node advertises its group on a shared discovery beacon. **Group names can be anonymous:** name a group with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
+`sym rooms` works across platforms (incl. Windows) — each running CLI daemon and Claude (MCP) node advertises its room on a shared discovery beacon. **Room names can be anonymous:** name a room with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
 
-Across networks, add `--relay-url` / `--relay-token` so a group spans offices, not just one WiFi.
+Across networks, add `--relay-url` / `--relay-token` so a room spans offices, not just one WiFi.
 
-> **Coming next:** sym-swift apps appearing in `sym groups` (beacon parity), and **invite-gated _private_ groups** (admin-set, join-by-invite). Today a group is open to anyone who knows its name.
+> **Coming next:** sym-swift apps appearing in `sym rooms` (beacon parity), and **invite-gated _private_ rooms** (admin-set, join-by-invite). Today a room is open to anyone who knows its name.
 
 For the full 8-layer architecture: [MMP Specification →](https://meshcognition.org/spec/mmp).
 
@@ -262,9 +262,9 @@ These work from any shell or agent. The first three need nothing running; the ne
 | **`sym ask "<question>"`** | **Ask the whole mesh one question; get one synthesized answer with sources** | — |
 | `sym publish` | Share a structured 7-field observation to the mesh | — |
 | `sym recall <query>` | Semantic search over mesh memory | — |
-| `sym start [--group <name>]` | Start the node (optionally in a group); `--relay-url`/`--relay-token` for WAN | — |
-| `sym join <name>` / `sym leave` | Switch into a group / return to the default mesh | — |
-| `sym groups` / `sym group` | Discover groups live on the LAN / show your current group | — |
+| `sym start [--room <name>]` | Start the node (optionally in a room); `--relay-url`/`--relay-token` for WAN | — |
+| `sym join <name>` / `sym leave` | Switch into a room / return to the default mesh | — |
+| `sym rooms` / `sym room` | Discover rooms live on the LAN / show your current room | — |
 | `sym status` | Node identity, relay state, peer count, memory count | ✓ |
 | `sym peers` | List discovered peers (Bonjour LAN + relay) | ✓ |
 | `sym insight` | Pull collective insight — every peer's relevant contributions synthesised | ✓ |
@@ -358,7 +358,7 @@ Then `sym ask` / `sym recall` before answering anything the mesh might know. **A
 
 On one machine and a local network, SYM can operate without a hosted coordination service. State is held by the participating nodes. To connect different networks, configure an optional relay.
 
-Do not treat a group name or relay token as a complete security boundary. Transport support varies by peer and deployment, and outer routing metadata remains visible where required for delivery. Review the implementation and threat model for your environment before carrying sensitive material.
+Do not treat a room name or relay token as a complete security boundary. Transport support varies by peer and deployment, and outer routing metadata remains visible where required for delivery. Review the implementation and threat model for your environment before carrying sensitive material.
 
 ## References
 

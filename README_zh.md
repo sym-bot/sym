@@ -206,29 +206,29 @@ SYM 汇总三条相关贡献，合成一份统一答案，每个观点均标注�
 |------|----------|----------|
 | **Node（节点）** | 谁是活跃参与者？ | `sym start`（守护进程，_任意语言_，实时）· `sym-mesh-channel`（Claude/MCP）· `sym-swift`（原生应用）· `xmesh-agent` |
 | **Reach（覆盖）** | 消息能传多远？ | 同机 = 共享存储（**无需运行任何进程**）· 同 WiFi = Bonjour/mDNS · 跨网络 = 中继服务器 |
-| **Scope（作用域）** | 谁参与对话？ | **group（群组）**——默认 `_sym._tcp` 公共 mesh，或命名私有群组 |
+| **Scope（作用域）** | 谁参与对话？ | **room（群组）**——默认 `_sym._tcp` 公共 mesh，或命名私有群组 |
 
 **单机环境下无需运行任何守护进程**——代理通过本地存储共享信息；`observe` 写入，`ask` / `recall` 跨代理读取，每个接收方门控保留相关内容、丢弃无关内容。如需**跨设备组网**，每台设备运行一个节点——即 `sym start`，这是**支持多语言、实时通信的完整节点**。任何能调用 shell（`sym publish`、`sym ask`）并读取流（`sym listen`）的语言——Python、Go、Windows 上的 Codex 代理等——均可成为实时对等节点，无需为每种语言单独开发 SDK。同一 WiFi 下的节点通过 Bonjour 自动发现；中继服务器支持跨网络通信。
 
 ---
 
-## Groups（群组）——你的"群聊"
+## Rooms（群组）——你的"群聊"
 
 一个 mesh 可容纳多个群组。默认 mesh（`_sym._tcp`）是公共广场；**命名群组是独立房间**——仅同一群组内的节点能相互发现并交换 CMB（Cognitive Memory Block，认知记忆块）。CLI、Claude MCP 节点与 sym-swift 共享同一命名规范，确保它们能进入同一"房间"。
 
 ```bash
-sym start --group acme-office   # 启动时加入指定群组
+sym start --room acme-office   # 启动时加入指定群组
 sym join acme-office            # 切换至某群组（短横线命名，或 "default"）
-sym groups                      # 列出局域网内活跃的群组
-sym group                       # 显示当前所在群组
+sym rooms                      # 列出局域网内活跃的群组
+sym room                       # 显示当前所在群组
 sym leave                       # 返回默认 mesh
 ```
 
-`sym groups` 支持跨平台（含 Windows）——每个运行的 CLI 守护进程和 Claude（MCP）节点均通过共享发现信标广播其所属群组。**群组名称可匿名化**：使用不透明代码命名群组，局域网列表不会暴露其用途，而知晓该代码的成员仍可相互发现。
+`sym rooms` 支持跨平台（含 Windows）——每个运行的 CLI 守护进程和 Claude（MCP）节点均通过共享发现信标广播其所属群组。**群组名称可匿名化**：使用不透明代码命名群组，局域网列表不会暴露其用途，而知晓该代码的成员仍可相互发现。
 
 跨网络使用时，添加 `--relay-url` / `--relay-token` 参数，即可让同一群组跨越多个办公室，而非局限于单一 WiFi。
 
-> **即将推出**：sym-swift 应用将出现在 `sym groups` 中（信标对齐），以及**邀请制私有群组**（管理员设置、凭邀请加入）。当前群组对知晓名称的任何节点开放。
+> **即将推出**：sym-swift 应用将出现在 `sym rooms` 中（信标对齐），以及**邀请制私有群组**（管理员设置、凭邀请加入）。当前群组对知晓名称的任何节点开放。
 
 ---
 
@@ -241,9 +241,9 @@ sym leave                       # 返回默认 mesh
 | **`sym ask "<问题>"`** | **向整个 mesh 提问，获取一份带来源的合成答案** | — |
 | `sym publish` | 向 mesh 共享一条结构化 7 字段观察 | — |
 | `sym recall <查询>` | 对 mesh 记忆进行语义搜索 | — |
-| `sym start [--group <名称>]` | 启动节点（可选加入群组）；`--relay-url`/`--relay-token` 支持广域网 | — |
+| `sym start [--room <名称>]` | 启动节点（可选加入群组）；`--relay-url`/`--relay-token` 支持广域网 | — |
 | `sym join <名称>` / `sym leave` | 切换至某群组 / 返回默认 mesh | — |
-| `sym groups` / `sym group` | 发现局域网内活跃群组 / 显示当前群组 | — |
+| `sym rooms` / `sym room` | 发现局域网内活跃群组 / 显示当前群组 | — |
 | `sym status` | 查看节点身份、中继状态、对等节点数、记忆条目数 | ✓ |
 | `sym peers` | 列出已发现的对等节点（Bonjour 局域网 + 中继） | ✓ |
 | `sym insight` | 提取集体洞察——合成所有对等节点的相关贡献 | ✓ |

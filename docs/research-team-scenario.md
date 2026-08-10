@@ -2,7 +2,7 @@
 
 A deep walkthrough of six agents investigating a single open question: *"Are emergent capabilities in LLMs real phase transitions or artefacts of metric choice?"*
 
-In a group chat, these agents would pass messages and the PM would try to manage them (it can't — as anyone who's tried will confirm). On the mesh, something fundamentally different happens: **each agent defines what it cares about through field weights, and SVAF autonomously decides what each agent sees.**
+In a room chat, these agents would pass messages and the PM would try to manage them (it can't — as anyone who's tried will confirm). On the mesh, something fundamentally different happens: **each agent defines what it cares about through field weights, and SVAF autonomously decides what each agent sees.**
 
 ## The agents and what the mesh gives them
 
