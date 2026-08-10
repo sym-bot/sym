@@ -44,7 +44,7 @@ describe('MemoryStore', () => {
   it('should store CMB when provided', () => {
     const { createCMB } = require('@sym-bot/core');
     const cmb = createCMB({
-      fields: {
+      categories: {
         focus: 'debugging auth module',
         issue: 'tired and frustrated',
         intent: 'needs a break',
@@ -58,7 +58,7 @@ describe('MemoryStore', () => {
     const entry = store.write('user tired and frustrated', { cmb });
 
     assert.ok(entry.cmb, 'should store CMB');
-    assert.ok(entry.cmb.fields, 'CMB should have fields');
+    assert.ok(entry.cmb.categories, 'CMB should have categories');
   });
 
   it('should search memories by keyword', () => {
@@ -87,7 +87,7 @@ describe('MemoryStore', () => {
     assert.ok(cmbs.length <= 3, 'should respect limit');
 
     for (const cmb of cmbs) {
-      assert.ok(cmb.fields, 'each CMB should have fields');
+      assert.ok(cmb.categories, 'each CMB should have categories');
       // §7.2: authorship lives in metadata and is REQUIRED to survive the receive path —
       // a record whose author is dropped on storage cannot be verified against its author's key.
       assert.ok(cmb.metadata?.createdBy ?? cmb.createdBy, 'each CMB should carry its author');
@@ -117,7 +117,7 @@ describe('MemoryStore', () => {
     // Write a child with parent reference
     const { createCMB } = require('@sym-bot/core');
     const childCmb = createCMB({
-      fields: {
+      categories: {
         focus: 'child of parent',
         issue: 'none', intent: 'test lineage', motivation: 'coverage',
         commitment: 'test', perspective: 'test',
@@ -289,7 +289,7 @@ describe('MemoryStore', () => {
     // would drop it and break offline-remix detection.
     const cmb = {
       createdBy: 'peer-c', createdAt: Date.now(),
-      fields: { focus: { text: 'c remix of b' }, mood: { text: 'steady' } },
+      categories: { focus: { text: 'c remix of b' }, mood: { text: 'steady' } },
       lineage: { parents: ['remix-B'], ancestors: ['root-A', 'remix-B'], method: 'SVAF-v2' },
     };
     const stored = store.receiveFromPeer('peer-c', { cmb, content: 'c remix of b', source: 'peer-c' });

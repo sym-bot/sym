@@ -33,7 +33,7 @@ function push(node, text, key) {
   node._pushInbox({
     source: 'peer',
     content: text,
-    cmb: { fields: { focus: { text } }, metadata: { key } },
+    cmb: { categories: { focus: { text } }, metadata: { key } },
   });
 }
 

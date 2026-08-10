@@ -56,7 +56,7 @@ async function withNode(baseName, fn) {
   }
 }
 
-// remember(fields, opts) — the CAT7 fields are the FIRST argument and the
+// remember(categories, opts) — the CAT7 categories are the FIRST argument and the
 // addressee rides in opts. Passing a single object silently produces a
 // broadcast with `to` undefined, which is its own instance of the class under
 // test here: a call that looks addressed and is not.
@@ -117,7 +117,7 @@ describe('directed delivery accountability (bl-a6e63608c8c)', () => {
     });
   });
 
-  it('marks a group broadcast as not-directed rather than undelivered', async () => {
+  it('marks a room broadcast as not-directed rather than undelivered', async () => {
     await withNode('acct-broadcast', async (node) => {
       // A broadcast to an empty mesh reached nobody, but it made no addressed
       // promise — receiver-autonomous attention means no one is obliged to be

@@ -16,14 +16,14 @@ const { connect, emitOnce, parseServer } = require('../lib/emit');
 const { verifyCMB } = require('@sym-bot/core');
 const { nodeDir } = require('../lib/config');
 
-const ALIGNED = { decision: 'aligned', total_drift: 0.1, field_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
+const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
 
 /** A listening node with no mDNS (server-only discovery) on an ephemeral port. */
 async function withReceiver(name, fn) {
   const node = new SymNode({
     name,
     silent: true,
-    group: 'emit-g',
+    room: 'emit-g',
     discovery: new BonjourDiscovery({ mdns: false }),
   });
   node._svafEvaluator.evaluate = async () => ALIGNED; // deterministic admission
@@ -54,7 +54,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     await withReceiver('emit-rx', async (node, port) => {
       const accepted = once(node, 'cmb-accepted');
       const { key, cmb } = await emitOnce(
-        { server: `127.0.0.1:${port}`, group: 'emit-g', name: 'ci-emitter' },
+        { server: `127.0.0.1:${port}`, room: 'emit-g', name: 'ci-emitter' },
         { focus: 'build 4821 green', intent: 'ground', commitment: 'verified: test suite passed' },
       );
 
@@ -62,9 +62,9 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
       // cmb1- -> cmb- migration moves the spelling while the scheme is unchanged.
       assert.match(key, /^cmb1?-[0-9a-f]{64}$/, 'v1 content address (either prefix)');
       assert.equal(cmb.metadata.createdBy, 'ci-emitter');
-      // `group` became `room` and moved into metadata in the same signing-scheme change — the
+      // `room` became `room` and moved into metadata in the same signing-scheme change — the
       // audience is signature-bound, so it belongs in the section the signature covers.
-      assert.equal(cmb.metadata.room, 'emit-g', 'audience-bound to the authoring group');
+      assert.equal(cmb.metadata.room, 'emit-g', 'audience-bound to the authoring room');
       assert.equal(cmb.metadata.sigAlg, 'ed25519');
 
       const stored = await accepted;
@@ -75,7 +75,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
 
   it('the emitted signature verifies against the emitter identity key (Class 1 §17.1)', async () => {
     await withReceiver('emit-rx2', async (node, port) => {
-      const emitter = await connect({ server: `127.0.0.1:${port}`, group: 'emit-g', name: 'sensor-a' });
+      const emitter = await connect({ server: `127.0.0.1:${port}`, room: 'emit-g', name: 'sensor-a' });
       try {
         assert.ok(emitter.peer && emitter.peer.nodeId, 'receiver handshake surfaced');
         const { cmb } = emitter.emit({ focus: 'temperature nominal' });
@@ -92,7 +92,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     await withReceiver('emit-rx3', async (node, port) => {
       const seen = [];
       node.on('cmb-accepted', (s) => seen.push(s));
-      const emitter = await connect({ server: `127.0.0.1:${port}`, group: 'emit-g', name: 'ci-emitter' });
+      const emitter = await connect({ server: `127.0.0.1:${port}`, room: 'emit-g', name: 'ci-emitter' });
       try {
         const first = emitter.emit({ focus: 'deploy started' });
         const second = emitter.emit(

@@ -83,7 +83,7 @@ function isRootShaped(lineage) {
 }
 
 function inboundFrame(topicText, rootKey) {
-  const cmb = createCMB({ fields: cat7(topicText), createdBy: 'peerA' });
+  const cmb = createCMB({ categories: cat7(topicText), createdBy: 'peerA' });
   cmb.metadata.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
   return { type: 'cmb', timestamp: Date.now(), content: topicText, source: 'peerA', cmb };
 }

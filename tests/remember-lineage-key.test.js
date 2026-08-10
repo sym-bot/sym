@@ -16,10 +16,10 @@ const { BonjourDiscovery } = require('../lib/discovery');
 const { blockKeyV2 } = require('@sym-bot/core');
 const { nodeDir } = require('../lib/config');
 
-const ALIGNED = { decision: 'aligned', total_drift: 0.1, field_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
+const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
 
 function mkNode(name) {
-  const n = new SymNode({ name, silent: true, group: 'g', discovery: new BonjourDiscovery({ mdns: false }) });
+  const n = new SymNode({ name, silent: true, room: 'g', discovery: new BonjourDiscovery({ mdns: false }) });
   n._svafEvaluator.evaluate = async () => ALIGNED;
   return n;
 }
@@ -44,7 +44,7 @@ describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch
       const cmb = res.cmb || res;
       assert.ok(cmb.metadata.lineage?.parents.length === 1, 'lineage present');
       assert.ok(!('ancestors' in cmb.metadata.lineage), 'ancestors is retired, not carried');
-      assert.equal(cmb.metadata.key, blockKeyV2(cmb.fields), 'address is the content root, unchanged by lineage');
+      assert.equal(cmb.metadata.key, blockKeyV2(cmb.categories), 'address is the content root, unchanged by lineage');
     } finally {
       await node.stop();
       fs.rmSync(nodeDir('rmx-key'), { recursive: true, force: true });

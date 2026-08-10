@@ -31,7 +31,7 @@ async function withNode(baseName, fn) {
 
 // A delivery lands in the inbox via the node's own 'cmb-accepted' emit.
 const deliver = (node, focus, extra = {}) =>
-  node.emit('cmb-accepted', { source: 'peerA', content: `focus: ${focus}`, cmb: { key: `cmb-${focus}`, fields: { focus: { text: focus } } }, ...extra });
+  node.emit('cmb-accepted', { source: 'peerA', content: `focus: ${focus}`, cmb: { key: `cmb-${focus}`, categories: { focus: { text: focus } } }, ...extra });
 
 describe('node.inbox() — pull-based receive', () => {
   it('drains delivered CMBs FIFO and advances the cursor', async () => {
@@ -40,7 +40,7 @@ describe('node.inbox() — pull-based receive', () => {
       deliver(node, 'two');
       const r1 = node.inbox();
       assert.strictEqual(r1.messages.length, 2, 'both deliveries drain');
-      assert.deepStrictEqual(r1.messages.map((m) => m.fields.focus.text), ['one', 'two'], 'FIFO order');
+      assert.deepStrictEqual(r1.messages.map((m) => m.categories.focus.text), ['one', 'two'], 'FIFO order');
       const r2 = node.inbox();
       assert.strictEqual(r2.messages.length, 0, 'second drain is empty — cursor advanced');
     });
@@ -64,7 +64,7 @@ describe('node.inbox() — pull-based receive', () => {
       assert.strictEqual(r1.remaining, 1, 'reports 1 remaining');
       const r2 = node.inbox({ limit: 2 });
       assert.strictEqual(r2.messages.length, 1, 'second page is the remaining 1 — not skipped');
-      assert.strictEqual(r2.messages[0].fields.focus.text, 'x3');
+      assert.strictEqual(r2.messages[0].categories.focus.text, 'x3');
     });
   });
 
@@ -73,14 +73,14 @@ describe('node.inbox() — pull-based receive', () => {
       deliver(node, 'findme');
       const { messages } = node.inbox({ peek: true });
       const got = node.inboxGet(messages[0].id);
-      assert.ok(got && got.fields.focus.text === 'findme', 'inboxGet returns the buffered message');
+      assert.ok(got && got.categories.focus.text === 'findme', 'inboxGet returns the buffered message');
       assert.strictEqual(node.inboxGet('in9999'), null, 'unknown id → null');
     });
   });
 
   it('preserves the opaque payload on the pulled message', async () => {
-    // Regression: the payload sits at cmb.payload (sibling of cmb.fields), and
-    // _pushInbox used to copy only fields — so structured agent-to-agent data
+    // Regression: the payload sits at cmb.payload (sibling of cmb.categories), and
+    // _pushInbox used to copy only categories — so structured agent-to-agent data
     // silently vanished on the pull (sym_receive/sym_fetch) path while surviving
     // the channel-push path. It must reach the inbox message intact.
     await withNode('inbox-payload', async (node) => {
@@ -88,7 +88,7 @@ describe('node.inbox() — pull-based receive', () => {
       node.emit('cmb-accepted', {
         source: 'peerA',
         content: 'focus: with-payload',
-        cmb: { key: 'cmb-pl', fields: { focus: { text: 'with-payload' } }, payload },
+        cmb: { key: 'cmb-pl', categories: { focus: { text: 'with-payload' } }, payload },
       });
       const { messages } = node.inbox();
       assert.strictEqual(messages.length, 1);
@@ -97,7 +97,7 @@ describe('node.inbox() — pull-based receive', () => {
       node.emit('cmb-accepted', {
         source: 'peerA',
         content: 'focus: no-payload',
-        cmb: { key: 'cmb-np', fields: { focus: { text: 'no-payload' } } },
+        cmb: { key: 'cmb-np', categories: { focus: { text: 'no-payload' } } },
       });
       assert.strictEqual(node.inbox().messages[0].payload, null, 'no payload → null, not undefined');
     });

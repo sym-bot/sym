@@ -329,7 +329,7 @@ describe('SymNode', () => {
       timestamp: Date.now(),
       cmb: {
         key: `cmb-test-${Date.now()}`,
-        fields: {
+        categories: {
           focus: { text: 'test signal' },
           mood: { text: 'neutral', valence: 0, arousal: 0 },
         },
@@ -357,18 +357,18 @@ describe('SymNode', () => {
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
 
-    const fields = {
+    const categories = {
       focus: 'observation', issue: 'none', intent: 'test', motivation: 'test',
       commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 },
     };
 
     // Domain observation sets canRemix = true
-    node.remember(fields);
+    node.remember(categories);
     assert.strictEqual(node.canRemix(), true, 'domain observation should enable remix');
 
     // Remix should succeed and RESET canRemix
     const remix = node.remember(
-      { ...fields, focus: 'remix of peer signal' },
+      { ...categories, focus: 'remix of peer signal' },
       { parents: [{ key: 'cmb-parent-123', lineage: { ancestors: [] } }] }
     );
     assert.ok(remix, 'remix should succeed');
@@ -376,13 +376,13 @@ describe('SymNode', () => {
 
     // Second remix without new domain data should be rejected
     const rejected = node.remember(
-      { ...fields, focus: 'second remix attempt' },
+      { ...categories, focus: 'second remix attempt' },
       { parents: [{ key: 'cmb-parent-456', lineage: { ancestors: [] } }] }
     );
     assert.strictEqual(rejected, null, 'second remix without new domain data should be rejected');
 
     // New domain observation re-enables remix
-    node.remember({ ...fields, focus: 'fresh observation' });
+    node.remember({ ...categories, focus: 'fresh observation' });
     assert.strictEqual(node.canRemix(), true, 'new observation should re-enable remix');
 
     await node.stop();

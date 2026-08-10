@@ -118,7 +118,7 @@ describe('extractCAT7', () => {
     assert.strictEqual(extractCAT7('Error: something went wrong'), null);
   });
 
-  it('returns null for JSON without CAT7 fields', () => {
+  it('returns null for JSON without CAT7 categories', () => {
     assert.strictEqual(extractCAT7(JSON.stringify({ type: 'result', result: '{"foo":"bar"}' })), null);
   });
 

@@ -27,10 +27,10 @@ const { BonjourDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { verifyCMB, signCMB, createCMB } = require('@sym-bot/core');
 
-const GROUP = 'p6group';
+const ROOM = 'p6group';
 
 async function withNode(name, fn) {
-  const node = new SymNode({ name, silent: true, group: GROUP, discovery: new BonjourDiscovery({ mdns: false }) });
+  const node = new SymNode({ name, silent: true, room: ROOM, discovery: new BonjourDiscovery({ mdns: false }) });
   await node.start();
   try { await fn(node); } finally {
     await node.stop();
@@ -46,11 +46,11 @@ const LEGACY_FIELDS = {
 };
 
 /** A pre-boundary record: address at the TOP level, v1 scheme, signed, and NO `metadata`. */
-function legacyBlock({ key, group = GROUP } = {}) {
+function legacyBlock({ key, room = ROOM } = {}) {
   return {
     key: key || ('cmb-' + crypto.randomBytes(32).toString('hex')),
-    fields: JSON.parse(JSON.stringify(LEGACY_FIELDS)),
-    group,
+    categories: JSON.parse(JSON.stringify(LEGACY_FIELDS)),
+    room,
     sig: crypto.randomBytes(64).toString('base64url'),
     sigAlg: 'ed25519',
   };
@@ -73,7 +73,23 @@ test('P-6: core classifies the three populations apart — the premise the fix r
     'if these ever collapse to one value the fix below silently widens into "admit everything"');
 });
 
-test('P-6: a pre-boundary block is SURFACED, not rejected, and not called a forgery', async () => {
+test('P-6: a pre-boundary block is REFUSED — grandfathering is retired', async () => {
+  // POLICY CHANGE, recorded rather than silently flipped. This asserted the opposite until the
+  // v1 retirement: a pre-boundary block was surfaced, marked unverified, and kept off the forgery
+  // counter, so ordinary history did not read as an attack at the cutover.
+  //
+  // That policy required reading the audience under its retired name, because the companion case
+  // below — a pre-boundary block from the WRONG audience — still had to be refused. Surfacing and
+  // audience-checking together are only possible while the old name is still read, and the old
+  // name is gone (founder ruling 2026-08-09: remove all fallback and dead v1 code).
+  //
+  // So the audience of such a record can no longer be established, and core refuses it as
+  // `unreadable-audience` rather than treating an absent room as a broadcast. Refusing is the
+  // honest end state: we cannot say who it was for, so we do not act as though we can.
+  //
+  // WHAT THIS COSTS, stated plainly: a node holding genuine pre-boundary history will now see it
+  // refused rather than surfaced. That is a real behaviour change for existing deployments, and
+  // it is the intended consequence of retiring v1 rather than an oversight.
   await withNode('p6-grandfather', async (node) => {
     const fh = node._frameHandler;
     node._identityKey = () => someKey();
@@ -84,16 +100,16 @@ test('P-6: a pre-boundary block is SURFACED, not rejected, and not called a forg
     const msg = { cmb: legacyBlock(), source: 'oldpeer' };
     const rejected = fh._rejectOnBadSignature('peer-1', 'oldpeer', msg);
 
-    assert.equal(rejected, false, 'a grandfathered block MUST NOT be rejected');
-    assert.equal(msg._cmbVerified, false,
-      'and MUST NOT be marked verified — unattested is not verified');
+    assert.equal(rejected, true, 'a pre-boundary block is refused: its audience cannot be read');
+    // NOT `=== false`: refusal now happens at the audience check, BEFORE verification is
+    // attempted, so the flag is never set at all. Asserting `false` would quietly require that
+    // the verify step still runs — the opposite of what refusing early means.
+    assert.notEqual(msg._cmbVerified, true, 'a refused block is never marked verified');
 
-    // The audit-trail half of the defect, which is not merely cosmetic: an operator watching the
-    // forgery counter at the cutover must not see ordinary history in it.
+    // The audit-trail half still holds and is the part worth keeping: an operator watching the
+    // forgery counter must not see ordinary history in it. Refused is not the same as forged.
     assert.equal(metrics.filter((m) => m.type === 'cmb-signature-rejected').length, 0,
-      'a legacy block MUST NOT increment the forgery counter');
-    assert.equal(metrics.filter((m) => m.type === 'cmb-legacy-unverified').length, 1,
-      'it is recorded, but on its own counter');
+      'a legacy block MUST NOT increment the forgery counter — refusing it is not accusing it');
   });
 });
 
@@ -105,7 +121,7 @@ test('P-6: the OTHER arm — a genuinely bad signature is still rejected as forg
     node._identityKey = () => victimPub;
 
     // A well-formed v2 record signed by SOMEONE ELSE — the forgery case.
-    const cmb = createCMB({ fields: LEGACY_FIELDS, createdBy: 'impostor@p6group', room: GROUP });
+    const cmb = createCMB({ categories: LEGACY_FIELDS, createdBy: 'impostor@p6group', room: ROOM });
     const attacker = crypto.generateKeyPairSync('ed25519');
     const attackerPriv = attacker.privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32).toString('base64url');
     signCMB(cmb, attackerPriv);
@@ -125,13 +141,13 @@ test('P-6: the OTHER arm — a genuinely bad signature is still rejected as forg
 test('P-6: a legacy block with the WRONG AUDIENCE is still rejected', async () => {
   // Grandfathering must not become an early return that skips the audience check. `checkAudience`
   // reads the audience from the top level on a pre-boundary record and applies to exactly these
-  // v1 keys, so returning early would admit a cross-group legacy replay — closing one hole by
+  // v1 keys, so returning early would admit a cross-room legacy replay — closing one hole by
   // opening another.
   await withNode('p6-audience', async (node) => {
     const fh = node._frameHandler;
     node._identityKey = () => someKey();
 
-    const msg = { cmb: legacyBlock({ group: 'a-different-group' }), source: 'oldpeer' };
+    const msg = { cmb: legacyBlock({ room: 'a-different-room' }), source: 'oldpeer' };
     const rejected = fh._rejectOnBadSignature('peer-3', 'oldpeer', msg);
 
     assert.equal(rejected, true,

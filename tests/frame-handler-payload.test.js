@@ -5,10 +5,10 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 /**
  * Regression: opaque payload survives the SVAF FUSION path, not just the inbox.
  *
- * The payload sits at cmb.payload (sibling of cmb.fields) and is never part of
+ * The payload sits at cmb.payload (sibling of cmb.categories) and is never part of
  * the cmbKey hash. inbox.test.js guards _pushInbox (the pull surface). This
  * guards the layer ABOVE it: when SVAF ADMITS an incoming CMB, the fused remix
- * is rebuilt from CAT7 fields (the heuristic path returns a fresh fusedEntry.cmb
+ * is rebuilt from CAT7 categories (the heuristic path returns a fresh fusedEntry.cmb
  * with no payload), so the payload was dropped BEFORE it ever reached the inbox.
  * The effect was verdict-dependent and invisible: an admitted directed CMB lost
  * its payload while the same CMB rejected-but-directed (surfaced from the raw
@@ -27,9 +27,9 @@ const fh = new FrameHandler({}, {});
 describe('_preserveIncomingPayload — payload rides the admitted SVAF remix', () => {
   it('re-attaches the incoming payload onto a fused remix whose cmb was rebuilt without it', () => {
     const payload = { type: 'llm-request', request_id: 'r1', nested: { sequence: 42 } };
-    const msg = { cmb: { key: 'parent', fields: { focus: { text: 'q' } }, payload } };
-    // Simulate the heuristic fusion result: a fresh cmb rebuilt from fields only.
-    const fusedEntry = { cmb: { key: 'remix', fields: { focus: { text: 'q' } } } };
+    const msg = { cmb: { key: 'parent', categories: { focus: { text: 'q' } }, payload } };
+    // Simulate the heuristic fusion result: a fresh cmb rebuilt from categories only.
+    const fusedEntry = { cmb: { key: 'remix', categories: { focus: { text: 'q' } } } };
 
     fh._preserveIncomingPayload(fusedEntry, msg);
 
@@ -37,8 +37,8 @@ describe('_preserveIncomingPayload — payload rides the admitted SVAF remix', (
   });
 
   it('is a no-op when the incoming CMB has no payload (back-compat, CAT7-only)', () => {
-    const msg = { cmb: { key: 'parent', fields: { focus: { text: 'q' } } } };
-    const fusedEntry = { cmb: { key: 'remix', fields: { focus: { text: 'q' } } } };
+    const msg = { cmb: { key: 'parent', categories: { focus: { text: 'q' } } } };
+    const fusedEntry = { cmb: { key: 'remix', categories: { focus: { text: 'q' } } } };
 
     fh._preserveIncomingPayload(fusedEntry, msg);
 
@@ -52,7 +52,7 @@ describe('_preserveIncomingPayload — payload rides the admitted SVAF remix', (
   });
 
   it('ignores a null/undefined payload rather than overwriting with it', () => {
-    const fusedEntry = { cmb: { key: 'remix', fields: {} } };
+    const fusedEntry = { cmb: { key: 'remix', categories: {} } };
     fh._preserveIncomingPayload(fusedEntry, { cmb: { payload: null } });
     assert.strictEqual('payload' in fusedEntry.cmb, false, 'null payload is not attached');
   });

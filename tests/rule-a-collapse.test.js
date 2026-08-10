@@ -11,7 +11,7 @@
  * Parenting that on [own HEAD] writes the edge K -> K, and a reachability walk never leaves it.
  * Rule A is sound under content-only addressing IFF the collapse property holds.
  *
- * The old scheme made this impossible by accident: a remix key was minted over fields + parents
+ * The old scheme made this impossible by accident: a remix key was minted over categories + parents
  * + the receiver's NAME, so remixKey != parentKey by construction. Removing the name term
  * removed that guarantee without removing the code that relied on it.
  *
@@ -32,7 +32,7 @@ const { nodeDir } = require('../lib/config');
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, gate_values: {} };
 
 async function withNode(name, fn) {
-  const node = new SymNode({ name, silent: true, group: 'g', discovery: new BonjourDiscovery({ mdns: false }) });
+  const node = new SymNode({ name, silent: true, room: 'g', discovery: new BonjourDiscovery({ mdns: false }) });
   node._svafEvaluator.evaluate = async () => ALIGNED;
   await node.start();
   try { await fn(node); } finally {

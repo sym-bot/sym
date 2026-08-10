@@ -31,8 +31,8 @@ describe('E2E checkpoint + witness (D3)', () => {
   it('A checkpoints its chain, B witnesses it, and A reconciles consistent + witnessed', async () => {
     const aName = `e2e-cp-a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const bName = `e2e-cp-b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const A = new SymNode({ name: aName, silent: true, discovery: new NullDiscovery(), group: 'sym-bot-team', checkpointInterval: 2 });
-    const B = new SymNode({ name: bName, silent: true, discovery: new NullDiscovery(), group: 'sym-bot-team', checkpointInterval: 2 });
+    const A = new SymNode({ name: aName, silent: true, discovery: new NullDiscovery(), room: 'sym-bot-team', checkpointInterval: 2 });
+    const B = new SymNode({ name: bName, silent: true, discovery: new NullDiscovery(), room: 'sym-bot-team', checkpointInterval: 2 });
     await A.start(); await B.start();
     A._svafEvaluator.evaluate = async () => null;
     B._svafEvaluator.evaluate = async () => null;

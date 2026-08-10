@@ -17,7 +17,7 @@ const { nodeDir } = require('../lib/config');
 
 function makeNode(base) {
   const name = `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), group: 'g' });
+  const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: 'g' });
   return { node, name };
 }
 
