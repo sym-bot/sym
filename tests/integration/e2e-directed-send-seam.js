@@ -1,37 +1,39 @@
-'use strict';
-
 /**
- * ACCEPTANCE TEST — starts at sym_send, crosses the package seam.
+ * ACCEPTANCE TEST — starts at sym_send and crosses the package seam.
  *
- * THIS TEST IS EXPECTED TO FAIL TODAY. That red is the result, not a defect.
+ * STATUS: GREEN as of mesh-channel 0.7.1. It was RED by design before that, and
+ * the history is the point.
  *
  * Why it exists (CTO ruling 2026-08-10, after two rulings were corrected):
  *
- *   A directed send to a peer that is not connected is REFUSED inside
- *   mesh-channel (server.js, the `matches.length === 0` branch) BEFORE
- *   explicitSend is called. No envelope leaves the package. So a correct,
- *   well-tested delivery spool in sym-daemon sits downstream of a message that
- *   was never sent — and neither package's suite can see it, because
- *   mesh-channel's tests cannot see the daemon and the daemon's tests cannot see
- *   mesh-channel. The refusal lived in the seam between two suites, invisible to
- *   both, and to two people who reasoned about it rather than crossing it.
+ *   A directed send to an absent peer was REFUSED inside mesh-channel, in the
+ *   `matches.length === 0` branch, BEFORE explicitSend was called. No envelope
+ *   left the package, so a correct daemon-side spool sat downstream of a message
+ *   that was never sent. Neither suite could see it: mesh-channel's tests cannot
+ *   see the daemon, the daemon's tests cannot see mesh-channel. The defect lived
+ *   in the seam between two suites, invisible to both and to two people who
+ *   reasoned about it rather than crossing it. Every test either seat had began
+ *   BELOW the layer that refused. This one starts above it and drives the real
+ *   MCP tool surface over stdio, against the INSTALLED artifact rather than a
+ *   working tree.
  *
- *   Measured, not assumed: mesh-channel 0.6.5 has ZERO references to
- *   register-agent, daemon.sock or agent-cmb, and the daemon log carries ZERO
- *   hosted-agent registrations for any seat (claude-sym-dev, claude-sym-cto,
- *   codex-mac) against 109 for the ops agents. Seats are standalone SymNodes, so
- *   a daemon-side spool cannot serve them until they register at all.
+ * A CORRECTION THIS TEST MADE TO ITSELF, kept because it is the more useful half:
+ *   Against 0.7.1 it still failed — and the implementation was right, the test was
+ *   wrong. It asserted "KNOWN-but-absent" while its fixture established neither:
+ *   an isolated HOME and a fresh room mean the node has never observed the peer,
+ *   so 0.7.1 correctly refused it as an UNKNOWN name rather than holding it. The
+ *   fixture now seeds known-peers.json — the system's own record of having
+ *   observed a peer — and the unknown case became its own test rather than a
+ *   silent assumption. A red test is only evidence if its preconditions are real.
  *
- * What must become true for this to go green — either path closes it:
- *   (a) SENDER-SIDE QUEUE (ruled, CTO owns): mesh-channel holds the envelope in
- *       its own durable store for a KNOWN peer and flushes on reappearance.
- *   (b) L2 + daemon spool (open, not this week): seats register as hosted agents
- *       and lib/hosted-spool.js holds it for them.
+ * NOT COVERED, stated rather than implied: earning the roster entry through a
+ * genuine observe-then-disconnect, and the FLUSH when the peer reappears. Both
+ * need two live nodes and a reconnection. They are the next case, deliberately
+ * not smuggled in as a slow flaky one that gets skipped.
  *
- * The assertions below describe the DESTINATION, deliberately. They encode the
- * contract the ruling settled — held-at-sender must never be reported as
- * delivered, and must name the peer it is waiting for — so that whichever path
- * lands, this test is what says it actually arrived.
+ * Still open elsewhere: seats are standalone SymNodes with ZERO hosted-agent
+ * registrations against 109 for the ops agents, so the daemon spool at
+ * lib/hosted-spool.js cannot serve seats until L2 lands and they register at all.
  */
 
 const { test } = require('node:test');
@@ -76,64 +78,89 @@ function mcpClient(env) {
   return { child, call, kill: () => { try { child.kill('SIGTERM'); } catch {} } };
 }
 
-test('a directed send to a KNOWN-BUT-ABSENT seat is held, never refused into the void', async (t) => {
-  if (!fs.existsSync(MESH_CHANNEL)) {
-    t.skip(`mesh-channel not installed at ${MESH_CHANNEL}`);
-    return;
-  }
+/** Seed the roster the production code reads. `known-peers.json` IS the system's
+ *  own record of "this node has observed that peer", written by outbox.rememberPeer
+ *  when a peer is actually seen. Writing it constructs the documented precondition
+ *  rather than bypassing a check — the send below still runs the real refusal
+ *  branch, the real isKnownPeer gate and the real outbox.hold.
+ *
+ *  What this does NOT cover, stated rather than implied: earning that roster entry
+ *  through a genuine observe-then-disconnect, and the FLUSH on reappearance. Both
+ *  need two live nodes and a reconnection; they are the next case, deliberately not
+ *  smuggled in as a slow flaky one that gets skipped. */
+function seedKnownPeer(home, nodeName, peerName) {
+  const dir = path.join(home, '.sym', 'nodes', nodeName);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'known-peers.json'),
+    JSON.stringify({ [peerName]: { peerId: null, lastSeen: null } }, null, 2));
+}
 
-  // Isolated room and HOME so this never touches the live mesh or a real store.
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'seam-'));
+async function sendTo(home, to, { known = false } = {}) {
+  const nodeName = 'seam-sender';
+  if (known) seedKnownPeer(home, nodeName, to);
   const c = mcpClient({
     HOME: home,
-    SYM_ROOM: `seam-test-${Date.now()}`,
-    SYM_NODE_NAME: 'seam-sender',
+    SYM_ROOM: `seam-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    SYM_NODE_NAME: nodeName,
     CLAUDE_PROJECT_DIR: home,
   });
-
   try {
     await c.call('initialize', {
       protocolVersion: '2024-11-05', capabilities: {},
       clientInfo: { name: 'seam-acceptance', version: '1' },
     });
-
     const res = await c.call('tools/call', {
       name: 'sym_send',
       arguments: {
-        to: 'codex-mac',                       // a real seat name, deliberately absent here
+        to,
         focus: 'the reply that was refused at 09:10:51 — held, not lost',
         issue: 'none',
         intent: 'acceptance: the seam between mesh-channel and the daemon',
       },
     });
+    return (res.result?.content ?? res.error?.content ?? []).map((x) => x.text || '').join(' ');
+  } finally { c.kill(); }
+}
 
-    const text = (res.result?.content ?? res.error?.content ?? [])
-      .map((c2) => c2.text || '').join(' ');
+test('a directed send to a KNOWN-BUT-ABSENT seat is HELD, never refused into the void', async (t) => {
+  if (!fs.existsSync(MESH_CHANNEL)) { t.skip(`mesh-channel not installed at ${MESH_CHANNEL}`); return; }
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'seam-known-'));
+  try {
+    const text = await sendTo(home, 'codex-mac', { known: true });
 
-    // ── THE CONTRACT, as ruled ────────────────────────────────────────────
-    // 1. It must not be refused into the void. Today this line FAILS with
-    //    "Peer \"codex-mac\" not connected." — that failure is the point.
-    assert.ok(
-      !/not connected/i.test(text),
-      `directed send was REFUSED at the sender, so no envelope crossed the seam — got: ${text}`,
-    );
+    // 1. Not refused into the void — the envelope must not evaporate at the sender.
+    assert.ok(!/not connected\. Call sym_peers/.test(text),
+      `directed send was REFUSED at the sender, so nothing crossed the seam — got: ${text}`);
 
-    // 2. Held must be visibly held, and must name who it waits for. A queue at
-    //    the sender is INVISIBLE TO THE RECEIVER: nobody but the sender knows the
-    //    message exists, so the tool output is the only place that fact can live.
-    assert.match(text, /held|queued|pending/i, 'the response must say the envelope is held');
+    // 2. Held must be visibly held and must NAME who it waits for. A sender-side
+    //    queue is invisible to the receiver, so this text is the only place that
+    //    fact can live.
+    assert.match(text, /held|queued|waiting/i, 'the response must say the envelope is held');
     assert.match(text, /codex-mac/, 'and must name the peer it is waiting for');
 
-    // 3. Held is NOT delivered. This is the same invariant as `dispatched` vs
-    //    `delivered` in lib/node.js: socket.write is dispatch, and a queue is not
-    //    even dispatch. Reporting queued as sent is the original defect wearing
-    //    a new coat.
-    assert.ok(
-      !/^Sent CMB/.test(text.trim()),
-      'a held envelope must never be reported as sent',
-    );
-  } finally {
-    c.kill();
-    fs.rmSync(home, { recursive: true, force: true });
-  }
+    // 3. Held is NOT delivered. Same invariant as dispatched-vs-delivered one layer
+    //    down: socket.write is dispatch, and a queue is not even dispatch.
+    assert.ok(!/^Sent CMB/.test(text.trim()), 'a held envelope must never be reported as sent');
+    assert.match(text, /not deliver|is not delivery/i,
+      'and must say so in words the operator reads, not only by omission');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('a directed send to an UNKNOWN name is refused and queues NOTHING', async (t) => {
+  if (!fs.existsSync(MESH_CHANNEL)) { t.skip(`mesh-channel not installed at ${MESH_CHANNEL}`); return; }
+  // Gate 4: a typo must not create state. This is the case that made my first
+  // version of this test fail against a CORRECT implementation — I asserted
+  // "known but absent" while my fixture established neither.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'seam-unknown-'));
+  try {
+    const text = await sendTo(home, 'peer-that-never-existed', { known: false });
+    assert.match(text, /never seen|not connected/i, 'an unknown name is refused');
+    assert.match(text, /nothing was queued|cannot create a queue/i,
+      'and the refusal must say that nothing was queued');
+    const outbox = path.join(home, '.sym', 'nodes', 'seam-sender', 'outbox.json');
+    if (fs.existsSync(outbox)) {
+      const o = JSON.parse(fs.readFileSync(outbox, 'utf8'));
+      assert.strictEqual((o.items || []).length, 0, 'a typo must leave the outbox empty');
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
