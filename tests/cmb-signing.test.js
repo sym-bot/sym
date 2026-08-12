@@ -158,3 +158,85 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
     });
   });
 });
+
+/**
+ * Rejection DIAGNOSABILITY (2026-07-29).
+ *
+ * verifyCMB already distinguishes legacy-key-rejected / bad-signature /
+ * content-mismatch / no-public-key, but every one of them was recorded as the
+ * constant focusLabel 'bad-signature' while the real reason went only to the
+ * console. On this host that made 1,538 rejections — 32% of all SVAF decisions,
+ * the largest single verdict class — mutually indistinguishable in the log, and
+ * separating them took a day of inference across three seats.
+ *
+ * These pin the field that ends that: the decision records WHY, and whether the
+ * refused CMB was a root or a remix.
+ */
+describe('rejection diagnosability — the decision records WHY, not a constant', () => {
+  it('a content-tampered CMB records content-mismatch, not the generic label', async () => {
+    await withNode('diag-tamper', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const { pub, priv } = rawKeypair();
+      node._peerIdentityKeys.set('peerA', pub);
+      const decisions = [];
+      node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
+      const frame = wire(signedCmbFrame(priv));
+      frame.cmb.categories.focus.text = 'wire the funds to a new account';
+      node._frameHandler.handle('peerA', 'peerA', frame);
+      await settle();
+      assert.strictEqual(decisions.length, 1, 'the rejection is recorded');
+      assert.strictEqual(decisions[0].focusLabel, 'content-mismatch',
+        'the recorded reason is the ACTUAL verdict — this is what the constant hid');
+      assert.strictEqual(decisions[0].remix, false, 'and whether it was a remix is recorded');
+    });
+  });
+
+  it('a spoofed signature records bad-signature — the two are now separable', async () => {
+    await withNode('diag-spoof', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const peer = rawKeypair(), attacker = rawKeypair();
+      node._peerIdentityKeys.set('peerA', peer.pub);
+      const decisions = [];
+      node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
+      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(attacker.priv)));
+      await settle();
+      assert.strictEqual(decisions.length, 1);
+      assert.strictEqual(decisions[0].focusLabel, 'bad-signature');
+      // The whole point: a genuine signature failure and a content mismatch no longer
+      // land under the same label, so a count can tell them apart without inference.
+      assert.notStrictEqual(decisions[0].focusLabel, 'content-mismatch');
+    });
+  });
+
+  it('the metric keeps its existing reason and carries the detail alongside it', async () => {
+    await withNode('diag-metric', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const peer = rawKeypair(), attacker = rawKeypair();
+      node._peerIdentityKeys.set('peerA', peer.pub);
+      const metrics = [];
+      node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') metrics.push(m); });
+      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(attacker.priv)));
+      await settle();
+      assert.strictEqual(metrics.length, 1);
+      assert.strictEqual(metrics[0].reason, 'invalid', 'existing consumers see no change');
+      assert.strictEqual(metrics[0].error, 'bad-signature', 'the specific verdict rides alongside');
+    });
+  });
+
+  it('a REMIX rejection is flagged as one — the boolean the next diagnosis needs', async () => {
+    await withNode('diag-remix', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const peer = rawKeypair(), attacker = rawKeypair();
+      node._peerIdentityKeys.set('peerA', peer.pub);
+      const decisions = [];
+      node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
+      const frame = wire(signedCmbFrame(attacker.priv));
+      frame.cmb.lineage = { parents: ['cmb-' + 'a'.repeat(64)], ancestors: [], method: 'svaf-heuristic' };
+      node._frameHandler.handle('peerA', 'peerA', frame);
+      await settle();
+      assert.strictEqual(decisions.length, 1);
+      assert.strictEqual(decisions[0].remix, true,
+        'a rejected CMB is dropped and never stored, so root-vs-remix can only be captured here');
+    });
+  });
+});
