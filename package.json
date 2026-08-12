@@ -36,7 +36,8 @@
     "ws": "^8.20.0"
   },
   "overrides": {
-    "protobufjs": "^7.6.3"
+    "sharp": "^0.35.0",
+    "adm-zip": "^0.6.0"
   },
   "files": [
     "bin/",
