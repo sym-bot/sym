@@ -92,7 +92,7 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
     });
   });
 
-  it('a content-tampered CMB (valid sig, swapped field) is REJECTED — never surfaces', async () => {
+  it('a content-tampered CMB (valid sig, swapped category) is REJECTED — never surfaces', async () => {
     await withNode('verify-tamper', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const { pub, priv } = rawKeypair();
@@ -169,7 +169,7 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
  * the largest single verdict class — mutually indistinguishable in the log, and
  * separating them took a day of inference across three seats.
  *
- * These pin the field that ends that: the decision records WHY, and whether the
+ * These pin the category that ends that: the decision records WHY, and whether the
  * refused CMB was a root or a remix.
  */
 describe('rejection diagnosability — the decision records WHY, not a constant', () => {

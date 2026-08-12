@@ -43,10 +43,10 @@ async function withNode(name, fn) {
 
 const FIELDS = {
   focus: 'the crosswalk for status is unagreed',
-  issue: 'no counterpart field in the target',
+  issue: 'no counterpart category in the target',
   intent: 'coordinate',
   motivation: 'unblock the mapping',
-  commitment: 'agree it with the field owner',
+  commitment: 'agree it with the category owner',
   perspective: 'dev seat',
   mood: { text: 'steady', valence: 0, arousal: 0 },
 };

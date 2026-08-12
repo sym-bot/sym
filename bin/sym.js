@@ -465,7 +465,7 @@ function cmdPublish() {
  * persists the keypair to ~/.sym/nodes/<name>/identity.json, so
  * repeated calls with the same --name resolve to the same nodeId.
  *
- * Ships CAT7 field vectors via SymNode's internal encoder — the caller
+ * Ships CAT7 category vectors via SymNode's internal encoder — the caller
  * only needs to supply text (and valence/arousal for mood).
  */
 async function standaloneObserve(categories, opts) {

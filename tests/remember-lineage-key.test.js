@@ -28,7 +28,7 @@ describe('remember() with parents — remix-scheme keying (§8.2.1 role dispatch
   it('a lineage-bearing block is addressed CONTENT-ONLY — no remix re-key', async () => {
     // This asserted a self-consistent REMIX key under §8.2.1 role dispatch: a block carrying
     // parents was re-keyed under a derivation that bound the parents and the author's NAME.
-    // That derivation is retired. The v2 address is the Merkle root over the seven fieldKeys
+    // That derivation is retired. The v2 address is the Merkle root over the seven categoryKeys
     // and is content-only, so a lineage-bearing block is addressed exactly like any other block
     // with the same content — which IS the collapse property, and it is the condition Rule A's
     // soundness depends on (a self-re-assertion cites rather than minting key K with parent K).
