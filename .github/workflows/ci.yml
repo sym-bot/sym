@@ -3,17 +3,35 @@ name: CI
 on:
   push:
     branches: [main]
+  # NOT filtered to `main`. A PR targeting a stacked base (e.g. a cutover branch)
+  # used to run NO checks at all, while `gh pr view` still reported the merge state
+  # as CLEAN — indistinguishable, at the surface anyone actually looks at, from a PR
+  # whose tests passed. Every branch that opens a PR gets checked.
   pull_request:
-    branches: [main]
+  # So `main` can be run on demand. Isolating "is this break mine or the base's?"
+  # otherwise required pushing to main, which is exactly when you least want to.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseding a PR push is fine — nobody needs the older run. Superseding `main`
+  # is not: it destroys the only record of whether the mainline is green, and a job
+  # that hangs long enough is ALWAYS superseded, so a persistent failure records
+  # itself as a string of "cancelled" runs and reads as noise rather than breakage.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A hang must fail fast and loudly. Without this a stuck job burns to the 6h
+    # platform ceiling and then reports "cancelled" — the failure mode that hid the
+    # Node 18 break: Node 22 passed in ~30s while Node 18 ran for six hours, twice,
+    # and neither run left a red mark behind.
+    timeout-minutes: 15
     strategy:
+      # Report every version's real result. fail-fast would let a Node 18 hang cancel
+      # the Node 22 job and lose the one signal that still works.
+      fail-fast: false
       matrix:
         node-version: [18, 22]
     steps:
