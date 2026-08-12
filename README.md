@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/@sym-bot/sym"><img src="https://img.shields.io/npm/v/%40sym-bot%2Fsym?label=npm" alt="npm package version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 license"></a>
   <a href="https://github.com/sym-bot/sym/actions/workflows/ci.yml"><img src="https://github.com/sym-bot/sym/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://meshcognition.org/spec/mmp"><img src="https://img.shields.io/badge/protocol-MMP_v1.0-orange" alt="MMP specification"></a>
+  <a href="https://meshcognition.org/spec/mmp"><img src="https://img.shields.io/badge/protocol-MMP_v1.1-orange" alt="MMP specification"></a>
 </p>
 
 `npm install -g @sym-bot/sym`
@@ -70,11 +70,11 @@ Do not invent a room name when joining an existing team. Ask the human for the s
 
 | You use | Start with | Experience |
 |---|---|---|
-| Codex, Cursor, Copilot, scripts | `@sym-bot/sym` + the SYM skill | Publish, listen, recall, and ask through the universal runtime |
-| Claude Code | [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) | Claude-native mid-turn delivery through Channels |
-| Headless model-configured peers | [`@sym-bot/xmesh-agent`](https://github.com/sym-bot/xmesh-agent) | Autonomous peers without a host IDE |
+| Claude Code | [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) | Real time: peer messages appear inside the session on arrival |
+| Codex | [`@sym-bot/mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) as an MCP server | Durable inbox: verified messages wait; Codex reads them with `sym_receive` |
+| Cursor, Copilot, scripts, services | `@sym-bot/sym` + the SYM skill | Publish, listen, recall, and ask through the runtime and CLI |
 
-Claude Code's mid-turn push currently requires its development-channels flag. Other agents use the SYM runtime and listener.
+Claude Code's real-time push requires its development-channels flag, confirmed at each session start, until the channel is allowlisted. Without the flag a session can send and poll but cannot be reached mid-turn.
 
 ## What SYM gives each agent
 
@@ -99,11 +99,16 @@ Run `sym --help` for the full command surface.
 ## Where it fits
 
 - **[MMP](https://meshcognition.org/spec/mmp)** is the open wire protocol.
-- **SYM** is this open-core runtime and CLI.
-- **[xmesh-agent](https://github.com/sym-bot/xmesh-agent)** is the public open-source runtime for headless, model-configured peers.
-- **Enterprise AI integration:** visit **[xmesh.bot](https://xmesh.bot)**.
+- **SYM** is the open runtime and CLI. It carries the complete open core in its own tree —
+  records, signing, baseline admission, default coupling — with no closed dependency, and the
+  admission and coupling engines are injectable.
+- **xMesh** is the agent mesh runtime built on this foundation. The free
+  [Developer Runtime](https://www.npmjs.com/package/@sym-bot/xmesh) runs locally or in any pod,
+  and a coding agent drives it through MCP (`xmesh-mcp`): offer a mission, follow the board.
+- **Enterprise:** visit **[xmesh.bot](https://xmesh.bot)**.
 
-The xMesh enterprise product and its codebase are private. The public npm runtimes are separate reference components.
+The xMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
+mesh-channel are open source.
 
 ## Current boundaries
 
