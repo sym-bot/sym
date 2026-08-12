@@ -19,7 +19,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { verifyAttestation, verifyAttestationRole } = require('@sym-bot/core');
+const { verifyAttestation, verifyAttestationRole } = require('../lib/core');
 
 // Construct (no start) — the builder needs only identity / room / role / chain state.
 function withNode(baseName, opts, fn) {

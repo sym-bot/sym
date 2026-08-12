@@ -23,10 +23,10 @@
 
 ## 0.10.0 (2026-08-01)
 
-- **Pinned to `@sym-bot/core` 0.6.0.** Brings design C's shadow gate into the receive path: a
-  binary redundancy cut computes alongside the five-valued band on every admission, is logged
-  beside it, and **decides nothing**. No peer can observe it — it never enters the signed
-  attestation payload — so nothing on the mesh can come to depend on its behaviour.
+- **Pinned to `@sym-bot/core` 0.6.0.** Adds an observe-only admission diagnostic on the
+  receive path: computed alongside the five-valued band on every admission, logged beside it,
+  and **deciding nothing**. No peer can observe it — it never enters the signed attestation
+  payload — so nothing on the mesh can come to depend on its behaviour.
 - **feat:** `svafRedundancyThreshold` node option. Every other SVAF threshold has been settable
   for a long time; the redundancy floor was not settable anywhere, and it is the whole of the
   redundancy cut. Deliberately carries **no default here** — unset, core applies its own, so the

@@ -25,7 +25,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady, verifyTetherAttestation, kernelId } = require('@sym-bot/core');
+const { createCMB, isSemanticReady, verifyTetherAttestation, kernelId } = require('../lib/core');
 
 // The tether's reject-floor calibration assumes the semantic kernel (the
 // production default — §9.2.1: thresholds are meaningful only within a pinned

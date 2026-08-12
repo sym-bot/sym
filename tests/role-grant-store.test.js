@@ -15,7 +15,7 @@ const path = require('path');
 const os = require('os');
 const { RoleGrantStore } = require('../lib/role-grant-store');
 const { RosterKeyRegistry } = require('../lib/roster-keys');
-const { signGrant } = require('@sym-bot/core');
+const { signGrant } = require('../lib/core');
 
 function kp(nodeId) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

@@ -36,7 +36,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB } = require('@sym-bot/core');
+const { createCMB } = require('../lib/core');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

@@ -20,7 +20,7 @@ const crypto = require('crypto');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, signCMB, verifyCMB } = require('@sym-bot/core');
+const { createCMB, signCMB, verifyCMB } = require('../lib/core');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

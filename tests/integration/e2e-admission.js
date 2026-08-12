@@ -17,7 +17,7 @@ const fs = require('fs');
 const { SymNode } = require('../../lib/node');
 const { NullDiscovery } = require('../../lib/discovery');
 const { nodeDir } = require('../../lib/config');
-const { verifyAttestation } = require('@sym-bot/core');
+const { verifyAttestation } = require('../../lib/core');
 
 function bidirectionalPair() {
   const la = {}, lb = {};

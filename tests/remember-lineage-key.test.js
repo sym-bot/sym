@@ -13,7 +13,7 @@ const fs = require('node:fs');
 
 const { SymNode } = require('../lib/node');
 const { BonjourDiscovery } = require('../lib/discovery');
-const { blockKeyV2 } = require('@sym-bot/core');
+const { blockKeyV2 } = require('../lib/core');
 const { nodeDir } = require('../lib/config');
 
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };

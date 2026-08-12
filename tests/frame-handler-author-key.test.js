@@ -29,7 +29,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { FrameHandler } = require('../lib/frame-handler');
-const { createCMB, signCMB } = require('@sym-bot/core');
+const { createCMB, signCMB } = require('../lib/core');
 
 const GROUP = 'test-group';
 const RECEIVER_NODE_ID = 'receiver-node-id';

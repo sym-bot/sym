@@ -111,7 +111,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
     // sym's suite was 309/309 green through all of that, because no test served a record of this
     // shape. That is the point of this one: the fix is not "bump the dependency", it is "check
     // what the dependency now returns for the records you actually hold".
-    const { cmbKeyV1 } = require('@sym-bot/core');
+    const { cmbKeyV1 } = require('../lib/core');
     await withNode('cfetch-legacy', async (nodeB) => {
       fakePeer(nodeB, 'peerA');
       const categories = cat7('a pre-boundary block minted before the merkle cutover');
@@ -140,7 +140,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       nodeB.on('metric', (m) => { if (m.type === 'cmb-fetch-forged') metrics.push(m); });
 
       const categories = cat7('content that will be served without any container at all');
-      const { cmbKeyV1 } = require('@sym-bot/core');
+      const { cmbKeyV1 } = require('../lib/core');
       const key = cmbKeyV1(categories);
 
       const p = nodeB.fetchCMB(key, { timeoutMs: 600 });

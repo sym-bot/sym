@@ -42,7 +42,7 @@ describe('MemoryStore', () => {
   });
 
   it('should store CMB when provided', () => {
-    const { createCMB } = require('@sym-bot/core');
+    const { createCMB } = require('../lib/core');
     const cmb = createCMB({
       categories: {
         focus: 'debugging auth module',
@@ -115,7 +115,7 @@ describe('MemoryStore', () => {
     // Write a parent first
     const parent = store.write('parent observation', { tags: ['lineage'] });
     // Write a child with parent reference
-    const { createCMB } = require('@sym-bot/core');
+    const { createCMB } = require('../lib/core');
     const childCmb = createCMB({
       categories: {
         focus: 'child of parent',

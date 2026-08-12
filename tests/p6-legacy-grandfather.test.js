@@ -25,7 +25,7 @@ const crypto = require('node:crypto');
 const { SymNode } = require('../lib/node');
 const { BonjourDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { verifyCMB, signCMB, createCMB } = require('@sym-bot/core');
+const { verifyCMB, signCMB, createCMB } = require('../lib/core');
 
 const ROOM = 'p6group';
 

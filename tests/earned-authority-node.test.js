@@ -14,7 +14,7 @@ const crypto = require('crypto');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir, loadOrCreateIdentity } = require('../lib/config');
-const { verifyAttestationRole, signAttestation } = require('@sym-bot/core');
+const { verifyAttestationRole, signAttestation } = require('../lib/core');
 
 function kp(nodeId) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

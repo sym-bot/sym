@@ -15,7 +15,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady, verifyTetherAttestation } = require('@sym-bot/core');
+const { createCMB, isSemanticReady, verifyTetherAttestation } = require('../lib/core');
 
 async function awaitSemantic(timeoutMs = 30000) {
   const t0 = Date.now();
