@@ -63,7 +63,7 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
     assert.strictEqual(att.roster, 'sym-bot-team', 'scoped to B\'s roster');
     assert.strictEqual(att.method, 'heuristic');
     assert.ok(['aligned', 'guarded'].includes(att.verdict), 'overall verdict from the gate');
-    assert.strictEqual(Object.keys(att.categories).length, 7, 'a verdict for each CAT7 field');
+    assert.strictEqual(Object.keys(att.categories).length, 7, 'a verdict for each CAT7 category');
     assert.strictEqual(att.seq, 1, 'first link in B\'s attester chain');
     assert.strictEqual(att.prev, 'genesis');
     assert.deepStrictEqual(verifyAttestation(att, B._identity.publicKey), { signed: true, valid: true }, 'signature verifies against B\'s identity key');

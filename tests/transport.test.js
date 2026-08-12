@@ -87,7 +87,7 @@ describe('TcpTransport', () => {
 });
 
 describe('RelayPeerTransport', () => {
-  it('should send envelope with to field when ws ready', () => {
+  it('should send envelope with to category when ws ready', () => {
     const sent = [];
     const mockWs = { readyState: 1, send: (data) => sent.push(data) };
     const transport = new RelayPeerTransport(mockWs, 'peer-123');

@@ -466,10 +466,10 @@ function handleIPCMessage(socketId, socket, msg) {
     case 'listen':
       // MMP Section 13.9: Local Event Interface.
       // Register this socket for real-time mesh events.
-      // Subscriber MAY declare field weights for domain-specific filtering.
+      // Subscriber MAY declare category weights for domain-specific filtering.
       listeners.set(socketId, { socket, categoryWeights: msg.categoryWeights || null });
       sendIPC(socket, { type: 'result', action: 'listen', status: 'subscribed' });
-      log(`Listener registered (socket ${socketId}${msg.categoryWeights ? ', with field weights' : ''})`);
+      log(`Listener registered (socket ${socketId}${msg.categoryWeights ? ', with category weights' : ''})`);
       break;
 
     case 'peers': {
@@ -557,8 +557,8 @@ function broadcastToHostedAgents(msg) {
   }
 }
 
-// MMP Section 13.9.2: Subscriber Field Weights.
-// If subscriber declared field weights, evaluate CMB relevance before delivery.
+// MMP Section 13.9.2: Subscriber Category Weights.
+// If subscriber declared category weights, evaluate CMB relevance before delivery.
 function shouldDeliverToListener(listener, msg) {
   if (!listener.categoryWeights) return true; // no weights = receive everything
   if (msg.event !== 'cmb-accepted') return true; // non-CMB events always delivered
@@ -567,12 +567,12 @@ function shouldDeliverToListener(listener, msg) {
   if (!categories) return true;
 
   // Weighted relevance: sum(α_f * hasContent_f) / sum(α_f)
-  // Deliver if any high-weight field has content
+  // Deliver if any high-weight category has content
   const weights = listener.categoryWeights;
   let weightedScore = 0, totalWeight = 0;
-  for (const [field, weight] of Object.entries(weights)) {
+  for (const [category, weight] of Object.entries(weights)) {
     totalWeight += weight;
-    const text = categories[field]?.text || '';
+    const text = categories[category]?.text || '';
     if (text && text !== 'none' && text !== 'neutral') {
       weightedScore += weight;
     }
@@ -872,7 +872,7 @@ async function main() {
         key: entry.key,
         source: entry.source || recordCreatedBy(entry.cmb) || 'unknown',
         focus: entry.cmb?.categories?.focus?.text || entry.content || '',
-        categories: entry.cmb?.categories || null, // Section 13.9.2: needed for subscriber field weight filtering
+        categories: entry.cmb?.categories || null, // Section 13.9.2: needed for subscriber category weight filtering
         timestamp: entry.timestamp || Date.now(),
       },
     });

@@ -48,7 +48,7 @@ describe('svafRedundancyThreshold', () => {
       assert.strictEqual(node._svafStableThreshold, 0.3);
       assert.strictEqual(node._svafGuardedThreshold, 0.7);
       assert.ok('_svafRedundancyThreshold' in node,
-        'the floor must exist on the node even when unset, or the pass-through reads a missing field');
+        'the floor must exist on the node even when unset, or the pass-through reads a missing category');
     });
   });
 });

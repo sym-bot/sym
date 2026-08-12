@@ -55,7 +55,7 @@ describe('isValidCAT7', () => {
     assert.strictEqual(isValidCAT7(null), false);
   });
 
-  it('rejects missing field', () => {
+  it('rejects missing category', () => {
     const { focus, ...rest } = VALID_CAT7;
     assert.strictEqual(isValidCAT7(rest), false);
   });

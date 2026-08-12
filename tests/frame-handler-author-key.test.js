@@ -16,7 +16,7 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  *
  * The relaxation is deliberately narrow: only a NAMED author that is not the
  * deliverer is treated as unverifiable. An absent `createdBy`, or an author that
- * IS the deliverer, still hard-rejects — otherwise omitting the field would be a
+ * IS the deliverer, still hard-rejects — otherwise omitting the category would be a
  * way to dodge signature rejection entirely.
  *
  * This does NOT authenticate relayed CMBs. The author's key is unresolvable from
