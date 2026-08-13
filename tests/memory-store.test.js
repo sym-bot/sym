@@ -282,11 +282,13 @@ describe('MemoryStore', () => {
     assert.ok(results.length >= 1, 'should find peer memory');
   });
 
-  it('preserves the wire ancestor chain — the root is not dropped across hops (MMP §15.2)', () => {
-    // C receives B's remix, which carries the full chain [root-A] on the wire, but
-    // B's key is not in C's index (C stores its own remix, never the incoming CMB).
-    // The stored ancestors MUST keep root-A — recomputing from the index alone
-    // would drop it and break offline-remix detection.
+  it('does NOT trust a wire ancestor chain — the local closure is verified-only (MMP v2.0)', () => {
+    // MMP v2.0: metadata.lineage is {parents, method} only. A non-conformant peer may still put an
+    // `ancestors` array on the wire; sym must NOT trust it — that was the lineage-amplification
+    // vector (a bloated wire chain inflating every downstream node's closure with unverified keys).
+    // C receives B's remix carrying a wire chain [root-A, remix-B]; root-A is not in C's local
+    // index, so it is honestly absent from the stored closure (you cannot attest what you have not
+    // seen). Only the direct parent, which C can name, is retained.
     const cmb = {
       createdBy: 'peer-c', createdAt: Date.now(),
       categories: { focus: { text: 'c remix of b' }, mood: { text: 'steady' } },
@@ -294,7 +296,7 @@ describe('MemoryStore', () => {
     };
     const stored = store.receiveFromPeer('peer-c', { cmb, content: 'c remix of b', source: 'peer-c' });
     assert.ok(stored, 'stored');
-    assert.ok(stored.lineage.ancestors.includes('root-A'), 'root-A preserved from the wire chain');
-    assert.ok(stored.lineage.ancestors.includes('remix-B'), 'parent B included');
+    assert.ok(stored.lineage.parents.includes('remix-B'), 'the direct parent is kept');
+    assert.ok(!stored.lineage.ancestors.includes('root-A'), 'a wire-supplied root C never saw is NOT trusted into the closure');
   });
 });
