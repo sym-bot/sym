@@ -2,6 +2,33 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.11.3 (2026-08-13)
+
+### Added
+
+- **Reads the published MMP v2.0 record signature suite.** A record signed under
+  `mmp-sig-v2.0` now verifies against the published preimage, so a v2.0 record
+  from an independent implementation interoperates with this one. Signature
+  verification, the end-to-end category encryption, the handshake proof-of-
+  possession, and the session key schedule all match the published v2.0 spec
+  byte-for-byte. Records signed under the previous suite continue to verify
+  unchanged — this release **reads** v2.0; it still **emits** the previous suite,
+  so nothing on the wire changes for peers on earlier versions. Emission moves to
+  v2.0 in a later release, once v2.0 readers are widely deployed.
+
+- **Verification receipt for verified-record consumers.** After this node
+  verifies a v2.0 record it can emit a compact receipt bound to the exact record
+  bytes, so a downstream consumer can admit the record without re-verifying it
+  and detect any mutation between verification and use.
+
+### Changed
+
+- **Lineage is walked from verified local records only.** A record's provenance
+  is resolved by traversing parents this node has actually stored, never a
+  sender-supplied ancestor list — a non-conforming peer can no longer inject an
+  apparent root. Admission freshness is derived from the signed timestamp of a
+  verified record rather than a transport field.
+
 ## 0.10.2 (2026-08-04)
 
 ### Fixed
