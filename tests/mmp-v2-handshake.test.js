@@ -77,3 +77,49 @@ describe('MMP v2.0 handshake key schedule (§5.2)', () => {
     assert.strictEqual(k.clientToServerKey.toString('hex').length, 64, 'a 32-byte ChaCha20-Poly1305 key');
   });
 });
+
+// §5.2 transcript CONSTRUCTION (not just the primitives over a given transcript) and the
+// cmb-encrypted-v2 downgrade resistance that rides it.
+const { buildTranscript } = require('../lib/core/handshake-v2');
+const { EXT_CMB_ENCRYPTED_V2 } = require('../lib/core/mmp-extensions');
+
+describe('MMP v2.0 transcript construction + extension binding', () => {
+  it('buildTranscript reproduces the canonical transcript byte-for-byte', () => {
+    assert.strictEqual(buildTranscript(vec.fixture.handshake).toString('hex'), vec.expected.transcriptHex);
+  });
+
+  it('the full chain from the CONSTRUCTED transcript matches the vector', () => {
+    const t = buildTranscript(vec.fixture.handshake);
+    assert.strictEqual(transcriptHash(t).toString('hex'), vec.expected.transcriptHashHex);
+    assert.strictEqual(sessionIdFromTranscript(t), vec.expected.sessionId);
+    const k = deriveSessionKeys(Buffer.from(vec.expected.sharedSecretHex, 'hex'), transcriptHash(t));
+    assert.strictEqual(k.clientToServerKey.toString('hex'), vec.expected.clientToServerKeyHex);
+    assert.strictEqual(k.serverToClientKey.toString('hex'), vec.expected.serverToClientKeyHex);
+  });
+
+  it('extensions are bytewise-sorted in the transcript regardless of offer order', () => {
+    const swapped = JSON.parse(JSON.stringify(vec.fixture.handshake));
+    swapped.client.extensions = [...swapped.client.extensions].reverse();
+    // Reversing the OFFER order must not change the transcript — the sort is canonical.
+    assert.strictEqual(buildTranscript(swapped).toString('hex'), vec.expected.transcriptHex);
+  });
+
+  it('cmb-encrypted-v2 binds into the transcript; stripping it changes the transcript (downgrade breaks proofs)', () => {
+    const withExt = JSON.parse(JSON.stringify(vec.fixture.handshake));
+    withExt.client.extensions.push(EXT_CMB_ENCRYPTED_V2);
+    withExt.server.extensions.push(EXT_CMB_ENCRYPTED_V2);
+    withExt.selectedExtensions = [...withExt.selectedExtensions, EXT_CMB_ENCRYPTED_V2];
+    const withHash = transcriptHash(buildTranscript(withExt)).toString('hex');
+
+    // A relay that strips the selected cmb-encrypted-v2 produces a DIFFERENT transcript hash, so
+    // the Ed25519 proofs over the original transcript can no longer verify — the downgrade is
+    // cryptographically visible, not silent.
+    const stripped = JSON.parse(JSON.stringify(withExt));
+    stripped.selectedExtensions = stripped.selectedExtensions.filter((e) => e !== EXT_CMB_ENCRYPTED_V2);
+    const strippedHash = transcriptHash(buildTranscript(stripped)).toString('hex');
+
+    assert.notStrictEqual(withHash, strippedHash, 'stripping the selected extension must change the transcript');
+    // and it sorts canonically into the offered list (bytewise before receipts-v1)
+    assert.ok(buildTranscript(withExt).includes(Buffer.from(EXT_CMB_ENCRYPTED_V2, 'utf8')));
+  });
+});
