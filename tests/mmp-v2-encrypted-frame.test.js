@@ -87,4 +87,24 @@ describe('MMP v2.0 cmb-encrypted frame codec', () => {
     const frame = buildEncryptedFrame({ cmb, applicationBytes, sessionId: vec.sessionId, direction: c2s.direction, sequence: c2s.sequence, trafficKey: Buffer.from(c2s.trafficKeyHex, 'hex') });
     assert.throws(() => openEncryptedFrame({ frame, trafficKey: Buffer.from(s2c.trafficKeyHex, 'hex') }));
   });
+
+  // The no-application case (codex byte ruling, merged canonical vector): application=null omits
+  // applicationData entirely, and metadata.application stays explicit null in the clear metadata.
+  it('reproduces the merged no-application vector byte-for-byte', () => {
+    const na = vec.noApplication;
+    assert.ok(na, 'merged vector carries the noApplication case');
+    const naPlain = JSON.parse(na.protectedPlaintextUtf8);
+    assert.strictEqual(na.metadata.application, null, 'clear metadata keeps application explicit null');
+    // plaintext: applicationData omitted (applicationBytes = null)
+    assert.strictEqual(protectedPlaintext(naPlain.categories, null).toString('utf8'), na.protectedPlaintextUtf8);
+    const c = na.case;
+    const frame = buildEncryptedFrame({
+      cmb: { categories: naPlain.categories, metadata: na.metadata }, applicationBytes: null,
+      sessionId: vec.sessionId, direction: c.direction, sequence: c.sequence, trafficKey: Buffer.from(c.trafficKeyHex, 'hex'),
+    });
+    assert.strictEqual(frame.sealed, c.sealedBase64url, 'no-application sealed bytes must match the merged vector');
+    // round-trip: opens back with no applicationBytes
+    const out = openEncryptedFrame({ frame, trafficKey: Buffer.from(c.trafficKeyHex, 'hex') });
+    assert.strictEqual(out.applicationBytes, null);
+  });
 });
