@@ -1,0 +1,113 @@
+{
+  "protocolVersion": "2.0",
+  "warning": "all private keys and nonces are fixed conformance fixtures",
+  "fixture": {
+    "handshake": {
+      "protocolVersion": "2.0",
+      "room": "conformance-room",
+      "client": {
+        "nonce": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU",
+        "nodeId": "018f47a0-7b21-7abc-8def-111111111111",
+        "identityPublicKey": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "e2ePublicKey": "ew1H2TQn-DERYHgcfHM_2J-IlwrvSQ2KoO4ZpMuKGxQ",
+        "name": "vector-client",
+        "implementation": {
+          "name": "mmp-vector",
+          "version": "1.0.0"
+        },
+        "extensions": [
+          "receipts-v1",
+          "admission-attestation-v1"
+        ]
+      },
+      "server": {
+        "nonce": "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY",
+        "nodeId": "018f47a0-7b21-7abc-8def-222222222222",
+        "identityPublicKey": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "e2ePublicKey": "_y7kVgHsG2cxDHeQQEWFrmlzMe7hwfjPJBlzHB__Pms",
+        "name": "vector-server",
+        "implementation": {
+          "name": "mmp-vector",
+          "version": "1.0.0"
+        },
+        "extensions": [
+          "admission-attestation-v1",
+          "checkpoints-v1"
+        ]
+      },
+      "selectedExtensions": [
+        "admission-attestation-v1"
+      ]
+    },
+    "frames": {
+      "clientHello": {
+        "type": "client-hello",
+        "protocolVersion": "2.0",
+        "room": "conformance-room",
+        "nodeId": "018f47a0-7b21-7abc-8def-111111111111",
+        "name": "vector-client",
+        "identityPublicKey": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "e2ePublicKey": "ew1H2TQn-DERYHgcfHM_2J-IlwrvSQ2KoO4ZpMuKGxQ",
+        "nonce": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU",
+        "implementation": {
+          "name": "mmp-vector",
+          "version": "1.0.0"
+        },
+        "extensions": [
+          "receipts-v1",
+          "admission-attestation-v1"
+        ]
+      },
+      "serverHello": {
+        "type": "server-hello",
+        "protocolVersion": "2.0",
+        "room": "conformance-room",
+        "nodeId": "018f47a0-7b21-7abc-8def-222222222222",
+        "name": "vector-server",
+        "identityPublicKey": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+        "e2ePublicKey": "_y7kVgHsG2cxDHeQQEWFrmlzMe7hwfjPJBlzHB__Pms",
+        "nonce": "ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmY",
+        "implementation": {
+          "name": "mmp-vector",
+          "version": "1.0.0"
+        },
+        "extensions": [
+          "admission-attestation-v1",
+          "checkpoints-v1"
+        ],
+        "clientNonce": "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU",
+        "selectedExtensions": [
+          "admission-attestation-v1"
+        ],
+        "proof": "7DNboZzYA9CSEk59gQNJEOAMNEFlMynazclFN4uPXGOd3muDjhk2v2XgLyDaW-niRGg3W1QOzdiXyPLFw0fTDQ",
+        "keyConfirmation": "lLjhdZb7PEmGlZOOwkSwxgIjYdskRaMkziMhy9c8tKk"
+      },
+      "clientFinish": {
+        "type": "client-finish",
+        "transcriptHash": "f85383e8ebb887a1fe9578adabae4b5d40f24749968be23b38c209c5ec212a05",
+        "proof": "kPJ_DxaXJMA2WqzyOYlxqP4QdGdUh-OzW6ImzK9_dHxVwtkQVhXXtSrmUhwKOItAgBLXDYK62HdANPoE2jN0Bw",
+        "keyConfirmation": "bhR5iAW99puPL_2L4ACz2fY6Iam6XbW2ZX0HXOoifHI"
+      }
+    },
+    "clientIdentityPrivateSeedBase64url": "ERERERERERERERERERERERERERERERERERERERERERE",
+    "serverIdentityPrivateSeedBase64url": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+    "clientE2EPrivateKeyBase64url": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM",
+    "serverE2EPrivateKeyBase64url": "REREREREREREREREREREREREREREREREREREREREREQ"
+  },
+  "expected": {
+    "transcriptHex": "6d6d702d68616e647368616b652d7472616e7363726970742d76320a333a322e3031363a636f6e666f726d616e63652d726f6f6d34333a5656565656565656565656565656565656565656565656565656565656565656565656565656565656565534333a5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5a6d5933363a30313866343761302d376232312d376162632d386465662d31313131313131313131313134333a304571794d6e5172744b7336453269395268586b3574416953726361415775766853436a4d736c33687a6334333a657731483254516e2d4445525948676366484d5f324a2d496c7772765351324b6f4f345a704d754b47785131333a766563746f722d636c69656e7431303a6d6d702d766563746f72353a312e302e30313a3232343a61646d697373696f6e2d6174746573746174696f6e2d763131313a72656365697074732d763133363a30313866343761302d376232312d376162632d386465662d32323232323232323232323234333a6f4a716c3948706e575941762d56583433433071464b584a6e534f2d6c5f686b456e5f354f44525670504134333a5f79376b56674873473263784448655151455746726d6c7a4d65376877666a504a426c7a48425f5f506d7331333a766563746f722d73657276657231303a6d6d702d766563746f72353a312e302e30313a3232343a61646d697373696f6e2d6174746573746174696f6e2d763131343a636865636b706f696e74732d7631313a3132343a61646d697373696f6e2d6174746573746174696f6e2d7631",
+    "transcriptHashHex": "f85383e8ebb887a1fe9578adabae4b5d40f24749968be23b38c209c5ec212a05",
+    "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+    "clientProofPayloadHex": "6d6d702d68616e647368616b652d70726f6f662d76320a363a636c69656e7436343a66383533383365386562623838376131666539353738616461626165346235643430663234373439393638626532336233386332303963356563323132613035",
+    "clientProofBase64url": "kPJ_DxaXJMA2WqzyOYlxqP4QdGdUh-OzW6ImzK9_dHxVwtkQVhXXtSrmUhwKOItAgBLXDYK62HdANPoE2jN0Bw",
+    "serverProofPayloadHex": "6d6d702d68616e647368616b652d70726f6f662d76320a363a73657276657236343a66383533383365386562623838376131666539353738616461626165346235643430663234373439393638626532336233386332303963356563323132613035",
+    "serverProofBase64url": "7DNboZzYA9CSEk59gQNJEOAMNEFlMynazclFN4uPXGOd3muDjhk2v2XgLyDaW-niRGg3W1QOzdiXyPLFw0fTDQ",
+    "sharedSecretHex": "3c528e9fd39731b15d10de8feb5f71d3f65b73c993581dedb03315a9ed177730",
+    "clientFinishedKeyHex": "3bab0f8fea6a5bc3d28942f2ba4d39260dbb415768cee2879a7b8ff761bfe79b",
+    "serverFinishedKeyHex": "406b8c52568334a421b650b2d463c03cbe226ad9a8a5364c7f4559ead353bf9d",
+    "clientKeyConfirmationHex": "6e14798805bdf69b8f2ffd8be000b3d9f63a21a9ba5db5b6657d075cea227c72",
+    "serverKeyConfirmationHex": "94b8e17596fb3c498695938ec244b0c6022361db2445a324ce2321cbd73cb4a9",
+    "clientToServerKeyHex": "789c875b5646722f94938d29a7712fcab924873cf5df4c1cf44ac18836990130",
+    "serverToClientKeyHex": "cfcddba80535583d252d8e744d55fe9cc792c7a63facbe5b13c5cb100bc289ae"
+  }
+}
