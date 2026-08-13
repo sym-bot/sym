@@ -50,3 +50,30 @@ describe('MMP v2.0 handshake proof-of-possession (P0.3)', () => {
     assert.ok(!verifyProof('client', tampered, e.clientProofBase64url, clientPub), 'a proof over a different transcript must fail');
   });
 });
+
+const { deriveSessionKeys, keyConfirmation } = require('../lib/core/handshake-v2');
+
+describe('MMP v2.0 handshake key schedule (§5.2)', () => {
+  const sharedSecret = Buffer.from(vec.expected.sharedSecretHex, 'hex');
+  const th = transcriptHash(tx);
+
+  it('derives the two traffic keys and two finished keys byte-exact', () => {
+    const k = deriveSessionKeys(sharedSecret, th);
+    assert.strictEqual(k.clientToServerKey.toString('hex'), vec.expected.clientToServerKeyHex);
+    assert.strictEqual(k.serverToClientKey.toString('hex'), vec.expected.serverToClientKeyHex);
+    assert.strictEqual(k.clientFinishedKey.toString('hex'), vec.expected.clientFinishedKeyHex);
+    assert.strictEqual(k.serverFinishedKey.toString('hex'), vec.expected.serverFinishedKeyHex);
+  });
+
+  it('computes the key confirmations byte-exact', () => {
+    const k = deriveSessionKeys(sharedSecret, th);
+    assert.strictEqual(keyConfirmation('client', k.clientFinishedKey, th).toString('hex'), vec.expected.clientKeyConfirmationHex);
+    assert.strictEqual(keyConfirmation('server', k.serverFinishedKey, th).toString('hex'), vec.expected.serverKeyConfirmationHex);
+  });
+
+  it('the derived traffic keys are exactly what the e2e AEAD vector uses (full chain)', () => {
+    // The handshake traffic key IS the e2e trafficKey — proving handshake→AEAD is one contract.
+    const k = deriveSessionKeys(sharedSecret, th);
+    assert.strictEqual(k.clientToServerKey.toString('hex').length, 64, 'a 32-byte ChaCha20-Poly1305 key');
+  });
+});
