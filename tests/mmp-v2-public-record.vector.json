@@ -1,0 +1,75 @@
+{
+  "categories": {
+    "focus": {
+      "text": "publish corrected MMP conformance artifacts",
+      "meta": {
+        "key": "5016f1bd82f5ec8ad064f9fb0a47c10988190c407c9d534e76b366634bf2e268",
+        "parents": []
+      }
+    },
+    "issue": {
+      "text": "the public vectors and runtime disagree",
+      "meta": {
+        "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+        "parents": [
+          "cmb-abababababababababababababababababababababababababababababababab"
+        ]
+      }
+    },
+    "intent": {
+      "text": "make independent implementations interoperate",
+      "meta": {
+        "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+        "parents": []
+      }
+    },
+    "motivation": {
+      "text": "a protocol claim must be executable",
+      "meta": {
+        "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+        "parents": []
+      }
+    },
+    "commitment": {
+      "text": "one contract drives every implementation",
+      "meta": {
+        "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+        "parents": []
+      }
+    },
+    "perspective": {
+      "text": "protocol editor",
+      "meta": {
+        "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+        "parents": []
+      }
+    },
+    "mood": {
+      "text": "determined",
+      "meta": {
+        "key": "a515fb1d0492e7661b89c2b02d6bf81372ee07560bfca054863c76dec74880da",
+        "parents": []
+      }
+    }
+  },
+  "metadata": {
+    "key": "cmb-7f7b55653aa9854999c2efeb9751ce4428f9dfe95839e34e4358ab0be5cdf98d",
+    "addressScheme": "mmp-cmb-merkle-v2",
+    "signatureSuite": "mmp-sig-v2.0",
+    "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+    "createdBy": "vector-author",
+    "createdTimestamp": 1786611600000,
+    "room": "conformance-room",
+    "to": "018f47a0-7b21-7abc-8def-fedcba987654",
+    "lineage": {
+      "parents": [
+        "cmb-abababababababababababababababababababababababababababababababab"
+      ],
+      "method": "svaf-heuristic"
+    },
+    "application": null,
+    "assertionId": "asrt-926d08932fe23abc3950001f80df80f93f9ae0942eb04329cd5d6c4748a0ff7e",
+    "sigAlg": "ed25519",
+    "sig": "ae5wP18m0_bGBxiqL4faj70eTjwK_nZL1FocG021xhwmHqmX1Ne3SlVZzdquOZiuh5haKtss6nGXWZdvXzVpCg"
+  }
+}
