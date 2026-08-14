@@ -1,0 +1,72 @@
+{
+  "note": "A genuinely JS-emitted mmp-sig-v2.0 record for cross-device verification. Verify with authorPublicKeyBase64url; assertionId must re-derive.",
+  "authorPublicKeyBase64url": "sk2LK1H-h4xIQxXHLXomad-H1LKY1YKVRV7LSD-FOyM",
+  "record": {
+    "categories": {
+      "focus": {
+        "text": "cross-device v2.0 verification",
+        "meta": {
+          "key": "d197ca84702640d701d560926d24ab2bece08ce78ab3cd117c393c93c2a20d37",
+          "parents": []
+        }
+      },
+      "issue": {
+        "text": "iOS peers had no published-suite reader",
+        "meta": {
+          "key": "2486f0eb40303fa226f7f57667dc732b6a3a339bb03a14b3b4337d72a665f55c",
+          "parents": []
+        }
+      },
+      "intent": {
+        "text": "prove a JS-emitted record verifies on a physical device",
+        "meta": {
+          "key": "a613000942f556890ceceba26a20bc1a6a432357b9a45a469337e932e1f9aeab",
+          "parents": []
+        }
+      },
+      "motivation": {
+        "text": "neutral",
+        "meta": {
+          "key": "5fa41414a2623a052ab4cebde3d0560e27357aff11eed5766875c93c02cb3a68",
+          "parents": []
+        }
+      },
+      "commitment": {
+        "text": "neutral",
+        "meta": {
+          "key": "7e888650c8e1ccea20f158bad4627211b7ec14ec2a00330ee4eec8e5b479f2f6",
+          "parents": []
+        }
+      },
+      "perspective": {
+        "text": "core",
+        "meta": {
+          "key": "96bd3974f816597edb114f82aa47b595efc2723b3c2afc966d25eca888cf9996",
+          "parents": []
+        }
+      },
+      "mood": {
+        "text": "neutral",
+        "meta": {
+          "key": "9f86463ea205c4797f96d28a40c8c8d5ea03c731a3b095645af3a1a6302424b8",
+          "parents": []
+        }
+      }
+    },
+    "metadata": {
+      "key": "cmb-6423a4ac96b7190c037986435491e78836fbba5a097b51a07f8b23addc4c6635",
+      "createdBy": "claude-sym-cto",
+      "createdTimestamp": 1786703495627,
+      "lineage": null,
+      "room": "sym-bot-room",
+      "to": null,
+      "addressScheme": "mmp-cmb-merkle-v2",
+      "signatureSuite": "mmp-sig-v2.0",
+      "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+      "application": null,
+      "assertionId": "asrt-3f39244386ded346b2d59ee7cf7e67d6c186cf8735df9a661ac493cc654b5e3c",
+      "sig": "yUoWOZCKr00c0OPWuPKIskkRwW-O-Nzof3X0Zf9hTGxuhrqfM99npbrovYkff1WpRcXGy7e73aO1wOHZscbcBQ",
+      "sigAlg": "ed25519"
+    }
+  }
+}
