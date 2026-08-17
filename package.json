@@ -1,6 +1,6 @@
 {
   "name": "@sym-bot/sym",
-  "version": "0.11.3",
+  "version": "0.12.0",
   "description": "Infrastructure and protocol for multi-agent collective intelligence",
   "main": "lib/node.js",
   "bin": {
@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --test --test-force-exit tests/*.test.js",
     "test:integration": "node --test --test-timeout=30000 --test-concurrency=1 tests/integration/*.js",
-    "prepublishOnly": "npm test"
+    "gate:stock-nodes": "node scripts/gate-two-stock-nodes.mjs",
+    "prepublishOnly": "npm test && npm run gate:stock-nodes"
   },
   "keywords": [
     "mesh",
