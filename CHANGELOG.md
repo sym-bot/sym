@@ -2,6 +2,30 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.12.0 (2026-08-17)
+
+### Added
+
+- **The runtime is now self-sufficient — everything a node needs to think is in this package.**
+  Semantic category encoding and SVAF evaluation, which previously lived in the separate
+  `@sym-bot/core` package, are part of the open runtime. A node can create, sign, exchange,
+  verify, evaluate, admit and store records with no additional engine installed, which is what
+  makes this package a complete, independently usable implementation of MMP 2.0 rather than the
+  open half of a pair.
+
+- **Every release is gated on two stock nodes.** Before publishing, the packed tarball is
+  installed into an empty directory and two plain nodes are driven through the entire path —
+  create, sign, exchange, verify, evaluate, admit, store with lineage — and then one is restarted
+  and the record must still be there, with the signed record of why it was admitted. The gate runs
+  against the artifact you install, not the source tree, because those are not the same thing.
+
+### Changed
+
+- **Nothing existing behaves differently.** The absorbed code is additive: where both lineages had
+  an implementation, this package keeps its own — measured, not assumed, by the signing and
+  interoperability conformance suites, which decide any disagreement. Existing nodes upgrade with
+  no change to the wire, to record addresses, or to stored data.
+
 ## 0.11.3 (2026-08-13)
 
 ### Added
