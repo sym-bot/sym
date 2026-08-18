@@ -2,6 +2,19 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.12.1 (2026-08-18)
+
+### Fixed
+
+- **A rooted deployment keeps its identity, keys, stores and lock inside its own root.** Setting
+  `SYM_STATE_DIR` already moved a node's memory; it did not move the tree that holds each node's
+  identity, keypair and single-writer lock, which stayed at `~/.sym/nodes` for every deployment
+  on the machine. Two independent deployments on one host — each with its own `SYM_STATE_DIR` —
+  therefore shared one identity tree, and the second to start was refused the lock the first
+  held, while appearing healthy in every other respect. The identity tree, the daemon socket and
+  the logs now follow `SYM_STATE_DIR` too. Nothing moves for a deployment that sets nothing:
+  `~/.sym` remains the default, in the same place, with the same contents.
+
 ## 0.12.0 (2026-08-17)
 
 ### Added
