@@ -2,6 +2,30 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.12.2 (2026-08-24)
+
+### Fixed
+
+- **A node's local state never moved when it admitted a peer's cognition.** Every
+  `updateLocalState` call was reached from init, broadcast, or the node's own `remember` — nothing
+  on admit. The neural gate re-encoded state after storing an admitted remix; the heuristic gate,
+  which is the production default, did not. This package ships no `svaf_v2.pt` and the neural path
+  additionally spawns a Python subprocess, so in practice the state simply never moved: a node that
+  had admitted five hundred peer blocks carried exactly the same local state as one that had
+  admitted none, even though the context it encodes is built from the store those blocks land in.
+  Both gate paths now take the same step, through one shared method rather than a copied line —
+  the defect was never a wrong line, it was the difference between two paths that are supposed to
+  be interchangeable.
+
+  **What this does not change.** It is still a stateless re-encode: prior state is discarded and
+  recomputed from the store, so nothing here is recurrent and nothing learns. SVAF scores
+  per-category CMB vectors against anchor memory and does not read the hidden state, so no
+  admission decision changes as a result of this fix. What it buys is that local state is real,
+  so something can be built on it.
+
+  The regression test is structural on purpose: each path worked as written, and the defect was
+  the difference between them, so a behavioural test on either one would have passed throughout.
+
 ## 0.12.1 (2026-08-18)
 
 ### Fixed
