@@ -63,15 +63,15 @@ describe('the grant — mint and verify', () => {
   it('a DIFFERENT key never verifies it — the signature is the whole gate', () => {
     const owner = keypair(), impostor = keypair();
     const g = signRoomGrant({ room: ROOM, grantee: 'node-b', grantedBy: 'node-a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, impostor.pub, { room: ROOM }).ok, false);
+    assert.strictEqual(verifyRoomGrant(g, impostor.pub, { room: ROOM, grantee: 'node-b' }).ok, false);
   });
 
   it('a grant for one room cannot be replayed into another', () => {
     const owner = keypair();
     const g = signRoomGrant({ room: ROOM, grantee: 'node-b', grantedBy: 'node-a' }, owner.priv);
     const moved = { ...g, room: 'other-room--team-0123456789abcdef01234567' };
-    assert.strictEqual(verifyRoomGrant(moved, owner.pub, { room: moved.room }).ok, false, 'signature binds the room');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: 'other-room' }).reason, 'room-mismatch');
+    assert.strictEqual(verifyRoomGrant(moved, owner.pub, { room: moved.room, grantee: 'node-b' }).ok, false, 'signature binds the room');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: 'other-room', grantee: 'node-b' }).reason, 'room-mismatch');
   });
 
   it('a grant for one grantee cannot be presented by another', () => {
@@ -83,7 +83,7 @@ describe('the grant — mint and verify', () => {
   it('the grantee key is bound: swapping it breaks the signature', () => {
     const owner = keypair(), a = keypair(), b = keypair();
     const g = signRoomGrant({ room: ROOM, grantee: 'node-b', granteeKey: a.pub, grantedBy: 'node-a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant({ ...g, granteeKey: b.pub }, owner.pub, { room: ROOM }).ok, false);
+    assert.strictEqual(verifyRoomGrant({ ...g, granteeKey: b.pub }, owner.pub, { room: ROOM, grantee: 'node-b' }).ok, false);
   });
 
   it('an unownable room cannot be granted at all, at mint or at verify', () => {
@@ -134,7 +134,7 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
       Buffer.from(`room-join|${g.room}|${g.grantee}||${g.grantedBy}|${g.grantedAt}|${g.expiresAt}`, 'utf8'),
       crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(owner.priv, 'base64url')]), format: 'der', type: 'pkcs8' })).toString('base64url');
     g.sigAlg = 'ed25519';
-    const v = verifyRoomGrant(g, owner.pub, { room: ROOM, now: now + 1000 });
+    const v = verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', now: now + 1000 });
     assert.strictEqual(v.ok, false);
     assert.strictEqual(v.reason, 'lifetime-exceeds-cap', 'refused outright — the window is never the sender\'s choice');
   });
@@ -143,25 +143,25 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
     const owner = keypair();
     const now = 1_700_000_000_000;
     const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a', grantedAt: now, expiresAt: now + 60_000 }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, now: now + 30_000 }).ok, true, 'live');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, now: now + 60_000 + EXPIRY_SKEW_MS - 1 }).ok, true, 'inside skew');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, now: now + 60_000 + EXPIRY_SKEW_MS + 1 }).reason, 'expired');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', now: now + 30_000 }).ok, true, 'live');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', now: now + 60_000 + EXPIRY_SKEW_MS - 1 }).ok, true, 'inside skew');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', now: now + 60_000 + EXPIRY_SKEW_MS + 1 }).reason, 'expired');
   });
 
   it('a grant from the future is refused beyond skew', () => {
     const owner = keypair();
     const now = 1_700_000_000_000;
     const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a', grantedAt: now, expiresAt: now + 3600_000 }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, now: now - EXPIRY_SKEW_MS - 1 }).reason, 'not-yet-valid');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', now: now - EXPIRY_SKEW_MS - 1 }).reason, 'not-yet-valid');
   });
 
   it('unsigned, wrong-typed and key-less inputs all fail closed', () => {
     const owner = keypair();
     const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant({ ...g, sig: undefined }, owner.pub, {}).reason, 'unsigned');
-    assert.strictEqual(verifyRoomGrant({ ...g, type: 'role-grant' }, owner.pub, {}).reason, 'not-a-room-join-grant');
-    assert.strictEqual(verifyRoomGrant(g, null, {}).reason, 'no-owner-key-pinned');
-    assert.strictEqual(verifyRoomGrant(null, owner.pub, {}).ok, false);
+    assert.strictEqual(verifyRoomGrant({ ...g, sig: undefined }, owner.pub, { room: ROOM, grantee: 'b' }).reason, 'unsigned');
+    assert.strictEqual(verifyRoomGrant({ ...g, type: 'role-grant' }, owner.pub, { room: ROOM, grantee: 'b' }).reason, 'not-a-room-join-grant');
+    assert.strictEqual(verifyRoomGrant(g, null, { room: ROOM, grantee: 'b' }).reason, 'no-owner-key-pinned');
+    assert.strictEqual(verifyRoomGrant(null, owner.pub, { room: ROOM, grantee: 'b' }).ok, false);
   });
 });
 
@@ -227,15 +227,20 @@ describe('ownership registry — out-of-band only, precedence, and open-by-defau
     assert.strictEqual(r.pin('sym', 'n', o.pub, 'config').reason, 'room-not-ownable');
   });
 
-  it('ownership survives a restart, and the reload does not fabricate conflicts', () => {
+  it('ownership survives a restart — but comes back as a CACHE, not as operator authority', () => {
     const dir = tmp();
     const o = keypair();
     const first = new RoomOwnershipRegistry({ dir });
     first.pin(ROOM, 'node-a', o.pub, 'config');
+
     const second = new RoomOwnershipRegistry({ dir });
-    assert.strictEqual(second.ownerOf(ROOM).nodeId, 'node-a');
-    assert.strictEqual(second.ownerOf(ROOM).source, 'config');
+    assert.strictEqual(second.ownerOf(ROOM).nodeId, 'node-a', 'the room stays gated across a restart');
+    assert.strictEqual(second.ownerOf(ROOM).source, 'own',
+      'a replayed record never restores itself at the operator rank — the file is unsigned');
     assert.strictEqual(second.conflicts().length, 0, 'replaying our own record is not a conflict');
+
+    const third = new RoomOwnershipRegistry({ dir, owners: [{ room: ROOM, nodeId: 'node-a', publicKey: o.pub }] });
+    assert.strictEqual(third.ownerOf(ROOM).source, 'config', 'boot-time config re-establishes the authority');
   });
 });
 
@@ -247,7 +252,7 @@ describe('end to end: the incident this exists to make impossible', () => {
 
     // the stranger presents nothing — there is no path to admission
     assert.strictEqual(reg.isGated(ROOM), true);
-    assert.strictEqual(verifyRoomGrant(null, reg.ownerOf(ROOM).publicKey, { room: ROOM }).ok, false);
+    assert.strictEqual(verifyRoomGrant(null, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: 'stranger-node' }).ok, false);
 
     // the owner deliberately admits a FOREIGN crew — sharing as an act
     const grant = signRoomGrant(
@@ -255,5 +260,56 @@ describe('end to end: the incident this exists to make impossible', () => {
     assert.strictEqual(
       verifyRoomGrant(grant, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: 'volunteer-node' }).ok, true,
       'an open room stays possible — it is now a decision someone made');
+  });
+});
+
+describe('review folds — the guard cannot be defeated by how it is CALLED', () => {
+  it('F2: omitting the expectation is a refusal, never a pass — no bearer tokens', () => {
+    const owner = keypair();
+    const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a' }, owner.priv);
+    // the old default returned ok here: any copy of any unexpired grant, presented by anyone
+    assert.strictEqual(verifyRoomGrant(g, owner.pub).reason, 'no-expectation');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, {}).reason, 'no-expectation');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM }).reason, 'no-expectation', 'room alone is not enough');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { grantee: 'b' }).reason, 'no-expectation', 'grantee alone is not enough');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b' }).ok, true);
+  });
+});
+
+describe('review folds — the state file is a cache, not an authority', () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'room-own-fold-'));
+
+  it('F4: a hand-written record claiming source:config loads at most as own, and config overrides it', () => {
+    const dir = tmp();
+    const evil = keypair(), real = keypair();
+    fs.writeFileSync(path.join(dir, 'room-owners.jsonl'),
+      JSON.stringify({ room: ROOM, nodeId: 'attacker', publicKey: evil.pub, source: 'config' }) + '\n');
+    const r = new RoomOwnershipRegistry({ dir });
+    assert.strictEqual(r.ownerOf(ROOM).source, 'own', 'the disk cannot name the operator rank');
+    // and the operator's boot-time config wins outright
+    const r2 = new RoomOwnershipRegistry({ dir, owners: [{ room: ROOM, nodeId: 'real', publicKey: real.pub }] });
+    assert.strictEqual(r2.ownerOf(ROOM).nodeId, 'real');
+    assert.strictEqual(r2.ownerOf(ROOM).source, 'config');
+  });
+
+  it('F5: reload is replay-EXACT — the last accepted write wins, so two processes agree', () => {
+    const dir = tmp();
+    const a = keypair(), b = keypair();
+    const first = new RoomOwnershipRegistry({ dir });
+    first.pin(ROOM, 'node-a', a.pub, 'config');
+    first.repin(ROOM, 'node-b', b.pub, 'config');          // a deliberate rotation
+    const reloaded = new RoomOwnershipRegistry({ dir });
+    assert.strictEqual(reloaded.ownerOf(ROOM).nodeId, 'node-b', 'not the first line');
+    assert.strictEqual(reloaded.conflicts().length, 0, 'a replay of our own log is not a conflict');
+  });
+
+  it('F6: an operator can rotate a compromised owner key without hand-editing state', () => {
+    const r = new RoomOwnershipRegistry();
+    const old = keypair(), fresh = keypair();
+    r.pin(ROOM, 'node-a', old.pub, 'config');
+    assert.strictEqual(r.pin(ROOM, 'node-a', fresh.pub, 'config').reason, 'conflict', 'pin still refuses');
+    assert.strictEqual(r.repin(ROOM, 'node-a', fresh.pub, 'config').pinned, true);
+    assert.strictEqual(r.ownerOf(ROOM).publicKey, fresh.pub);
+    assert.ok(r.conflicts().some((c) => c.replaced), 'the rotation is visible, not silent');
   });
 });
