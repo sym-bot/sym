@@ -39,9 +39,17 @@ describe('mesh rooms', () => {
       }
     });
     it('rejects non-kebab / unsafe names', () => {
-      for (const g of ['Backend_Team', 'has space', 'UPPER', '-leading', 'trailing-', 'a--b', '', null, undefined]) {
+      for (const g of ['Backend_Team', 'has space', 'UPPER', '-leading', 'trailing-', 'a---b', 'a--', '--b', '', null, undefined]) {
         assert.strictEqual(isValidRoom(g), false, `${g} should be invalid`);
       }
     });
   });
+});
+
+
+it('tenant-suffixed rooms are valid — the grammar xMesh scopes recipe rooms with (ruling 2026-08-26)', () => {
+  for (const g of ['a--b', 'x-review--team-02779b950c3d8d7378fd11d6', 'eng-northbank--team-0123456789abcdef01234567']) {
+    assert.equal(isValidRoom(g), true, g);
+    assert.equal(serviceTypeToRoom(roomServiceType(g)), g, `round-trip ${g}`);
+  }
 });
