@@ -14,7 +14,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const {
-  signRoomGrant, verifyRoomGrant, isOwnableRoom,
+  signRoomGrant, verifyRoomGrant, isOwnableRoom, roomGrantPayload, ROOM_GRANT_DOMAIN,
   MAX_GRANT_LIFETIME_MS, EXPIRY_SKEW_MS,
 } = require('../lib/core/room-grant');
 const { RoomOwnershipRegistry } = require('../lib/room-ownership');
@@ -90,6 +90,29 @@ describe('the grant — mint and verify', () => {
     const owner = keypair();
     assert.throws(() => signRoomGrant({ room: 'sym', grantee: 'n', grantedBy: 'o' }, owner.priv), /cannot be owned/);
     assert.throws(() => signRoomGrant({ room: 'default', grantee: 'n', grantedBy: 'o' }, owner.priv), /cannot be owned/);
+  });
+});
+
+describe('the payload is injective — a delimiter cannot shift a field boundary', () => {
+  it('the pipe-collision that a delimiter-joined encoding would have signed away', () => {
+    // Under `${grantee}|${granteeKey}` these two produce IDENTICAL bytes, so ONE owner
+    // signature would authorise a grantee the owner never named. Length-prefixing is
+    // what makes them different documents.
+    const a = roomGrantPayload({ room: ROOM, grantee: 'x|y', granteeKey: 'z', grantedBy: 'o', grantedAt: 1, expiresAt: 2 });
+    const b = roomGrantPayload({ room: ROOM, grantee: 'x', granteeKey: 'y|z', grantedBy: 'o', grantedAt: 1, expiresAt: 2 });
+    assert.ok(!a.equals(b), 'distinct grants must never share a preimage');
+  });
+
+  it('a grant signed for one grantee does not verify when re-split across the key field', () => {
+    const owner = keypair();
+    const g = signRoomGrant({ room: ROOM, grantee: 'x|y', granteeKey: 'z', grantedBy: 'o' }, owner.priv);
+    const resplit = { ...g, grantee: 'x', granteeKey: 'y|z' };
+    assert.strictEqual(verifyRoomGrant(resplit, owner.pub, { room: ROOM, grantee: 'x' }).ok, false);
+  });
+
+  it('the domain separator keeps a room grant from being read as any other signed object', () => {
+    const p = roomGrantPayload({ room: ROOM, grantee: 'b', granteeKey: '', grantedBy: 'o', grantedAt: 1, expiresAt: 2 });
+    assert.ok(p.subarray(0, ROOM_GRANT_DOMAIN.length).toString('utf8') === ROOM_GRANT_DOMAIN);
   });
 });
 
