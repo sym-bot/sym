@@ -2,6 +2,22 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.12.3 (2026-08-26)
+
+### Changed
+
+- **Tenant-suffixed room names are legal.** The room grammar accepts a double hyphen as a
+  segment separator (`x-review--team-02779b…`) — the shape xMesh scopes recipe rooms with.
+  Before this, `sym join`, the daemon, and `sym_invite_create` all refused the very rooms
+  the product creates, and only a direct service-type bypass made them work. Triple hyphens,
+  leading/trailing hyphens and bare suffixes stay invalid.
+- **The mapping's limits are stated where the next reader looks.** `roomServiceType` feeds
+  the room name into a DNS-SD Service Name unmodified; suffixed names are knowingly outside
+  RFC 6335's Service Name rules (consecutive hyphens, 15-char label), isolation rests on
+  responders not enforcing them, and one shipped consumer that truncates at 15 chars is
+  named in the comment. Names were never the boundary; room join authorization (the adopted
+  design in docs/DESIGN-room-join-authorization.md) is.
+
 ## 0.12.2 (2026-08-24)
 
 ### Fixed
