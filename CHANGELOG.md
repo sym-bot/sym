@@ -19,14 +19,25 @@ disconnected.
   is the canonical name for the global mesh. The round trip was already the
   ownability rule (`isOwnableRoom`); confining it there meant an *unowned* room
   could still be an alias, which is where the silent collapse happened.
-- **Room mismatch now closes the connection.** MMP §5.8 has always required a
-  receiver to refuse a peer whose declared room differs from its own, and the
-  handshake has always carried `room` — but nothing compared the two, so a peer
-  announcing any room joined the peer set. It is now checked on **both** the
-  dialling and accepting paths, because the loopback tie-break means a stranger
-  dials us in half of all nodeId orderings and a one-sided check is dead code
-  for those pairs. Same-room peers on 0.12.3 are unaffected: that version
-  already sends `room`, so it is compared and matches.
+- **A peer that CLAIMS a different room is now disconnected.** MMP §5.8 has
+  always required a receiver to refuse a peer whose declared room differs from
+  its own, but nothing compared the two, so a peer announcing any room joined
+  the peer set. It is now checked on **both** the dialling and accepting paths,
+  because the loopback tie-break means a stranger dials us in half of all nodeId
+  orderings and a one-sided check is dead code for those pairs.
+- **A peer that claims NO room is admitted, and the admission is logged.**
+  Absent is not `default`. A handshake with no `room` means the peer does not
+  speak room comparison — a version difference — not a claim to be in the public
+  square, and §5.8 closes on *mismatch*, which silence is not. This matters
+  concretely: sym-swift's handshake carries no room at all, so every shipped
+  MeloTune and MeloMove device sends one without it, and treating absence as a
+  claim would have partitioned the entire iOS fleet out of every named room —
+  silently, on both sides. The `room` field arrived in 0.11.0 as a rename of
+  `group` (which nothing reads today), so pre-0.11.0 nodes are in the same set.
+  An empty string counts as absent. **Known limitation:** a relay token
+  authenticates to the relay, not to a room, so an absent claim arriving over
+  the relay is unfiltered — as it already is in 0.12.3. The log makes that
+  population countable so the rule can tighten once Swift nodes send a room.
 
 ### Added
 
