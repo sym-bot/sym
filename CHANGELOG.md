@@ -2,6 +2,32 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.13.2 (2026-08-27)
+
+### Fixed — the absent-claim log asserted a cause it cannot observe
+
+The admission for a peer that claims no room logged `peer predates room
+comparison`. That was true while the absent set was pre-0.11.1 nodes and the
+iOS fleet. 0.13.1 added a second population to the same line: an `emit()` caller
+that names no room predates nothing — it is current code exercising a documented
+default, and that is a caller-side choice which may be legitimate indefinitely.
+
+The two need opposite responses. One is a fleet that *cannot* speak rooms and has
+to be waited out or upgraded; the other is a caller that *chose* not to claim and
+can be left alone. This line exists to be **counted**, because the count is what
+says when the receiving rule can be tightened — and a count that mixes them can
+never reach zero, so it would either hold the tightening forever or be overridden
+on a hunch.
+
+Absence is byte-identical on the wire, so the cause is not observable at this
+point at all. The log now reports what was seen — `no room claimed` — and leaves
+the inference to whoever reads the count. A test pins the observation and
+forbids the inference, so the reason cannot creep back in.
+
+Behaviour is unchanged: absence is still admitted, a mismatched claim is still
+refused. Found by dev-team-1 verifying 0.13.1 from a tarball they fetched
+themselves.
+
 ## 0.13.1 (2026-08-27)
 
 ### Fixed — emit() made a claim when it meant to stay silent
