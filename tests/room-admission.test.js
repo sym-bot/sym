@@ -34,7 +34,8 @@ const ROOM = 'x-review--team-02779b950c3d8d7378fd11d6';
 function receiver(room, owner) {
   const owners = new RoomOwnershipRegistry();
   if (owner) owners.pin(room, owner.nodeId, owner.publicKey, 'config');
-  return { _room: room, _roomOwners: owners };
+  const logged = [];
+  return { _room: room, _roomOwners: owners, _log: (m) => logged.push(m), logged };
 }
 const admit = (rcv, peerId, msg) => SymNode.prototype._roomAdmission.call(rcv, peerId, msg);
 
@@ -46,9 +47,28 @@ describe('the room comparison that did not exist', () => {
     assert.match(d.reason, /room-mismatch/);
   });
 
-  it('a handshake with no room at all is treated as `default` and refused elsewhere', () => {
-    assert.strictEqual(admit(receiver('backend-team'), 'p', { nodeId: 'p' }).admit, false);
-    assert.strictEqual(admit(receiver('default'), 'p', { nodeId: 'p' }).admit, true, 'and admitted in default');
+  // This test previously asserted the DEFECT: that an absent room is `default`
+  // and therefore refused by a node in a named room. It read as a deliberate
+  // decision and was neither -- `|| 'default'` collapsed "made no claim" into
+  // "claims the public square". A test can defend a bug as convincingly as it
+  // defends a behaviour, and this one did.
+  it('an ABSENT room claim is admitted — silence is not a claim, and it is not a mismatch', () => {
+    const named = receiver('backend-team');
+    assert.strictEqual(admit(named, 'p', { nodeId: 'p' }).admit, true,
+      'every shipped sym-swift device sends no room; refusing them partitions the iOS fleet');
+    assert.strictEqual(admit(receiver('default'), 'p', { nodeId: 'p' }).admit, true);
+    assert.match(named.logged.join('\n'), /ABSENT room claim/,
+      'the admission must be logged so the population is countable before tightening');
+  });
+
+  it('an EMPTY room string is treated as absent, not as a room named ""', () => {
+    assert.strictEqual(admit(receiver('backend-team'), 'p', { nodeId: 'p', room: '' }).admit, true);
+  });
+
+  it('a peer that DOES claim a room is still held to it — the isolation still works', () => {
+    const d = admit(receiver('backend-team'), 'p', { nodeId: 'p', room: 'default' });
+    assert.strictEqual(d.admit, false, 'an explicit `default` claim is a claim, and it mismatches');
+    assert.match(d.reason, /room-mismatch/);
   });
 });
 
