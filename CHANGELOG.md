@@ -2,6 +2,61 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.13.0 (2026-08-27)
+
+Room naming and room isolation. Minor rather than patch: names that were
+accepted before are now refused, and peers that were admitted before are now
+disconnected.
+
+### Changed
+
+- **Room names must be canonical** (founder ruling 2026-08-27): one name per
+  room, one room per name. `isValidRoom` now requires the round trip through
+  the service type to be identity, so **`sym` is refused**. It satisfies the
+  kebab grammar, maps to `_sym._tcp`, and comes back as `default` — a second
+  spelling of the global mesh, which meant a node asking for a room named `sym`
+  sat in the public square while reporting it was somewhere specific. `default`
+  is the canonical name for the global mesh. The round trip was already the
+  ownability rule (`isOwnableRoom`); confining it there meant an *unowned* room
+  could still be an alias, which is where the silent collapse happened.
+- **Room mismatch now closes the connection.** MMP §5.8 has always required a
+  receiver to refuse a peer whose declared room differs from its own, and the
+  handshake has always carried `room` — but nothing compared the two, so a peer
+  announcing any room joined the peer set. It is now checked on **both** the
+  dialling and accepting paths, because the loopback tie-break means a stranger
+  dials us in half of all nodeId orderings and a one-sided check is dead code
+  for those pairs. Same-room peers on 0.12.3 are unaffected: that version
+  already sends `room`, so it is compared and matches.
+
+### Added
+
+- `canonicalRoom(name)` — the sanctioned way to accept a room name from outside
+  (config, CLI flag, invite URL, UI field). Trims surrounding whitespace, which
+  is not part of a name, and otherwise returns the name or `null`. It returns
+  `null` rather than a best effort deliberately: **refuse, never repair.** Every
+  repair — lowercasing, substituting illegal characters, collapsing runs,
+  truncating to fit a length cap — is many-to-one, so it sends nodes that asked
+  for different rooms into one room and tells none of them.
+- `rooms` is exported from the main entry, so consumers can
+  `require('@sym-bot/sym').rooms` instead of deep-importing `lib/`. Six
+  hand-rolled copies of this mapping existed across the tree and every one
+  disagreed with at least one other; a shared mapping that is hard to reach is
+  a mapping that gets copied.
+- Room ownership and room-join grants (`lib/room-ownership.js`,
+  `lib/core/room-grant.js`). **Dormant unless a room has an owner** — with no
+  owner, admission is unchanged. Unlike the mismatch check above, this half
+  genuinely does nothing until ownership is used.
+
+### Fixed
+
+- The grammar's stated rationale was wrong. A comment claimed a 15-character
+  truncating consumer collapses two tenants' `x-review--team-<id>` rooms onto
+  one service type. Measured against the actual source, it does not — that
+  consumer emits a 9-character prefix plus a digest, so the two stay distinct.
+  The real harm is different and worse for interop: such a consumer emits a
+  type **no other implementation emits**, so it is invisible rather than
+  misrouted.
+
 ## 0.12.3 (2026-08-26)
 
 ### Changed
