@@ -57,8 +57,14 @@ describe('the room comparison that did not exist', () => {
     assert.strictEqual(admit(named, 'p', { nodeId: 'p' }).admit, true,
       'every shipped sym-swift device sends no room; refusing them partitions the iOS fleet');
     assert.strictEqual(admit(receiver('default'), 'p', { nodeId: 'p' }).admit, true);
-    assert.match(named.logged.join('\n'), /ABSENT room claim/,
+    // The log must state the OBSERVATION, not a cause it cannot see. Two
+    // populations land here — nodes that CANNOT claim a room, and callers that
+    // chose not to — and they are byte-identical on the wire. Asserting a
+    // reason would make the count that gates the tightening un-zeroable.
+    assert.match(named.logged.join('\n'), /no room claimed/,
       'the admission must be logged so the population is countable before tightening');
+    assert.doesNotMatch(named.logged.join('\n'), /predates|older|legacy/i,
+      'the log must not assert why the claim was absent — it cannot observe that');
   });
 
   it('an EMPTY room string is treated as absent, not as a room named ""', () => {
