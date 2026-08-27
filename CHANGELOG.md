@@ -34,10 +34,22 @@ disconnected.
   claim would have partitioned the entire iOS fleet out of every named room —
   silently, on both sides. The `room` field arrived in 0.11.0 as a rename of
   `group` (which nothing reads today), so pre-0.11.0 nodes are in the same set.
-  An empty string counts as absent. **Known limitation:** a relay token
-  authenticates to the relay, not to a room, so an absent claim arriving over
-  the relay is unfiltered — as it already is in 0.12.3. The log makes that
-  population countable so the rule can tighten once Swift nodes send a room.
+  An empty string counts as absent. The log makes the population countable so
+  the rule can tighten once Swift nodes send a room in the handshake.
+
+  **On the relay path, which is narrower than it first appears.** A relay token
+  is the security boundary and decides which *channel* a connection may reach,
+  from server-held state no client can influence. The `room` is a
+  client-declared *partition inside* that channel — addressing, not permission —
+  and the relay (≥ 0.1.3) partitions delivery, roster and departures by it. It
+  is safe to let a client name its room there because naming one can only ever
+  narrow what that connection receives, never widen it. An undeclared room is
+  the empty string, so pre-room clients share one unnamed partition rather than
+  leaking into named ones. sym-swift already sends `room` in `relay-auth` even
+  though its MMP handshake carries none, so iOS devices are partitioned
+  correctly over the relay today. What remains true, and is a design position
+  rather than a defect: within a channel you already hold a token for, the room
+  is addressing, so it is not a security boundary on that path.
 
 ### Added
 
