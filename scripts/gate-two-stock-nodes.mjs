@@ -35,8 +35,25 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), "sym-stock-gate-"));
 const install = path.join(work, "install");
 fs.mkdirSync(install);
 
-const run = (cmd, args, opts = {}) =>
-  execFileSync(cmd, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...opts });
+const run = (cmd, args, opts = {}) => {
+  // npm config propagates to CHILD npm processes through npm_config_* environment
+  // variables, so rehearsing a release with `npm publish --dry-run` sets
+  // npm_config_dry_run=true for everything this gate spawns: `npm pack` then writes no
+  // tarball and the gate dies with ENOENT on a file it just asked for. It reads exactly like
+  // a real regression in the artifact. Scrubbed here at the single spawn point rather than at
+  // each call site, because the next child added would inherit the trap again — the safest
+  // rehearsal of a publish must not be the one thing guaranteed to fail. (Found by
+  // dev-team-2, 2026-08-27, by prediction: setting the variable reproduces it, clearing it
+  // passes.)
+  const env = { ...process.env, ...(opts.env ?? {}) };
+  delete env.npm_config_dry_run;
+  return execFileSync(cmd, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    ...opts,
+    env,
+  });
+};
 
 const step = (msg) => console.log(`\n▸ ${msg}`);
 let packed;
