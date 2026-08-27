@@ -33,7 +33,11 @@ jobs:
       # the Node 22 job and lose the one signal that still works.
       fail-fast: false
       matrix:
-        node-version: [18, 22]
+        # 20 is the floor because the suite uses --test-force-exit, which does not exist
+        # before 20.14 — that mismatch, against an engines field still claiming >=18, is
+        # what kept this workflow red for three weeks while every run said `bad option`.
+        # Node 18 reached end of life in April 2025; claiming it was the actual defect.
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
