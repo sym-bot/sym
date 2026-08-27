@@ -2,6 +2,43 @@
 
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
+## 0.13.1 (2026-08-27)
+
+### Fixed — emit() made a claim when it meant to stay silent
+
+`connect()` defaulted `room` to `'default'` and always sent the field, so a
+caller who named no room made a **positive claim** of the public square. 0.13.0
+requires a receiver to close on a mismatched claim, so the documented default of
+a first-class API was precisely the value refused by every named room — and the
+caller saw only `closed before handshake`, with no mention of rooms anywhere in
+the error it received. The node logged the reason; the client did not, so it
+presented as a connectivity fault rather than a naming one, and a script that
+worked yesterday against a named-room node simply stopped connecting.
+
+`room` now has no default and is omitted from the handshake when the caller
+names none — silence, matching the rule 0.13.0 added on the receiving side.
+`connect({ room: 'default' })` still claims `default` deliberately, and is still
+refused by a node in a named room, which is correct: that is a claim.
+
+Reproduced before fixing and confirmed against the published 0.13.0 tarball, not
+against the source: a node in room `acme`, then `connect({ server })` fails
+while the node logs `room-mismatch (claims 'default', this node is in 'acme')`;
+passing `room: 'acme'` connects. Found by dev-team-1 reviewing the release.
+
+### Fixed — two comments in 0.13.0 that stated the wrong thing
+
+- The handshake `room` field arrived in **0.11.1**, not 0.11.0, and what 0.11.1
+  renamed from `group` was `emit.js`'s field on the CMB *record* — a different
+  object from the handshake frame, which carried no room at all through 0.11.0.
+  Both halves of the published note were wrong. Corrected rather than dropped,
+  since the boundary decides which nodes are in the absent set.
+- The note claiming an absent room over the relay is "unfiltered" is wrong and
+  is replaced. `relay-auth` carries a client-declared room and the relay scopes
+  delivery, roster and departures by it, with an undeclared room becoming its
+  own unnamed partition rather than the global mesh. sym-swift already sends it
+  there. The residual is a design position, now stated as one: inside a channel
+  a peer already holds a token for, the room is addressing, not a boundary.
+
 ## 0.13.0 (2026-08-27)
 
 Room naming and room isolation. Minor rather than patch: names that were
