@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.3 (2026-08-31)
+
+### Fixed — legacy inbox entries restore fetchable instead of lost or unaddressable
+
+`_loadInbox()` trusted persisted messages verbatim. seq and id were introduced together
+(v0.10.0) and the durable feed crossed that boundary, so real disks hold entries with
+seq-but-no-id — which surfaced in a receiver as "[undefined]" and could never be fetched
+(reported by codex-mac, 2026-08-31, as truncated directed replies with no retrievable id) —
+and entries with neither field, which the `seq > cursor` drain silently filtered out forever:
+loss wearing a working inbox.
+
+Restore now normalizes: known seqs advance the counter first, missing seqs are minted above
+it and above the cursor so a legacy entry surfaces once — redelivery is recoverable, silent
+loss is not — and every entry gets the id its seq implies. Three regression tests pin both
+legacy shapes and mint-vs-push uniqueness.
+
+
 > **Note:** Versions 0.3.26 – 0.3.55 were released as git tags without changelog entries. Changelog resumes at 0.3.56 below.
 
 ## 0.13.2 (2026-08-27)
