@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.4 (2026-08-31)
+
+### Fixed — a stale directive can no longer dress as fresh: the replay-dedup TTL now exceeds the slowest sender's horizon
+
+The receive-path dedup suppressed an already-surfaced CMB for one hour — sized for
+Bonjour reconnect replay storms, minutes apart. The daemon's delivery spool replays
+directed envelopes on a seat's reconnect at a ~30-HOUR horizon, so three
+already-drained messages re-surfaced as live pushes with fresh inbox ids and
+seconds-old ages — one of them an imperative to redo work its own successor
+recorded as committed (dev-team-3, 2026-08-31). Record-after-surface semantics make
+a long window safe (only genuinely delivered keys are suppressed; deliberate
+identical re-sends already salt themselves), so the TTL is now seven days.
+Regression test replays a surfaced directive 30 hours later and requires silence.
+
+
 ## 0.13.3 (2026-08-31)
 
 ### Fixed — legacy inbox entries restore fetchable instead of lost or unaddressable

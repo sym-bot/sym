@@ -240,3 +240,29 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
     });
   });
 });
+
+// ── A surfaced directed CMB stays suppressed even when the sender replays it DAYS later ──
+// The daemon's spool re-flushed ~30-hour-old directed envelopes on a seat reconnect; with the
+// 1-hour TTL they re-surfaced as live pushes with fresh inbox ids — a stale directive reading
+// as a current instruction (dev-team-3, 2026-08-31). The TTL must exceed the slowest sender's
+// replay horizon; record-after-surface keeps the long window safe for not-yet-delivered CMBs.
+describe('replay horizon — a stale directive must not dress as fresh', () => {
+  it('a directed CMB surfaced once is still suppressed when replayed 30 hours later', async () => {
+    await withNode('replay-30h', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      let surfaced = 0;
+      node.on('cmb-accepted', () => { surfaced += 1; });
+      const frame = directedFrame(node, 'directive: commit the README change from message 457');
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      await settle();
+      assert.equal(surfaced, 1, 'first delivery surfaces');
+      // Backdate the seen record by 30 hours — the daemon-spool replay horizon observed live.
+      const fh = node._frameHandler;
+      for (const [k, ts] of fh._seenCmbKeys) fh._seenCmbKeys.set(k, ts - 30 * 60 * 60 * 1000);
+      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      await settle();
+      assert.equal(surfaced, 1,
+        'a 30-hour-later replay of an already-surfaced directive must not re-surface as fresh');
+    });
+  });
+});
