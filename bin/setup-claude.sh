@@ -29,9 +29,9 @@ if [ -f "$RELAY_ENV" ]; then
 else
   echo "  WebSocket Relay (connects your mesh across the internet)"
   echo ""
-  read -p "  Relay URL (e.g. wss://sym-relay.onrender.com, or empty to skip): " RELAY_URL
+  read -p "  Relay URL (wss://… of a relay your team runs, or empty to skip): " RELAY_URL
   if [ -n "$RELAY_URL" ]; then
-    read -p "  Relay token (or empty for open access): " RELAY_TOKEN
+    read -p "  Relay channel token (issued by whoever runs the relay): " RELAY_TOKEN
     echo "SYM_RELAY_URL=$RELAY_URL" > "$RELAY_ENV"
     if [ -n "$RELAY_TOKEN" ]; then
       echo "SYM_RELAY_TOKEN=$RELAY_TOKEN" >> "$RELAY_ENV"

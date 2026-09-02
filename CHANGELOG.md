@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed — `setup-claude.sh` no longer names a hosted relay or offers "open access"
+
+The interactive setup prompted with one hosted relay as the example URL and described an
+empty token as "open access". The relay refuses to start in open mode and admits only the
+channel tokens its operator configured, so both prompts pointed at a door that does not
+open. The prompts now ask for the URL of a relay the team runs and for the channel token
+issued by whoever runs it. No behaviour changes.
+
+
 ## 0.13.4 (2026-08-31)
 
 ### Fixed — a stale directive can no longer dress as fresh: the replay-dedup TTL now exceeds the slowest sender's horizon
