@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed — a relay's auth refusal is said once, with the fix, instead of retried forever in silence
+
+A node whose token is not in the relay's channel table was refused with close 4003, logged
+"Relay error: Invalid token", and reconnected on the normal backoff — one rejection every
+~23 s in the relay's log for as long as the process lived, and nothing an operator could act
+on in the host's. The refusal is deterministic (the token comes from the node's environment,
+the table from the operator's), so retrying it fast is noise, not persistence. Now the relay
+layer logs ONE `FATAL: relay <url> refused <name> (4003: …)` line naming `SYM_RELAY_TOKEN` as
+the fix, emits `relay-auth-refused` on the node once per episode, and keeps retrying at a
+slow cadence (10 min, `authRefusedRetryMs`) — not a hard stop like 4004, because a retry
+harms no other node and the one production open-mode incident began with a channel table
+being edited live. A successful auth ends the episode. 4001 (auth timeout) is unchanged.
+
 ### Changed — `setup-claude.sh` no longer names a hosted relay or offers "open access"
 
 The interactive setup prompted with one hosted relay as the example URL and described an
