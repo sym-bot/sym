@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added — the relay's state is visible to whoever drives the node
+
+`sym status` printed `relay: disconnected wss://…` for every case that is not "connected":
+a relay that is down, a token the relay refuses, an identity another process already holds.
+The session behind the plugin saw even less — the plugin's `sym_status` reduced the same
+state to one word. A node could knock on a relay every ~23 s for hours, refused each time,
+and nothing on the node's side could say so.
+
+Now `node.status()` carries `relayState` — `{url, phase, since, attempts, nextRetryAt,
+lastClose, lastError, refused, peers}` with phase one of `off | idle | connecting |
+authenticating | connected | reconnecting | refused | collision` — and `relayStatus`, one
+line that puts the fix in the same sentence as the fault (a 4003 names the code, the relay's
+reason, and that `sym_invite_create` / `sym_join_room` / `SYM_RELAY_TOKEN` are the ways out; a
+4004 says it will not reconnect and why; an unreachable relay gives the last close, the next
+retry, and that LAN peers are unaffected). `sym status` prints that line, red when refused.
+`node.awaitRelayOutcome(timeoutMs = 10000)` resolves the first time the relay answers —
+admitted, refused, or stopped — so a join over a relay can report the relay's actual answer
+instead of "discovering peers". The token is never part of any of it.
+
 ## 0.13.5 (2026-09-03)
 
 ### Fixed — a relay's auth refusal is said once, with the fix, instead of retried forever in silence

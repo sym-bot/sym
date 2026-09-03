@@ -962,7 +962,9 @@ function formatStatus(msg) {
   const s = msg.status || {};
   console.log(`sym-daemon: ${bold('running')}`);
   console.log(`  node:     ${s.name || '?'} ${dim(s.nodeId ? '(' + s.nodeId.slice(0, 8) + ')' : '')}`);
-  console.log(`  relay:    ${s.relayConnected ? green('connected') : dim('disconnected')} ${dim(s.relay || '')}`);
+  // relayStatus (0.13.6) says the phase and the fix; older daemons only know the bit.
+  const relayLine = s.relayStatus || `${s.relayConnected ? 'connected' : 'disconnected'} ${s.relay || ''}`;
+  console.log(`  relay:    ${s.relayConnected ? green(relayLine) : (s.relayState?.phase === 'refused' ? red(relayLine) : dim(relayLine))}`);
   console.log(`  peers:    ${s.peerCount || 0}`);
   console.log(`  memories: ${s.memoryCount || 0}`);
   const vn = msg.virtualNodes || [];
@@ -1120,6 +1122,7 @@ function isDaemonRunning() {
 function bold(s) { return process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s; }
 function dim(s) { return process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s; }
 function green(s) { return process.stdout.isTTY ? `\x1b[32m${s}\x1b[0m` : s; }
+function red(s) { return process.stdout.isTTY ? `\x1b[31m${s}\x1b[0m` : s; }
 
 // ── Usage ─────────────────────────────────────────────────────
 
