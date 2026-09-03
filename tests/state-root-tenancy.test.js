@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { tmpdir } = require('./_tmpdir');
 
 const CONFIG = path.resolve(__dirname, '..', 'lib', 'config.js');
 
@@ -47,7 +48,7 @@ function inRoot(stateDir, code) {
 }
 
 test('SYM_DIR and NODES_DIR follow SYM_STATE_DIR', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-root-'));
+  const root = tmpdir('sym-root-');
   const out = inRoot(root, 'console.log(JSON.stringify({d:c.SYM_DIR,n:c.NODES_DIR}))');
   assert.deepEqual(JSON.parse(out), { d: root, n: path.join(root, 'nodes') });
 });
@@ -58,8 +59,8 @@ test('with SYM_STATE_DIR unset, nothing moves for anyone: ~/.sym as before', () 
 });
 
 test('the SAME node name in two roots holds TWO locks — no collision, no shared identity', async () => {
-  const a = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-tenant-a-'));
-  const b = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-tenant-b-'));
+  const a = tmpdir('sym-tenant-a-');
+  const b = tmpdir('sym-tenant-b-');
   const holder = await holdLock(a, 'xmesh');
   try {
     assert.ok(fs.existsSync(path.join(a, 'nodes', 'xmesh', 'lock.pid')), 'root A holds its lock under ITS tree');
@@ -76,7 +77,7 @@ test('the SAME node name in two roots holds TWO locks — no collision, no share
 });
 
 test('and the SAME root still refuses a second holder — the single-writer rule is intact', async () => {
-  const a = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-tenant-same-'));
+  const a = tmpdir('sym-tenant-same-');
   const holder = await holdLock(a, 'xmesh');
   try {
     const out = inRoot(a, `try{c.acquireIdentityLock('xmesh');console.log('ACQUIRED')}catch(e){console.log('REFUSED '+e.code)}`);

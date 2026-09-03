@@ -9,9 +9,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { tmpdir } = require('./_tmpdir');
 
 const {
   signRoomGrant, verifyRoomGrant, isOwnableRoom, roomGrantPayload, ROOM_GRANT_DOMAIN,
@@ -166,7 +166,7 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
 });
 
 describe('ownership registry — out-of-band only, precedence, and open-by-default', () => {
-  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'room-own-'));
+  const tmp = () => tmpdir('room-own-');
 
   it('a room with no owner is OPEN — nothing existing changes on upgrade day', () => {
     const r = new RoomOwnershipRegistry();
@@ -277,7 +277,7 @@ describe('review folds — the guard cannot be defeated by how it is CALLED', ()
 });
 
 describe('review folds — the state file is a cache, not an authority', () => {
-  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'room-own-fold-'));
+  const tmp = () => tmpdir('room-own-fold-');
 
   it('F4: a hand-written record claiming source:config loads at most as own, and config overrides it', () => {
     const dir = tmp();
