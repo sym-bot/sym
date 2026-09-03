@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.5 (2026-09-03)
 
 ### Fixed — a relay's auth refusal is said once, with the fix, instead of retried forever in silence
 
