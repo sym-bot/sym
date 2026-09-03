@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.6 (2026-09-03)
 
 ### Added — the relay's state is visible to whoever drives the node
 
