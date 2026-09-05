@@ -164,7 +164,29 @@ function applyStartFlags() {
   }
   const url = flagValue('--relay-url');
   const token = flagValue('--relay-token');
+  // The hosted relay admits a self-serve token of 32+ characters into its own channel and
+  // refuses a shorter one with a reason. Refuse it HERE, before it is persisted: persisted, it
+  // is knocked at the relay on every reconnect for the life of the daemon — two nodes did that
+  // every ~23 s on 2026-09-05, on an engine that never printed the reason.
+  const HOSTED = 'wss://sym-relay.onrender.com';
+  const effectiveUrl = url || readRelayEnv().SYM_RELAY_URL || '';
+  if (token && effectiveUrl.replace(/\/+$/, '') === HOSTED && token.length < 32) {
+    console.error(`--relay-token is ${token.length} characters; ${HOSTED} admits 32 or more, so this node would be refused on every attempt. ` +
+      `Nothing was saved. Use a token of 32 or more characters — a random one is best: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" — ` +
+      `or, in Claude Code, let sym_invite_create mint the invite and join with its token.`);
+    process.exit(1);
+  }
   if (url || token) persistRelay(url, token);
+}
+function readRelayEnv() {
+  const kv = {};
+  try {
+    for (const line of fs.readFileSync(path.join(os.homedir(), '.sym', 'relay.env'), 'utf8').split('\n')) {
+      const m = line.match(/^([A-Z_]+)=(.*)$/);
+      if (m) kv[m[1]] = m[2];
+    }
+  } catch {}
+  return kv;
 }
 
 // Launch the daemon (no running-check). Passes SYM_ROOM in env for the

@@ -226,7 +226,7 @@ sym leave                       # 返回默认 mesh
 
 `sym rooms` 支持跨平台（含 Windows）——每个运行的 CLI 守护进程和 Claude（MCP）节点均通过共享发现信标广播其所属群组。**群组名称可匿名化**：使用不透明代码命名群组，局域网列表不会暴露其用途，而知晓该代码的成员仍可相互发现。
 
-跨网络使用时，添加 `--relay-url` / `--relay-token` 参数，即可让同一群组跨越多个办公室，而非局限于单一 WiFi。
+跨网络使用时，添加 `--relay-url` / `--relay-token` 参数，即可让同一群组跨越多个办公室，而非局限于单一 WiFi。托管中继 `wss://sym-relay.onrender.com` 只接受 **32 个字符以上**的令牌（每个令牌对应一条独立通道）：请使用随机生成的长令牌，例如 `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`；过短的令牌会被中继拒绝，节点会一直无法加入。在 Claude Code 中，`sym_invite_create` 会自动生成合规令牌。
 
 > **即将推出**：sym-swift 应用将出现在 `sym rooms` 中（信标对齐），以及**邀请制私有群组**（管理员设置、凭邀请加入）。当前群组对知晓名称的任何节点开放。
 

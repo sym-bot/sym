@@ -247,7 +247,7 @@ sym leave                       # back to the default mesh
 
 `sym rooms` works across platforms (incl. Windows) — each running CLI daemon and Claude (MCP) node advertises its room on a shared discovery beacon. **Room names can be anonymous:** name a room with an opaque code and the LAN listing reveals nothing about its purpose, while members who know the code still find each other.
 
-Across networks, add `--relay-url` / `--relay-token` so a room spans offices, not just one WiFi.
+Across networks, add `--relay-url` / `--relay-token` so a room spans offices, not just one WiFi. The hosted relay `wss://sym-relay.onrender.com` admits a token of **32 or more characters** into that token's own channel and refuses a shorter one, so use a long random token — `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` — or let `sym_invite_create` in Claude Code mint the invite. `sym start` refuses a short token for the hosted relay before saving it.
 
 > **Coming next:** sym-swift apps appearing in `sym rooms` (beacon parity), and **invite-gated _private_ rooms** (admin-set, join-by-invite). Today a room is open to anyone who knows its name.
 
