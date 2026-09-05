@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.13.7 (2026-09-05)
+
+### Changed — never in the clear through a relay
+
+A peer reached only over a relay whose handshake carried no encryption key used to receive a
+CMB's categories in plaintext, through a server that promises it cannot read them. The sender
+now refuses: nothing is sent to that peer over the relay, the refusal is logged once with the
+peer named, and `peers()` / `sym status` carry `e2e` and `clearRefused` per peer. A peer on the
+local network without a key still receives (the frame never leaves that network); a relay peer
+with a key receives ciphertext exactly as before. Every current engine and the Swift SDK send
+the key, so this changes nothing for them.
+
+### Changed — a short hosted-relay token is refused before it is saved
+
+`sym start --relay-token` for the hosted relay refuses a token under 32 characters, names the
+floor and how to mint one, and saves nothing. Persisted, such a token was knocked at the relay
+every ~23 s for the life of the daemon, on an engine that never printed the reason.
+
+### Docs — security stated as mechanisms with limits
+
+README gains "Security, and what the relay can and cannot see"; README_zh and the reference
+state the token floor beside the relay flags.
+
 ## 0.13.6 (2026-09-03)
 
 ### Added — the relay's state is visible to whoever drives the node

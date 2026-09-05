@@ -110,6 +110,35 @@ Run `sym --help` for the full command surface.
 The xMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
 mesh-channel are open source.
 
+## Security, and what the relay can and cannot see
+
+We treat this as the product's first property, and we state it as mechanisms with their
+limits rather than as a promise.
+
+- **Every node signs.** A node's identity is an Ed25519 keypair on its own disk; every CMB it
+  emits is signed, and a receiver verifies the signature against the key it pinned at the
+  handshake.
+- **Content is encrypted for each peer.** At the handshake two nodes exchange X25519 public
+  keys and derive a secret only they hold. A CMB's seven categories — the content — are
+  encrypted for each recipient separately before they leave the sender. This is the same on
+  the local network and through a relay.
+- **Never in the clear through a relay** (engine 0.13.7 and later). If a peer reached only
+  over a relay presented no encryption key, the sender sends it nothing, says so once in its
+  log, and `sym status` shows the peer with `e2e: false, clearRefused: true`. On the local
+  network a keyless peer still receives, because the frame never leaves that network.
+- **The relay is a forwarder that cannot read what it carries.** `@sym-bot/sym-relay` reads
+  only the routing envelope (who, to whom, which room), forwards the sealed payload, and drops
+  it: no message store, no keys, no addresses. A channel is the set of nodes connected with
+  the same token; a self-serve token must be 32 characters or more, and a refused connection
+  is logged with the token's length, never the token.
+- **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
+  evaluation on every block it hears and stores only what it admits.
+
+What this does not cover: a room name or relay token is not an enterprise trust boundary —
+anyone holding the token is in the channel; the envelope (names, room, timing, sizes) is
+visible to the relay operator; and a peer's own machine is trusted with everything that peer
+admitted.
+
 ## Current boundaries
 
 - Every participant must join the same mesh room.
