@@ -149,10 +149,18 @@ log(`Mesh room: ${ROOM} (${roomServiceType(ROOM)})`);
 // run on daemon start so readers use the cmbs/ name with no fallback.
 try { const n = migrateStores(); if (n) log(`Migrated ${n} node store(s): meshmem → cmbs`); } catch { /* non-fatal */ }
 
+// RELAY-ONLY (2026-09-05): a host with no usable multicast — Termux on Android, a locked-down
+// container, a VPN that drops mDNS — joins the mesh over the relay alone and never touches
+// Bonjour. `SYM_RELAY_ONLY=1` (also persisted by `sym start --relay-only`). Without it the
+// node advertises and browses on the LAN as before.
+const RELAY_ONLY = /^(1|true|yes)$/i.test(String(process.env.SYM_RELAY_ONLY || ''));   // relay.env is folded into process.env above
+if (RELAY_ONLY) log(`relay-only: LAN discovery off (SYM_RELAY_ONLY); ${relayUrl ? `joining ${relayUrl}` : 'WARNING — no SYM_RELAY_URL, so this node will have no peers at all'}`);
+
 const node = new SymNode({
   name: NODE_NAME,
   cognitiveProfile: `Local CLI-host for ${os.hostname()}. Hosts IPC surface for sym CLI. Forwards frames, no storage, no SVAF.`,
   cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
+  relayOnly: RELAY_ONLY,
   room: ROOM,
   discoveryServiceType: roomServiceType(ROOM),
   relay: relayUrl,

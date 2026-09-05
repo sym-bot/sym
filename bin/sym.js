@@ -136,7 +136,7 @@ function readRoom() {
   catch { return 'default'; }
 }
 
-function persistRelay(url, token) {
+function persistRelay(url, token, relayOnly) {
   const dir = path.join(os.homedir(), '.sym');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, 'relay.env');
@@ -149,6 +149,8 @@ function persistRelay(url, token) {
   } catch {}
   if (url) kv.SYM_RELAY_URL = url;
   if (token) kv.SYM_RELAY_TOKEN = token;
+  if (relayOnly === true) kv.SYM_RELAY_ONLY = '1';
+  if (relayOnly === false) delete kv.SYM_RELAY_ONLY;
   fs.writeFileSync(f, Object.entries(kv).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
 }
 
@@ -176,7 +178,14 @@ function applyStartFlags() {
       `or, in Claude Code, let sym_invite_create mint the invite and join with its token.`);
     process.exit(1);
   }
-  if (url || token) persistRelay(url, token);
+  // --relay-only: join over the relay alone, never touch Bonjour — for a host with no usable
+  // multicast (Termux on Android, a locked-down container). --lan-too turns it back off.
+  const relayOnly = process.argv.includes('--relay-only') ? true : (process.argv.includes('--lan-too') ? false : undefined);
+  if (relayOnly === true && !(url || readRelayEnv().SYM_RELAY_URL)) {
+    console.error('--relay-only needs a relay: pass --relay-url <wss://…> (and --relay-token) too, or this node will have no peers at all.');
+    process.exit(1);
+  }
+  if (url || token || relayOnly !== undefined) persistRelay(url, token, relayOnly);
 }
 function readRelayEnv() {
   const kv = {};
@@ -1155,6 +1164,7 @@ ${bold('sym')} — local AI mesh for collective intelligence
 ${bold('Usage:')}
   sym start [--room <name>]         Start the mesh daemon (in a room; default = global mesh)
                                      Flags: --relay-url <url>, --relay-token <token>
+                                     --relay-only (no LAN discovery; Termux/Android, containers), --lan-too to undo
   sym stop                           Stop the mesh daemon
   sym status                         Show mesh status
   sym peers                          List connected peers

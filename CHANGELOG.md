@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.13.8 (unreleased)
+
+### Added — relay-only nodes, for hosts with no usable multicast
+
+`sym start --relay-only` (or `SYM_RELAY_ONLY=1`) skips LAN discovery entirely and joins over the
+relay alone — Termux on Android, a locked-down container, a VPN that drops mDNS. `--lan-too` turns
+discovery back on. Measured: a daemon started relay-only authenticates to the relay with no
+Bonjour started. The option existed in `lib/node.js` (`relayOnly`) but the daemon never exposed it.
+
+### Changed — a failing multicast socket no longer takes the node down
+
+LAN discovery is one transport of several: a Bonjour socket that cannot bind or send now degrades
+to "no LAN peers", said once in the log, and relay peers are unaffected. Before, the error was
+unhandled.
+
+### Added — the relay-auth frame carries the engine version
+
+One field, no payload, no confidentiality cost; the relay records it, so "which engines ever
+reached path X through the relay" becomes a query on the relay's log instead of a question nobody
+can answer after the fact.
+
 ## 0.13.7 (2026-09-05)
 
 ### Changed — never in the clear through a relay
