@@ -12,6 +12,19 @@ local network without a key still receives (the frame never leaves that network)
 with a key receives ciphertext exactly as before. Every current engine and the Swift SDK send
 the key, so this changes nothing for them.
 
+**Scope of what this closes, stated rather than implied.** The plaintext fallback entered the
+engine together with the key exchange in 0.3.6 (2026-03-29). Every published engine from 0.3.6
+to 0.13.6 sends its key at the handshake, so between any two of them the relay never carried a
+CMB's categories in the clear. The fallback could have been reached only by an engine older
+than 0.3.6 — which had no encryption at all — talking to a current node through the relay, or by
+a failed key derivation. Whether either ever happened cannot be checked after the fact: the
+relay never logged payloads, and the auth frame carried no engine version (it does from 0.13.8).
+If it did happen, what was readable was readable by the relay operator — the party already
+running the relay on that node's behalf — not by a third party, and there is no key to rotate
+and no version to abandon that any current user is not already past. That is why this is a note
+and not an advisory. No evidence of exposure was looked for and none is claimed; the honest
+statement is that it cannot be known, not that nothing happened.
+
 ### Changed — a short hosted-relay token is refused before it is saved
 
 `sym start --relay-token` for the hosted relay refuses a token under 32 characters, names the
