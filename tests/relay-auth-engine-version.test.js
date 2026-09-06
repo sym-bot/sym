@@ -29,5 +29,24 @@ test('relay-auth names the engine version beside the identity, and never more th
   const auth = seen[0];
   assert.equal(auth.type, 'relay-auth');
   assert.equal(auth.engine, version);
-  assert.deepEqual(Object.keys(auth).sort(), ['engine', 'name', 'nodeId', 'token', 'type']);   // no IP, no keys, nothing else
+  assert.deepEqual(Object.keys(auth).sort(), ['engine', 'name', 'nodeId', 'token', 'type']);   // no IP, no keys, nothing else; no room when the node is in `default`
+});
+
+test('relay-auth declares the node\'s room when it is not the default (wire note D4)', async () => {
+  const wss = new WebSocketServer({ port: 0 });
+  const seen = [];
+  wss.on('connection', (ws) => ws.on('message', (m) => { seen.push(JSON.parse(String(m))); ws.close(4003, 'done'); }));
+  const url = `ws://127.0.0.1:${wss.address().port}`;
+  let running = true;
+  const rc = new RelayConnection({
+    relayUrl: url, relayToken: 'x'.repeat(32), log: () => {}, getIdentity: () => ({ nodeId: 'c'.repeat(64) }), getRoom: () => 'momo-pair',
+    isRunning: () => running, getPeers: () => new Map(), getMeshNode: () => null, createPeer: () => {}, addPeer: () => {},
+    handlePeerMessage: () => {}, onPeerLeft: () => {}, onAuthRefused: () => {}, nodeName: 'room-test',
+    peerWakeChannels: new Map(), saveWakeChannels: () => {}, authRefusedRetryMs: 60000,
+  });
+  rc.connect();
+  for (let i = 0; i < 40 && seen.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+  running = false; rc.destroy(); await new Promise((r) => wss.close(() => r()));
+  assert.equal(seen[0].room, 'momo-pair');
+  assert.deepEqual(Object.keys(seen[0]).sort(), ['engine', 'name', 'nodeId', 'room', 'token', 'type']);
 });
