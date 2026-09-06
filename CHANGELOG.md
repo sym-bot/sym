@@ -15,6 +15,20 @@ LAN discovery is one transport of several: a Bonjour socket that cannot bind or 
 to "no LAN peers", said once in the log, and relay peers are unaffected. Before, the error was
 unhandled.
 
+### Changed — relay-auth declares the node's room (wire note D4)
+
+The relay partitions delivery and roster by the declared room; sym-swift and sym-py declare
+theirs, and a Node that stayed silent landed in the unnamed partition where its roommates could
+not see it (measured 2026-09-06: 0/0 peers in a room of three). The default room is not declared —
+absent means default on the relay from 0.5.2. The first patch landed on the wrong options object
+and was caught by probing the live auth frame; the second is probed in the same way.
+
+### Fixed — `shareWithPeers` threw after every send
+
+It returned `frame.timestamp` with no `frame` in scope — a ReferenceError on every call, after the
+frames had already gone out. Found by the wire-alignment review reading the code; confirmed by
+running it; pinned by a test.
+
 ### Added — the relay-auth frame carries the engine version
 
 One field, no payload, no confidentiality cost; the relay records it, so "which engines ever
