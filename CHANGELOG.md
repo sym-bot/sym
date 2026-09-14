@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.13.8 (unreleased)
+## 0.13.8 (2026-09-14)
+
+### Changed — the byte-identity vector check is Node determinism, not conformance
+
+`tests/mmp-v2-signing.test.js` asserted that signing the published payload reproduces the published
+signature. That is true under Node and will stay true — RFC 8032 derives the nonce from the key and
+the message — but it is NOT a conformance property: Apple hedges in both its implementations
+(measured 2026-09-14, CryptoKit: five signings of RFC 8032 vector 2 under one imported key gave five
+distinct valid signatures, none matching the published one; WebKit the same on Safari 26.5). A
+correct implementation on those platforms fails that assertion, which is why meshcognition.org now
+excludes Ed25519 signature bytes from the reproduction requirement. The check is kept as a
+regression guard on OUR signer under THIS runtime, renamed to say so, with the conformance property
+added beside it: sign the same payload twice and require both to verify.
 
 ### Added — relay-only nodes, for hosts with no usable multicast
 
