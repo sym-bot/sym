@@ -22,9 +22,29 @@ describe('MMP v2.0 signing conformance (mmp-sig-v2.0)', () => {
       assert.strictEqual(assertionIdV2_0(kase.record), kase.record.metadata.assertionId);
     });
 
-    it(`signature is byte-identical to the published vector — ${kase.label}`, () => {
+    // NODE DETERMINISM, NOT CONFORMANCE. Ed25519 is deterministic in RFC 8032 and Node honours it,
+    // so this pins that OUR signer still produces the published bytes — a regression guard on the
+    // vector and on this runtime. It is NOT a conformance requirement and MUST NOT be copied into
+    // one: Apple's implementations hedge, measured 2026-09-14 (CryptoKit: five signings of RFC 8032
+    // vector 2 under one key gave five distinct valid signatures, none matching the published one;
+    // WebKit the same, dev-team-3 on Safari 26.5). A correct implementation on those platforms
+    // fails this assertion, which is why the spec now requires verification instead
+    // (meshcognition.org §17.4, §20.3, §17.5).
+    it(`signature is byte-identical to the published vector — Node determinism, not conformance — ${kase.label}`, () => {
       const sig = crypto.sign(null, signingPayloadV2_0(kase.record), privateKeyObject(privB64url));
       assert.strictEqual(sig.toString('base64url'), kase.record.metadata.sig);
+    });
+
+    // THE CONFORMANCE PROPERTY, which every implementation must satisfy including a hedged signer:
+    // sign the same payload twice and both verify. Nothing is asserted about equality.
+    it(`two signatures over one payload both verify — ${kase.label}`, () => {
+      const payload = signingPayloadV2_0(kase.record);
+      const key = privateKeyObject(privB64url);
+      const pub = require('../lib/core/cmb-signing').publicKeyObject(pubB64url);
+      const a = crypto.sign(null, payload, key);
+      const b = crypto.sign(null, payload, key);
+      assert.ok(crypto.verify(null, payload, pub, a), 'first signature must verify');
+      assert.ok(crypto.verify(null, payload, pub, b), 'second signature must verify');
     });
 
     it(`the published signature verifies against the test public key — ${kase.label}`, () => {
