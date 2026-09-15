@@ -109,7 +109,23 @@ describe('gated rooms — fail closed, and the owner is never locked out', () =>
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
     const grant = signRoomGrant(
       { room: ROOM, grantee: 'volunteer', granteeKey: volunteer.pub, grantedBy: 'owner-node' }, owner.priv);
-    assert.strictEqual(admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant }).admit, true);
+    // WITH ITS KEY PROVEN, the invitation still works — sharing stays a decision someone makes.
+    assert.strictEqual(
+      admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant, provenPublicKey: volunteer.pub }).admit,
+      true);
+
+    // WITHOUT PROOF, nobody is admitted — including the real invitee. The old handshake only
+    // ASSERTS a key, and the key an impostor must assert is inside the grant it holds, so the
+    // gate stays shut until the proving handshake reaches this path (2026-09-16).
+    const unproven = admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant });
+    assert.strictEqual(unproven.admit, false, 'an unproven presenter is refused');
+    assert.match(String(unproven.reason), /no-proven-key/);
+
+    // AND AN IMPOSTOR PROVING ITS OWN KEY IS REFUSED BY THE BINDING.
+    const impostorKey = keypair();
+    const imp = admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant, provenPublicKey: impostorKey.pub });
+    assert.strictEqual(imp.admit, false, 'the grant binds a key and the binding is enforced');
+    assert.match(String(imp.reason), /grantee-key-mismatch/);
   });
 
   it('a grant minted by someone who is NOT the owner is refused', () => {
@@ -131,13 +147,16 @@ describe('gated rooms — fail closed, and the owner is never locked out', () =>
   });
 
   it('an expired grant is refused at join', () => {
-    const owner = keypair();
+    const owner = keypair(), late = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
     const long_ago = Date.now() - 48 * 3600_000;
     const grant = signRoomGrant(
-      { room: ROOM, grantee: 'late', grantedBy: 'owner-node', grantedAt: long_ago, expiresAt: long_ago + 3600_000 },
+      { room: ROOM, grantee: 'late', granteeKey: late.pub, grantedBy: 'owner-node', grantedAt: long_ago, expiresAt: long_ago + 3600_000 },
       owner.priv);
-    assert.match(admit(r, 'late', { nodeId: 'late', room: ROOM, roomGrant: grant }).reason, /expired/);
+    // proof supplied, so what is under test here is still the CLOCK
+    assert.match(
+      admit(r, 'late', { nodeId: 'late', room: ROOM, roomGrant: grant, provenPublicKey: late.pub }).reason,
+      /expired/);
   });
 
   it('the grantee is the handshake nodeId, not the transport peerId', () => {

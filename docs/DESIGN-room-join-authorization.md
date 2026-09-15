@@ -1,5 +1,21 @@
 # Room join authorization — membership by grant, not by knowledge of a string
 
+> **ENFORCEMENT LANDED 2026-09-16 — and this document was ahead of the code until it did.**
+> It said the grant "binds the grantee's key into the grantor's signed payload — tamper-evident
+> vouching that already teaches third parties a key they never handshook." The key was signed in
+> and compared to NOTHING: `verifyRoomGrant` expected only `{room, grantee}`, and the grantee id it
+> matched was asserted in an unproven handshake. A grant was therefore a BEARER TOKEN for the room
+> with a 24-hour life, and anyone who saw one could present it. Found by dev-team-3 from the code,
+> reproduced by its failing test (an impostor holding a different key was admitted to a gated room),
+> confirmed here by running it.
+>
+> The verifier now requires `expect.provenKey` and refuses without it, so the binding is real and
+> the gate FAILS CLOSED. There is deliberately no option to accept an asserted key: the key an
+> impostor must assert is printed inside the grant it is holding. Until the proving handshake
+> (`lib/core/handshake-v2.js`, present but not reachable from the connection path) supplies a proven
+> key, a gated room admits only its owner. Nothing in the estate gates a room today — no owner pins
+> on any node — so this closed a hole rather than breaking a user.
+
 **Date:** 2026-08-26 · **Author:** dev1 (sym runtime lane) · **Status:** v2 — mesh review SHIP-WITH-FIXES folded (x-review cmb-3e58586f…, 12 findings, all applied); FOUNDER RULED 2026-08-26: (1) grammar fix NOW, ahead of the gate; (2) ADOPT B AS FOLDED (owner-only, 24h lifetime, join-time expiry, handshake enforcement, default+sym public). Implementation = ordinary mesh-reviewed sym-lane work
 **Prior:** the C+D standing-rooms ruling (xmesh docs/DESIGN-tenancy-standing-rooms.md, founder
 2026-08-26) names this as its residual: "sym resolves rooms by string … full closure needs
