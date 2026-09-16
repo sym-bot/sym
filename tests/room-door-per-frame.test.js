@@ -120,3 +120,30 @@ describe('what the dispatcher does with the doors answer', () => {
     assert.deepEqual(seen, ['cmb']);
   });
 });
+
+describe('roomGate — the question a caller could not ask', () => {
+  const { RoomOwnershipRegistry: Reg } = require('../lib/room-ownership');
+  const gate = (room, owners) => SymNode.prototype.roomGate.call({ _room: room, _roomOwners: owners });
+
+  it('reports an ungated room as ungated with no owner', () => {
+    const g = gate(ROOM, new Reg());
+    assert.deepEqual(g, { room: ROOM, gated: false, owner: null });
+  });
+
+  it('reports a gated room with the owners PUBLIC key and where the pin came from', () => {
+    const owners = new Reg();
+    owners.pin(ROOM, OWNER.nodeId, OWNER.publicKey, 'config');
+    const g = gate(ROOM, owners);
+    assert.equal(g.gated, true);
+    assert.equal(g.owner.nodeId, OWNER.nodeId);
+    assert.equal(g.owner.publicKey, OWNER.publicKey);
+    assert.equal(g.owner.source, 'config');
+  });
+
+  it('never exposes a private key — verifying needs the public half, minting is the owners act', () => {
+    const owners = new Reg();
+    owners.pin(ROOM, OWNER.nodeId, OWNER.publicKey, 'config');
+    const flat = JSON.stringify(gate(ROOM, owners));
+    assert.ok(!/priv/i.test(flat), flat);
+  });
+});
