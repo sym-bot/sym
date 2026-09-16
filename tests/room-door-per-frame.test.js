@@ -20,7 +20,10 @@ const assert = require('node:assert');
 
 const { SymNode } = require('../lib/node');
 const { RoomOwnershipRegistry } = require('../lib/room-ownership');
-const { FrameHandler } = require('../lib/core/frame-handler');
+// THE LIVE MODULE, NOT lib/core/frame-handler.js. These tests originally imported the core copy,
+// which lib/node.js does not load — so the door passed nine tests while never running in
+// production. `require` the same path node.js does, and let the assertion below prove it.
+const { FrameHandler } = require('../lib/frame-handler');
 
 const ROOM = 'x-review--team-02779b950c3d8d7378fd11d6';
 const OWNER = { nodeId: 'owner-node', publicKey: 'ownerkey' };
@@ -145,5 +148,23 @@ describe('roomGate — the question a caller could not ask', () => {
     owners.pin(ROOM, OWNER.nodeId, OWNER.publicKey, 'config');
     const flat = JSON.stringify(gate(ROOM, owners));
     assert.ok(!/priv/i.test(flat), flat);
+  });
+});
+
+describe('the door is in the module the node actually loads', () => {
+  it('lib/node.js requires the SAME frame-handler these tests exercise', () => {
+    // WHY THIS TEST EXISTS. The door was written into lib/core/frame-handler.js and tested there.
+    // lib/node.js requires './frame-handler' — a different, larger file — so nine passing tests
+    // covered code no runtime ever loaded, and the door was reported as shipped while being dead.
+    // A green suite against the wrong file is worse than no suite: it retires the question.
+    const fs = require('node:fs');
+    const nodeSrc = fs.readFileSync(require.resolve('../lib/node.js'), 'utf8');
+    const required = /require\('\.\/(core\/)?frame-handler'\)/.exec(nodeSrc);
+    assert.ok(required, 'lib/node.js must require a frame-handler');
+    assert.equal(required[1], undefined,
+      'node.js requires ./frame-handler (lib/frame-handler.js) — tests must import that one');
+    const live = fs.readFileSync(require.resolve('../lib/frame-handler.js'), 'utf8');
+    assert.match(live, /_roomDoor/, 'the door must live in the module the node loads');
+    assert.match(live, /_roomAdmission/, 'and so must the handshake admission check');
   });
 });
