@@ -60,3 +60,34 @@ describe('MMP v2.0 cmb-encrypted-v2 extension negotiation', () => {
     assert.doesNotThrow(() => floor.enforce('unseen-node', false));
   });
 });
+
+describe('downgrade protection covers a REGISTRY, not one hard-coded name', () => {
+  const { assertNoDowngrade, DOWNGRADE_CRITICAL } = require('../lib/core/mmp-extensions');
+
+  it('exposes the set it protects, so a new extension has to make a decision', () => {
+    // The check was named for a property and implemented for one extension. Anyone adding an
+    // extension would reasonably assume a function called assertNoDowngrade covered theirs.
+    assert.ok(Array.isArray(DOWNGRADE_CRITICAL) && DOWNGRADE_CRITICAL.length >= 1);
+    assert.ok(Object.isFrozen(DOWNGRADE_CRITICAL), 'the registry must not be mutable at runtime');
+  });
+
+  it('aborts for EVERY registered extension both peers offered, not just the first', () => {
+    for (const ext of DOWNGRADE_CRITICAL) {
+      assert.throws(() => assertNoDowngrade([ext], [ext], []), /downgrade/,
+        `${ext} is registered as downgrade-critical but stripping it did not abort`);
+    }
+  });
+
+  it('does NOT abort for an unregistered extension — the omission is deliberate and visible', () => {
+    // An extension outside the registry is negotiable: either side may decline it. This test
+    // exists so that adding one and expecting protection fails HERE rather than in the field.
+    assert.doesNotThrow(() => assertNoDowngrade(['x-not-registered'], ['x-not-registered'], []));
+  });
+
+  it('still reports v2 posture correctly when other extensions are in play', () => {
+    const { EXT_CMB_ENCRYPTED_V2 } = require('../lib/core/mmp-extensions');
+    assert.equal(assertNoDowngrade([EXT_CMB_ENCRYPTED_V2, 'x-other'], [EXT_CMB_ENCRYPTED_V2],
+      [EXT_CMB_ENCRYPTED_V2]).v2, true);
+    assert.equal(assertNoDowngrade(['x-other'], ['x-other'], ['x-other']).v2, false);
+  });
+});
