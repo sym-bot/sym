@@ -126,11 +126,16 @@ describe('what the dispatcher does with the doors answer', () => {
 
 describe('roomGate — the question a caller could not ask', () => {
   const { RoomOwnershipRegistry: Reg } = require('../lib/room-ownership');
-  const gate = (room, owners) => SymNode.prototype.roomGate.call({ _room: room, _roomOwners: owners });
+  const gate = (room, owners, proves = false) => SymNode.prototype.roomGate.call({
+    _room: room, _roomOwners: owners,
+    _buildHandshake: () => (proves ? { provenPublicKey: 'proven-key' } : { publicKey: 'asserted-only' }),
+  });
 
   it('reports an ungated room as ungated with no owner', () => {
     const g = gate(ROOM, new Reg());
-    assert.deepEqual(g, { room: ROOM, gated: false, owner: null });
+    assert.equal(g.gated, false);
+    assert.equal(g.owner, null);
+    assert.equal(g.admits, 'anyone', 'an ungated room admits by declaration (MMP §5.8)');
   });
 
   it('reports a gated room with the owners PUBLIC key and where the pin came from', () => {
@@ -166,5 +171,41 @@ describe('the door is in the module the node actually loads', () => {
     const live = fs.readFileSync(require.resolve('../lib/frame-handler.js'), 'utf8');
     assert.match(live, /_roomDoor/, 'the door must live in the module the node loads');
     assert.match(live, /_roomAdmission/, 'and so must the handshake admission check');
+  });
+});
+
+describe('roomGate reports what the gate ENFORCES, not only that one is pinned', () => {
+  const { RoomOwnershipRegistry: Reg } = require('../lib/room-ownership');
+  const gate = (proves) => {
+    const owners = new Reg();
+    owners.pin(ROOM, OWNER.nodeId, OWNER.publicKey, 'config');
+    return SymNode.prototype.roomGate.call({
+      _room: ROOM, _roomOwners: owners,
+      _buildHandshake: () => (proves ? { provenPublicKey: 'proven' } : { publicKey: 'asserted-only' }),
+    });
+  };
+
+  it('says a gated room admits NOBODY while this runtime cannot prove a key', () => {
+    // The dangerous reading this replaces: `gated: true` alone invites the conclusion that the
+    // room admits the invited. verifyRoomGrant refuses for want of proof BEFORE comparing keys,
+    // so a legitimate grant-holder is refused for the same reason as a thief.
+    const g = gate(false);
+    assert.equal(g.gated, true);
+    assert.equal(g.admits, 'nobody');
+    assert.match(g.why, /refuses every peer, holder or not/);
+  });
+
+  it('says grant-holders once the handshake proves a key — without anyone editing this method', () => {
+    // Asked of our OWN handshake rather than hard-coded, so wiring lib/core/handshake-v2.js
+    // flips the answer on its own. A constant here would have to be remembered.
+    const g = gate(true);
+    assert.equal(g.admits, 'grant-holders');
+    assert.equal(g.why, null);
+  });
+
+  it('never reports a room as admitting more than it can enforce', () => {
+    const order = ['nobody', 'grant-holders'];
+    assert.ok(order.indexOf(gate(false).admits) < order.indexOf(gate(true).admits),
+      'the non-proving runtime must never claim the wider admission');
   });
 });
