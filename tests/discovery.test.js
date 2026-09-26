@@ -55,8 +55,12 @@ describe('BonjourDiscovery', () => {
       sendFrame(client, { type: 'handshake', nodeId: 'peer-abc', name: 'peer-node' });
     });
 
-    // Wait for the event
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for the EVENT, not for a fixed time: a 100 ms sleep raced the loopback round trip on a
+    // loaded host and failed with 0 connections while the handshake was still in flight.
+    const deadline = Date.now() + 5000;
+    while (connections.length === 0 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
 
     assert.strictEqual(connections.length, 1);
     assert.strictEqual(connections[0].peerId, 'peer-abc');

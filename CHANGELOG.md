@@ -1,5 +1,78 @@
 # Changelog
 
+## 0.13.9 (2026-09-26)
+
+### Security — the lineage anchor is found from records this node stored
+
+Upgrade every node: the §15.8 lineage tether is on by default, and this changes whose input it
+trusts. The tether compares a remix against the earliest resolvable ancestor, and that choice decides
+whether the remix keeps its lineage. Two inputs the SENDER controls could make it: the ancestor list
+the sender writes into the record, and the author's own unsigned timestamp. The anchor is now found
+by walking direct parents through records this node has stored — following each stored record's own
+parents, bounded at 64 hops and 4,096 records, cycle-safe — and ranked by the time THIS node stored
+them. A parent this node never stored ends the walk there; it is never taken on the sender's word.
+This is the resolution `@sym-bot/xmesh-core` already used; the open copy had not been brought level.
+
+### Fixed — admission no longer treats disagreeing memory as empty memory
+
+SVAF decided whether a category could be judged from its similarity-weighted readout, and that sum is
+near zero in two opposite cases: nothing in memory carries the category, and everything that carries
+it points the other way. Both were read as "no memory yet", so a record that contradicted a populated
+store was admitted on the cold-start rule. A small category weight had the same effect.
+
+- Whether a category can be judged is now decided by COVERAGE — how much live memory carries it
+  (age-decayed and confidence-weighted), independent of similarity. Coverage fades with age as the
+  readout always did.
+- Covered but pointing away scores full drift for that category instead of being skipped.
+- Category weights no longer enter the per-category readout (they cancelled there); they act only
+  where categories are combined, in the aggregate and the redundancy test.
+- A weight of 0 now DISABLES a category: it is reported `silent` with cause `zero-weight`, and it
+  never makes covered memory count as missing. It used to be read as full weight.
+- When memory covers only disabled categories, the record is admitted as `guarded`, not `aligned`,
+  with `coldStartCause: 'lens-uncovered'` on the result. An empty store still bootstraps as before.
+- Weights that are not finite, are negative, or are all zero are refused with an error naming them,
+  rather than replaced by a default. Every shipped weight profile is valid.
+- The §15.8 tether excludes a category weighted 0 instead of counting it at full weight.
+
+The matching MMP §9.2.1 text is in review. `@sym-bot/xmesh-core` 0.3.1 carries the same change;
+both answer the same 24 corner cases.
+
+### Fixed — a refused node no longer reports "connecting" while it retries
+
+After a relay refuses a node's token (4003), the node keeps retrying at a slow cadence, and the
+refusal was meant to stand for the whole episode. Each retry dial relabelled it `connecting` until the
+relay refused again, so a status read at that moment hid the refusal. The phase now stays `refused`
+until the relay admits the node.
+
+### Fixed — a node starts without reading its whole store first
+
+The memory store read and parsed every file synchronously in its constructor, so a process that
+starts several nodes paid for each store in turn before answering anything. `SymNode.start()` now
+builds the index asynchronously, in batches that yield to the event loop. Nothing can observe a
+half-built store: any read before the load finishes builds the index synchronously, as before, and
+the asynchronous result is then discarded rather than merged.
+
+### Fixed — the room-admission door runs in the frame handler the node actually loads
+
+The per-frame admission check had been written into a module no node loaded. It now runs in the live
+handler, together with the handshake check that records each peer's verdict. In a room with no pinned
+owner — every shipped deployment — behaviour is unchanged: frames from a peer with no verdict pass
+and are counted. In a room with a pinned owner, a peer that never presented a grant is refused on
+every frame except handshake and ping/pong.
+
+- `node.roomGate()` reports `{ room, gated, owner, admits, why }`. `admits` is what the gate enforces
+  today: `anyone`, `grant-holders`, or `nobody`. A gated room currently answers `nobody`, because the
+  key-proving handshake is not yet on the connection path, and says so in `why`.
+- A room-join grant must record its signer as the room's owner when the caller supplies the owner.
+- Downgrade protection names the extensions it protects (`cmb-encrypted-v2`), so a new extension
+  must be registered or its absence justified.
+
+### Removed — two modules nothing loaded
+
+`lib/core/frame-handler.js` and `lib/core/svaf-heuristic.js` were never on the running path. Tests
+that measured them now measure the live evaluator and handler, including new MMP §9.2 conformance
+cases.
+
 ## 0.13.8 (2026-09-14)
 
 ### Changed — the byte-identity vector check is Node determinism, not conformance

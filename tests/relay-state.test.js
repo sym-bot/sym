@@ -104,6 +104,22 @@ test('refused: awaitOutcome resolves on 4003; describe names code, reason and th
   } finally { c.stop(); await relay.close(); }
 });
 
+test('refused: a retry DIAL inside the episode keeps the phase refused', async () => {
+  // Deterministic twin of the slow-cadence check above, which samples at one instant and so only
+  // sometimes lands inside a dial. connect() sets the phase synchronously, so reading it straight
+  // after a retry dial observes exactly the window that used to say `connecting`.
+  const relay = fakeRelay((ws) => ws.close(4003, 'Invalid token'));
+  const c = client(relay.url, { authRefusedRetryMs: 60000 });
+  try {
+    c.rc.connect();
+    const s = await c.rc.awaitOutcome(5000);
+    assert.equal(s.phase, 'refused');
+    c.rc.connect(); // the retry, dialled now instead of in a minute
+    assert.equal(c.rc.state().phase, 'refused', 'a retry dial does not relabel the refusal as connecting');
+    assert.equal(c.rc.state().refused.code, 4003);
+  } finally { c.stop(); await relay.close(); }
+});
+
 test('identity collision: awaitOutcome resolves on 4004 with phase collision; describe says it will not reconnect', async () => {
   const relay = fakeRelay((ws) => ws.close(4004, 'Duplicate identity'));
   const c = client(relay.url);
