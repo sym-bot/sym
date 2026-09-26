@@ -37,6 +37,13 @@ store was admitted on the cold-start rule. A small category weight had the same 
 The matching MMP §9.2.1 text is in review. `@sym-bot/xmesh-core` 0.3.1 carries the same change;
 both answer the same 24 corner cases.
 
+### Fixed — a refused node no longer reports "connecting" while it retries
+
+After a relay refuses a node's token (4003), the node keeps retrying at a slow cadence, and the
+refusal was meant to stand for the whole episode. Each retry dial relabelled it `connecting` until the
+relay refused again, so a status read at that moment hid the refusal. The phase now stays `refused`
+until the relay admits the node.
+
 ### Fixed — a node starts without reading its whole store first
 
 The memory store read and parsed every file synchronously in its constructor, so a process that
