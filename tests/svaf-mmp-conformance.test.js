@@ -3,7 +3,13 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const {
   computeCategoryVerdicts, CATEGORY_VERDICT, DEFAULT_REDUNDANCY_THRESHOLD,
-} = require('../lib/core/svaf-heuristic.js');
+} = require('../lib/core');
+// THE LIVE EXPORT, not lib/core/svaf-heuristic.js. This test was written against the heuristic
+// file directly, and that file was never on the production path: lib/core/index.js exports the
+// SVAF evaluator from svaf-baseline.js, and svaf-heuristic.js was reachable only from the dead
+// duplicate lib/core/frame-handler.js. It passed for ten days while asserting nothing about the
+// engine nodes actually run. Requiring `../lib/core` is the same entry point lib/frame-handler.js
+// uses, so a green result here is a statement about production.
 
 /**
  * svaf-mmp-conformance.test.js — this engine is the REFERENCE for MMP §9.2, and nothing asserted it.

@@ -185,7 +185,7 @@ describe('the decision is enforced in BOTH directions', () => {
   it('the outbound path decides when the dialled peer\'s handshake arrives', () => {
     // the loopback tie-break means the stranger dials US in half of all nodeId
     // orderings — a check on only the accepting path is dead code for those pairs
-    const src = read('lib/core/frame-handler.js');
+    const src = read('lib/frame-handler.js');   // the handler lib/node.js loads; lib/core/frame-handler.js was a dead copy
     assert.match(src, /_handleHandshake\(peerId, peerName, msg\) \{[\s\S]{0,900}_roomAdmission\(peerId, msg\)/);
     assert.match(src, /this\._node\._peers\.delete\(peerId\)/, 'a refused peer is removed, not merely logged');
   });
