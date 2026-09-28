@@ -197,3 +197,48 @@ describe('loopback GC collects a dead registration in any room', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+// One 'exit' hook serves every live loopback registration in the process. Each discovery used to add its own, so a
+// process hosting many nodes carried one listener per live node (the xmesh runtime logged Node's
+// MaxListenersExceededWarning at every boot, 2026-09-28).
+describe('exit cleanup', () => {
+  it('twelve live discoveries add at most one exit listener between them, and stop() removes each registration', async () => {
+    const before = process.listenerCount('exit');
+    const ds = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new BonjourDiscovery({ mdns: false });
+      await d.start({ nodeId: `exit-probe-${i}`, name: `exit-probe-${i}`, publicKey: 'pk', hostname: 'host' }, () => {});
+      ds.push(d);
+    }
+    try {
+      assert.ok(process.listenerCount('exit') - before <= 1, `exit listeners grew by ${process.listenerCount('exit') - before} for 12 nodes`);
+      const files = ds.map((d) => d._regFile);
+      assert.ok(files.every((f) => f && fs.existsSync(f)), 'each node is registered');
+      for (const d of ds) await d.stop();
+      assert.ok(files.every((f) => !fs.existsSync(f)), 'stop() unlinks each registration');
+    } finally { for (const d of ds) { try { await d.stop(); } catch {} } }
+  });
+
+  it('a process that exits without stopping its nodes leaves no registration behind', () => {
+    const { spawnSync } = require('node:child_process');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-exit-home-'));
+    const script = `
+      const { BonjourDiscovery } = require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'discovery.js'))});
+      (async () => {
+        for (let i = 0; i < 3; i++) {
+          const d = new BonjourDiscovery({ mdns: false });
+          await d.start({ nodeId: 'abrupt-' + i, name: 'abrupt-' + i, publicKey: 'pk', hostname: 'host' }, () => {});
+        }
+        const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+        const dir = path.join(os.homedir(), '.sym', 'loopback');
+        process.stdout.write(String(fs.readdirSync(dir).filter((f) => f.startsWith('abrupt-')).length));
+        process.exit(0);
+      })();`;
+    const r = spawnSync(process.execPath, ['-e', script], { env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 20000 });
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(r.stdout.trim(), '3', 'three registrations while the process ran');
+    const dir = path.join(home, '.sym', 'loopback');
+    const left = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.startsWith('abrupt-')) : [];
+    assert.deepStrictEqual(left, [], 'and none after it exited');
+  });
+});
