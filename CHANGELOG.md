@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.10 (2026-09-28)
+
+### Fixed — a dead node's loopback registration is collected whatever its room
+
+Every node scans the same-host loopback registry (`~/.sym/loopback`) every 5 seconds, and it removed
+a dead node's registration only when that node shared its room. A node that ran in a room no live node
+remains in (every finished mission's crew, say) left its registration for good: on one host, 516
+registrations in 495 rooms, 24 of them live. Every live node re-read all of them every 5 seconds.
+A registration whose process is gone is now removed by whichever node scans it, in any room. Room
+isolation still decides whom a node dials. A registration whose process belongs to another user, or
+that names no process, is kept as before.
+
 ## 0.13.9 (2026-09-26)
 
 ### Security — the lineage anchor is found from records this node stored

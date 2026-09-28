@@ -143,3 +143,36 @@ describe('Discovery base class', () => {
     assert.ok(typeof d.stop === 'function');
   });
 });
+
+describe('loopback GC collects a dead registration in any room', () => {
+  // A finished mission's nodes leave registrations in a room no live node shares. The scan used to apply room
+  // isolation BEFORE its liveness check, so nobody ever collected them: 492 of 516 on one host (2026-09-28), and every
+  // live node re-read all of them every 5 s. Liveness now comes first; room isolation gates dialing only.
+  it('removes dead registrations of every room, keeps live ones, and dials only its own room', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const { spawn } = require('node:child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-gc-'));
+    // a pid that is certainly dead: a child that has exited and been reaped
+    const child = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+    await new Promise((r) => child.on('exit', r));
+    const deadPid = child.pid;
+    const write = (name, rec) => fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ ts: Date.now(), port: 40000, ...rec }));
+    write('dead-other-room', { nodeId: 'n-dead-other', pid: deadPid, serviceType: '_mission-abc123._tcp' });
+    write('dead-own-room', { nodeId: 'n-dead-own', pid: deadPid, serviceType: '_sym._tcp' });
+    write('live-other-room', { nodeId: 'n-live-other', pid: process.pid, serviceType: '_mission-def456._tcp' });
+    write('live-own-room', { nodeId: 'n-live-own', pid: process.pid, serviceType: '_sym._tcp' });
+    const dialed = [];
+    const d = new BonjourDiscovery({ mdns: false });
+    d._identity = { nodeId: 'n-aaa-scanner', name: 'scanner' };
+    d._serviceType = '_sym._tcp'; d._log = () => {};
+    d._regDir = dir; d._regFile = path.join(dir, 'self.json');
+    d.emit = (event, _host, _port, nodeId) => { if (event === 'peer-found') dialed.push(nodeId); return true; };
+    d._scanLoopback();
+    const left = fs.readdirSync(dir).sort();
+    assert.deepStrictEqual(left, ['live-other-room.json', 'live-own-room.json'], 'both dead registrations collected, whatever their room');
+    assert.deepStrictEqual(dialed, ['n-live-own'], 'room isolation still gates dialing');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
