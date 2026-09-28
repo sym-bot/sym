@@ -296,3 +296,21 @@ describe('mDNS errors', () => {
     function d(p) { return path.basename(p); }
   });
 });
+
+// A LAN peer that died without an mDNS goodbye never fires 'down', so it stayed in the reconnect cache and was re-dialled
+// every 15 s for as long as the node ran (8.6 million "Connect failed" lines in one daemon's log, 2026-09-28).
+describe('LAN peer cache', () => {
+  it('a peer not announced for five minutes is dropped, not re-dialled; a recently announced one is offered', () => {
+    const d = new BonjourDiscovery({ mdns: false });
+    const now = 1_000_000_000;
+    d._bonjourPeerCache = new Map([
+      ['gone', { address: '192.168.1.102', port: 54034, peerName: 'xmesh', seenAt: now - 5 * 60_000 - 1 }],
+      ['edge', { address: '192.168.1.102', port: 55000, peerName: 'xmesh', seenAt: now - 5 * 60_000 }],
+      ['live', { address: '192.168.1.103', port: 53746, peerName: 'melotune', seenAt: now - 20_000 }],
+      ['legacy', { address: '192.168.1.104', port: 51000, peerName: 'old' }],
+    ]);
+    const due = d._cachedPeersToReoffer(now).map(([id]) => id);
+    assert.deepStrictEqual(due, ['edge', 'live'], 'offered: the peers announced within the window');
+    assert.deepStrictEqual([...d._bonjourPeerCache.keys()], ['edge', 'live'], 'dropped: the silent one, and an entry with no announcement time');
+  });
+});
