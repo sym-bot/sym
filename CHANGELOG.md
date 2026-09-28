@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.13.11 (2026-09-28)
+
+### Fixed — a dropped network no longer takes the daemon down
+
+The daemon's room beacon (the `_symrooms._tcp` advertisement behind `sym rooms`) was made without an mDNS
+error callback, so a failed multicast send, which happens when the network drops (a sleep/wake, an interface
+change), was thrown where nothing could catch it: `send EHOSTUNREACH 224.0.0.251:5353` stopped the daemon
+three times in September. Discovery's guard against a multicast socket that cannot bind looked for the
+socket's emitter where bonjour-service 1.4 does not put it, so it never took effect either. Every bonjour
+instance sym makes now reports these failures and carries on (the beacon logs at most once a minute), and
+`sym rooms` does the same.
+
+### Fixed — a LAN peer that vanished is dropped, not re-dialled forever
+
+A peer that went away without an mDNS goodbye (killed, crashed, its host asleep) stayed in the reconnect cache
+and was dialled every 15 seconds for as long as the node ran: one daemon's log held 8.6 million
+"Connect failed" lines. A peer not announced for five minutes now leaves the cache, and its next announcement
+brings it back.
+
+### Changed — one exit hook per process
+
+Each discovery added its own `exit` listener to remove its loopback registration on an abrupt exit, so a
+process hosting many nodes carried one per node, and Node warned past ten (`MaxListenersExceededWarning`).
+One hook per process now cleans up every live registration.
+
+### Tests — discovery tests never touch the host's live registry
+
+The discovery tests registered throwaway nodes in the real `~/.sym/loopback`, and their scans collected the
+host's registrations. They now run under a sandbox HOME.
+
 ## 0.13.10 (2026-09-28)
 
 ### Fixed — a dead node's loopback registration is collected whatever its room
