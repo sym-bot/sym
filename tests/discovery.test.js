@@ -1,8 +1,29 @@
 'use strict';
 
+// HOME is redirected BEFORE sym is required: discovery's loopback registry lives under os.homedir(), and these tests
+// start real discovery. Without this they registered throwaway nodes ('test-id', on the global service type) in the
+// HOST's live registry, where a live node could dial them mid-test, and their scans collected the host's
+// registrations (found 2026-09-28: a run of 0.13.10's scan removed 490 dead entries from the real ~/.sym/loopback).
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const realHome = os.homedir();
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-discovery-home-'));
+
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const { Discovery, BonjourDiscovery, NullDiscovery } = require('../lib/discovery');
+
+describe('test isolation', () => {
+  it('a started discovery registers under the sandbox HOME, never the real one', async () => {
+    const d = new BonjourDiscovery({ mdns: false });
+    await d.start({ nodeId: 'isolation-probe', name: 'isolation-probe', publicKey: 'pk', hostname: 'host' }, () => {});
+    try {
+      assert.ok(d._regDir && d._regDir.startsWith(process.env.HOME), `registry dir ${d._regDir} is under the sandbox`);
+      assert.ok(!d._regDir.startsWith(path.join(realHome, '.sym')), 'and not in the host registry');
+    } finally { await d.stop(); }
+  });
+});
 
 describe('NullDiscovery', () => {
   it('should return port 0', async () => {
