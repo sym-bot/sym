@@ -259,11 +259,11 @@ function cmdRoom() {
 // rooms (room names may be opaque/anonymous codes — we just show what's
 // advertised). Discovery-only; comms stay isolated per room.
 function cmdRooms() {
-  let Bonjour;
-  try { ({ Bonjour } = require('bonjour-service')); }
-  catch (e) { console.error(`room discovery unavailable: ${e.message}`); return; }
-
-  const bonjour = new Bonjour();
+  let bonjour;
+  try {
+    const { createBonjour } = require('../lib/discovery');
+    bonjour = createBonjour((err) => console.error(`room discovery: ${err && err.message ? err.message : err}`));
+  } catch (e) { console.error(`room discovery unavailable: ${e.message}`); return; }
   const rooms = new Map();   // room name -> Set(node names)
   let browser;
   try {

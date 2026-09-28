@@ -12,7 +12,7 @@ process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-discovery-home-'))
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const { Discovery, BonjourDiscovery, NullDiscovery } = require('../lib/discovery');
+const { Discovery, BonjourDiscovery, NullDiscovery, createBonjour } = require('../lib/discovery');
 
 describe('test isolation', () => {
   it('a started discovery registers under the sandbox HOME, never the real one', async () => {
@@ -240,5 +240,59 @@ describe('exit cleanup', () => {
     const dir = path.join(home, '.sym', 'loopback');
     const left = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.startsWith('abrupt-')) : [];
     assert.deepStrictEqual(left, [], 'and none after it exited');
+  });
+});
+
+// mDNS failures are reported, never thrown. The sym daemon's room beacon, made without an error callback, died of
+// `send EHOSTUNREACH 224.0.0.251:5353` three times in September 2026: bonjour-service answers a query through its
+// multicast-dns socket, and a failed send reaches its default error callback, which throws.
+describe('mDNS errors', () => {
+  const { Bonjour } = require('bonjour-service');
+  // publish a service, then hand the server a query it answers, with the socket's send failing as it does when the
+  // network drops: the path the daemon died on
+  function answerAQueryWhileSendsFail(bonjour) {
+    // every send fails, the announcement included, so nothing reaches the real LAN; no probe, so the records are
+    // registered at once
+    bonjour.server.mdns.respond = (_packet, cb) => cb && cb(new Error('send EHOSTUNREACH 224.0.0.251:5353'));
+    bonjour.publish({ name: 'mdns-probe', type: 'symrooms', port: 7777, host: 'probe.local', txt: { room: 'r' }, probe: false });
+    bonjour.server.mdns.emit('query', { questions: [{ name: '_symrooms._tcp.local', type: 'PTR' }] }, { address: '192.168.1.9', port: 5353 });
+  }
+
+  it('the path the daemon died on: a bonjour made without an error callback throws a failed send', () => {
+    const bare = new Bonjour();
+    try { assert.throws(() => answerAQueryWhileSendsFail(bare), /EHOSTUNREACH/); }
+    finally { try { bare.destroy(); } catch {} }
+  });
+
+  it('createBonjour reports a failed send to its callback instead of throwing', () => {
+    const seen = [];
+    const b = createBonjour((err) => seen.push(err.message));
+    try {
+      assert.doesNotThrow(() => answerAQueryWhileSendsFail(b));
+      assert.deepStrictEqual(seen, ['send EHOSTUNREACH 224.0.0.251:5353']);
+    } finally { try { b.destroy(); } catch {} }
+  });
+
+  it('createBonjour listens for the socket error multicast-dns emits when it cannot bind', () => {
+    const seen = [];
+    const b = createBonjour((err) => seen.push(err.code));
+    try {
+      assert.ok(b.server.mdns.listenerCount('error') >= 1, 'on bonjour.server.mdns, where the socket errors are emitted');
+      const bind = Object.assign(new Error('bind EADDRINUSE 0.0.0.0:5353'), { code: 'EADDRINUSE' });
+      assert.doesNotThrow(() => b.server.mdns.emit('error', bind));
+      assert.deepStrictEqual(seen, ['EADDRINUSE']);
+    } finally { try { b.destroy(); } catch {} }
+  });
+
+  it('every bonjour sym makes comes from createBonjour', () => {
+    const roots = ['lib', 'bin'].map((d) => path.join(__dirname, '..', d));
+    for (const dir of roots) {
+      for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.js'))) {
+        const src = fs.readFileSync(path.join(dir, f), 'utf8');
+        const direct = (src.match(/new Bonjour\(/g) || []).length;
+        assert.strictEqual(direct, f === 'discovery.js' ? 1 : 0, `${d(dir)}/${f}: ${direct} direct Bonjour construction(s)`);
+      }
+    }
+    function d(p) { return path.basename(p); }
   });
 });

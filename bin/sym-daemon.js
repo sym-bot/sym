@@ -830,8 +830,15 @@ function log(msg) {
 let roomBeacon = null;
 function startRoomBeacon() {
   try {
-    const { Bonjour } = require('bonjour-service');
-    roomBeacon = new Bonjour();
+    const { createBonjour } = require('../lib/discovery');
+    // A failed mDNS send (the network dropped, a sleep/wake) is logged, at most once a minute, and never thrown: made
+    // without an error callback, this beacon took the daemon down with `send EHOSTUNREACH 224.0.0.251:5353`.
+    let lastBeaconError = 0;
+    roomBeacon = createBonjour((err) => {
+      if (Date.now() - lastBeaconError < 60_000) return;
+      lastBeaconError = Date.now();
+      log(`Room beacon: ${err && err.message ? err.message : err} — \`sym rooms\` may miss this node until the network returns; the node itself is unaffected`);
+    });
     roomBeacon.publish({
       name: NODE_NAME,
       type: 'symrooms',
