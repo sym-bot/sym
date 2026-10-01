@@ -44,8 +44,9 @@ function identity() {
 
 /** A signed CMB as it appears on the wire (emit.js: whole object, then signCMB). */
 function signedCMB({ author, signWith }) {
-  const cmb = createCMB({ categories: { focus: 'a relayed observation' }, createdBy: author });
-  cmb.room = GROUP;
+  // The room goes in metadata, where the signature binds it. (A top-level `room` is read by
+  // nothing; this fixture once passed only because a record with no room read as "every room".)
+  const cmb = createCMB({ categories: { focus: 'a relayed observation' }, createdBy: author, room: GROUP });
   signCMB(cmb, signWith);
   return cmb;
 }
