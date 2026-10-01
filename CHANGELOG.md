@@ -23,25 +23,37 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   decides.
 - **Unauthenticated gossip could repoint a phone's wake token.** Any room peer's `peer-info` could
   overwrite a wake channel the phone had given this node itself. A channel learned from a weaker
-  source (gossip < relay < the peer itself) now never replaces a stronger one's token.
+  source (gossip < relay < the peer itself) now never replaces a stronger one's token. A channel kept
+  by an earlier release, which recorded no source, ranks with the relay: gossip cannot repoint it.
+  At most 1024 channels are kept (gossip only ever displaces gossip), and one `peer-info` frame is
+  read for at most 256 entries, so fabricated node ids cannot grow the map, its file or the gossip
+  this node sends.
+- **A frame whose handling threw ended a relay-connected daemon.** The LAN path caught a throw from
+  frame handling, but the relay path had nothing above it, so the exception reached the process. A
+  frame that throws is now dropped with a log line and a `frame-handler-error` metric. A record that
+  declares the v2.0 suite but has no buildable preimage is rejected as a signature mismatch.
 - **A record with no room was admitted in every room it was replayed into (B-R10).** A record that
   names no room is now in the literal room `default` (§7). `createCMB` names `default` instead of
   null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
 - **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
-  before anything is stored or dispatched (§18.3.1).
+  before anything is stored or dispatched (§18.3.1). A `MeshAgent` whose node cannot sign says so
+  once and stops remixing and observing.
 
 ### Fixed — delivery and records
 
 - **Two copies of one record arriving together could both surface (K1).** A key is held in flight
   from the de-duplication check until its SVAF pass settles.
 - **A broadcast flood could evict directed de-duplication marks (K3).** They have their own map and
-  cap now.
-- **`inbox()`'s limit counted acked items (K4).** It counts unread deliveries; acked ones still come
-  back, marked.
+  cap now. A directed assertion is marked by the digest of the preimage its signature covers,
+  recomputed on receipt, not by the signature bytes: a hedged Ed25519 signer (WebKit) signs one
+  assertion differently each time, and its re-signed copy surfaced twice.
+- **`inbox()`'s limit counted acked items (K4).** It counts unread deliveries. Acked ones still come
+  back, marked, up to the same limit, and are passed over beyond it, so the limit bounds the reply.
 - **The inbox `from` was the author's label whether or not anything proved it (K5).** It is now the
   author when the signature proved who that is, and otherwise the peer that delivered it. The claim
   stays in `author.name`. A v2.0 record verified against its signed node id carries `author.nodeId`,
-  even when relayed.
+  even when relayed. `from` is a display label (two node ids can sign the same `createdBy`):
+  authorize on `author.nodeId`.
 - **Record timestamps ran ahead of the clock after a backward step, and restarted every process
   (K6).** The ratchet starts from this node's newest stored record. After a step back of more than a
   minute, timestamps follow the clock again, with a `clock-stepped-back` metric.
@@ -82,7 +94,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   both: `storedAt`, and the store's §6.4 `anchorWeight` (2.0 once validated, 0.5 once dismissed, never
   the sender's unsigned confidence). At the default freshness of 1800 s, an anchor older than about
   nine hours carries no weight. **A node whose recent memory is all older than that admits the next
-  block under the empty-memory rule**, as §9.2.1 specifies.
+  block under the empty-memory rule**, as §9.2.1 specifies. The spec discloses what that rule costs:
+  while it applies, the §16 influence bound does not cover the node. With decay that window recurs
+  after every quiet period of about 18.4 × `freshnessSeconds` (about nine hours at the default), not
+  only on a fresh node. `freshnessSeconds` is the dial: a larger value keeps older memory gating.
 
 ### Fixed — SVAF and the store
 
@@ -119,7 +134,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   first-hand sighting (gossip forwards it instead of the time of sending) and expire after 30 days
   unseen. A channel saved before this release gets one 30-day grace period, once.
 - **A daemon rooted with `SYM_STATE_DIR` kept its room, tasks and relay.env in `~/.sym`.** It uses
-  the state root now.
+  the state root now, and so does the `sym` CLI: its pid file, room, relay.env and node directory.
+  Two rooted deployments sharing a home shared one pid file, so `sym stop` for one stopped the other.
+- **A daemon IPC request whose handler threw went unanswered.** It is answered with the error, and a
+  refused `remember` carries the SDK's code (`ECMBSIZE`, `ESIGN`).
 - **A relay-only daemon still announced its room on the LAN.** It no longer does.
 - **IPC on Windows.** The daemon and every client now resolve the IPC endpoint one way, and on
   Windows a file path becomes a named pipe. `SymDaemonClient` defaulted to `/tmp/sym.sock`, which no
