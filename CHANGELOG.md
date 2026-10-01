@@ -54,6 +54,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   `attestations/archive/` and restarted from the records held, so nothing appended is lost. A node
   reads only the live logs at start, and of an oversized log from an earlier release only its last
   8 MiB; reading the whole of one held a node's thread for minutes.
+- **A repeat cost a signature check, and one peer could flood a node.** An attestation, checkpoint or
+  witness already held is dropped before its signature is verified. One peer's gossip frames
+  (attestation, checkpoint, witness) are capped at a burst of 500 and 100 a second; the excess is
+  dropped and counted (`gossip-rate-limited`).
 
 ### Fixed — delivery and records
 
