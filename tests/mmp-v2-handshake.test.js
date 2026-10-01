@@ -1,8 +1,10 @@
 'use strict';
 
 // MMP v2.0 handshake proof-of-possession conformance (P0.3). sym must reproduce
-// meshcognition.org's transcript hash, session id, and proofs byte-for-byte, and must REJECT an
-// unproven/tampered handshake — the impersonation fix. Vector: website #12, digest-pinned.
+// meshcognition.org's transcript, transcript hash, session id, proof payloads and key schedule
+// byte-for-byte, must ACCEPT the published proofs, and must REJECT an unproven/tampered
+// handshake — the impersonation fix. Vector: the published handshake-v2.json, copied verbatim
+// (digest pinned in mmp-v2-vectors-published.test.js).
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
@@ -31,13 +33,36 @@ describe('MMP v2.0 handshake proof-of-possession (P0.3)', () => {
     assert.strictEqual(sessionIdFromTranscript(tx), e.sessionId);
   });
 
-  it('client proof payload is byte-identical to the vector', () => {
+  it('client and server proof payloads are byte-identical to the vector', () => {
     assert.strictEqual(proofPayload('client', tx).toString('hex'), e.clientProofPayloadHex);
+    assert.strictEqual(proofPayload('server', tx).toString('hex'), e.serverProofPayloadHex);
   });
 
-  it('client and server proofs are byte-identical to the vector', () => {
-    assert.strictEqual(signProof('client', tx, vec.fixture.clientIdentityPrivateSeedBase64url), e.clientProofBase64url);
-    assert.strictEqual(signProof('server', tx, vec.fixture.serverIdentityPrivateSeedBase64url), e.serverProofBase64url);
+  // The vector's `usage` (2026-09-14 errata): the proofs are for VERIFICATION only — never sign
+  // the payload and compare bytes, because a hedged Ed25519 signer (WebKit, CryptoKit) returns a
+  // different valid signature on every call. Every other pinned value here is deterministic and
+  // is compared exactly. So our own proofs are checked the way the contract checks anyone's:
+  // two signings over one transcript both verify, and nothing is asserted about their bytes.
+  it('the vector marks the proofs as verification-only', () => {
+    assert.match(vec.usage, /Verification only/);
+    assert.match(vec.usage, /clientProofBase64url and serverProofBase64url/);
+  });
+
+  it('our proofs verify against the presented identity keys (signed twice, bytes not compared)', () => {
+    for (const [role, seed, pub] of [
+      ['client', vec.fixture.clientIdentityPrivateSeedBase64url, clientPub],
+      ['server', vec.fixture.serverIdentityPrivateSeedBase64url, serverPub],
+    ]) {
+      const a = signProof(role, tx, seed);
+      const b = signProof(role, tx, seed);
+      assert.ok(verifyProof(role, tx, a, pub), `${role}: first proof verifies`);
+      assert.ok(verifyProof(role, tx, b, pub), `${role}: second proof verifies`);
+    }
+  });
+
+  it('the presented identity keys are the ones the vector pins in the handshake', () => {
+    assert.strictEqual(clientPub, vec.fixture.handshake.client.identityPublicKey);
+    assert.strictEqual(serverPub, vec.fixture.handshake.server.identityPublicKey);
   });
 
   it('the published proofs verify against the presented identity keys', () => {
@@ -121,5 +146,35 @@ describe('MMP v2.0 transcript construction + extension binding', () => {
     assert.notStrictEqual(withHash, strippedHash, 'stripping the selected extension must change the transcript');
     // and it sorts canonically into the offered list (bytewise before receipts-v1)
     assert.ok(buildTranscript(withExt).includes(Buffer.from(EXT_CMB_ENCRYPTED_V2, 'utf8')));
+  });
+});
+
+// The room and the two names are the human-typed values in the transcript, and the same visible
+// text arrives as different code points depending on where it was typed (macOS tends to NFD,
+// most other systems NFC). The reference NFC-normalizes them; a transcript that did not would
+// make two honest peers hash different bytes and reject each other's proofs.
+describe('MMP v2.0 transcript: room and names are NFC-normalized', () => {
+  const NFC = 'café-rööm';                 // composed é, ö
+  const NFD = 'café-rööm';              // e + combining acute, o + combining diaeresis
+  const withText = (room, clientName, serverName) => {
+    const h = JSON.parse(JSON.stringify(vec.fixture.handshake));
+    h.room = room;
+    h.client.name = clientName;
+    h.server.name = serverName;
+    return h;
+  };
+
+  it('precondition: the two spellings are different code points for the same text', () => {
+    assert.notStrictEqual(NFC, NFD);
+    assert.strictEqual(NFD.normalize('NFC'), NFC);
+  });
+
+  it('a decomposed room or name produces the same transcript bytes as the composed one', () => {
+    const composed = buildTranscript(withText(NFC, NFC, NFC));
+    assert.strictEqual(buildTranscript(withText(NFD, NFC, NFC)).toString('hex'), composed.toString('hex'), 'room');
+    assert.strictEqual(buildTranscript(withText(NFC, NFD, NFC)).toString('hex'), composed.toString('hex'), 'client name');
+    assert.strictEqual(buildTranscript(withText(NFC, NFC, NFD)).toString('hex'), composed.toString('hex'), 'server name');
+    assert.ok(composed.includes(Buffer.from(NFC, 'utf8')), 'the transcript carries the composed form');
+    assert.ok(!buildTranscript(withText(NFD, NFD, NFD)).includes(Buffer.from(NFD, 'utf8')), 'never the decomposed one');
   });
 });

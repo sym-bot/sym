@@ -51,7 +51,9 @@ const PID_FILE = path.join(os.homedir(), '.sym', 'daemon.pid');
 function sleepMs(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
 }
-const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
+// getSocketPath already honours SYM_SOCKET — through the same mapping the daemon uses (a
+// named pipe on Windows). Reading the variable here as well would dial the raw path instead.
+const SOCKET_PATH = getSocketPath();
 const LOG_DIR = getLogDir('sym-daemon');
 const VERSION = require('../package.json').version;
 
