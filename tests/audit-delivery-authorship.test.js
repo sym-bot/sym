@@ -194,6 +194,35 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
+  it('N1: a relay cannot replay a signed directed record by re-spelling its signature or adding an assertionId', async () => {
+    await withNode('d2-respell', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(node);
+      const f = directed(node, signed(mkCmb('approve the release', { to: node.nodeId })));
+      const sig = f.cmb.metadata.sig;
+      // The same 64 signature bytes, spelled three other ways base64url decoding accepts.
+      const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+      const last = B64.indexOf(sig[sig.length - 1]);
+      const twin = B64[(last & 0b110000) | ((last + 1) & 0b001111)]; // same top 2 data bits, other padding bits
+      assert.deepStrictEqual(Buffer.from(sig.slice(0, -1) + twin, 'base64url'), Buffer.from(sig, 'base64url'));
+      const variants = [
+        (c) => { c.cmb.metadata.sig = sig + '='; },
+        (c) => { c.cmb.metadata.sig = sig.slice(0, -1) + twin; },
+        (c) => { c.cmb.metadata.assertionId = 'asrt-0000000000000000000000000000000000000000000000000000000000000000'; },
+      ];
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      await settle();
+      for (const v of variants) {
+        const copy = JSON.parse(JSON.stringify(f));
+        v(copy);
+        node._frameHandler.handle('peerA', 'peerA', copy);
+        await settle();
+      }
+      assert.strictEqual(seen.accepted.length, 1, 'every re-spelling is the same assertion');
+    });
+  });
+
   it('F2: an unverified directed CMB cannot widen its de-duplication key with unsigned fields', async () => {
     await withNode('d2-unsigned', async (node) => {
       node._svafEvaluator.evaluate = async () => REJECTED;
