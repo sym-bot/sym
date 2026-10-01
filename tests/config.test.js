@@ -12,7 +12,7 @@ const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
   normalizeMdnsHostname, pidIsAlive, lockHolderPid, log,
-  acquireIdentityLock, readLockFile, processStartTime,
+  acquireIdentityLock, readLockFile, processStartTime, _clearProcessStartTimeCache,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -340,8 +340,10 @@ describe('acquireIdentityLock', () => {
   });
 
   it('on Windows, a process start time is read and is stable', { skip: process.platform !== 'win32' }, () => {
+    _clearProcessStartTimeCache();
     const a = processStartTime(process.pid);
     assert.match(String(a), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, 'UTC ISO-8601 from PowerShell');
+    _clearProcessStartTimeCache(); // a second real PowerShell call, not the cache
     assert.strictEqual(processStartTime(process.pid), a, 'same process, same string');
     assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
   });
