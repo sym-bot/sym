@@ -151,7 +151,7 @@ describe('inbound identification deadline (MMP §19.1)', () => {
 });
 
 describe('relay message validation', () => {
-  it('survives a relay that sends null, a bare number and a type-less envelope', async () => {
+  it('survives a relay that sends null, a bare number, a type-less envelope and an oversize frame', async () => {
     const wss = new WebSocketServer({ port: 0 });
     wss.on('connection', (ws) => {
       ws.once('message', () => {
@@ -159,6 +159,7 @@ describe('relay message validation', () => {
         ws.send('5');
         ws.send(JSON.stringify({ from: 'x', payload: null }));
         ws.send(JSON.stringify({ from: 'x', payload: { no: 'type' } }));
+        ws.send(JSON.stringify({ from: 'x', payload: { type: 'cmb', blob: 'x'.repeat(MAX_FRAME_SIZE) } })); // over §4.1's bound
         ws.send(JSON.stringify({ type: 'relay-peers', peers: [] }));
       });
     });

@@ -2,36 +2,47 @@
 
 ## 0.13.12 (2026-10-01)
 
-Fixes from an MMP 2.0 conformance audit of sym-mesh-channel and the SDK it runs. Every bug listed here has a
-test that fails on 0.13.11.
+Fixes from an MMP 2.0 conformance audit of sym-mesh-channel and the SDK it runs, revised after an independent
+review of the first cut. Every bug listed here has a test that fails on 0.13.11.
 
 ### Fixed — a directed CMB always reaches the agent it was sent to (MMP §9.2.2)
 
-§9.2.2 says a CMB addressed to this node surfaces regardless of the SVAF verdict. Four paths dropped one anyway:
+§9.2.2 says a CMB addressed to this node surfaces regardless of the SVAF verdict. Three paths dropped one anyway:
 
 - A directed reply citing one of the receiver's own CMBs as its parent was skipped as an echo. Echo
   suppression now applies to broadcasts only.
-- Receive-path de-duplication used the content key for seven days, so a directed send of words this node had
-  already seen (a repeated "please review", or the same text earlier as a broadcast) never surfaced. Directed
-  CMBs are now de-duplicated on content key plus signature, so a replay of the same signed record is still
-  suppressed. This is interim until records carry an assertion identity (§8.8.2).
-- A directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere, and its key was then
-  marked delivered, so every re-send was dropped too. It now surfaces as delivered-not-stored
-  (`remixed: false`, `decision: 'redundant'`).
-- A directed CMB SVAF rejected surfaced twice when it carried a non-neutral mood. It now surfaces once.
+- Receive-path de-duplication used the content key for seven days, so a new directed send of words this node had
+  already seen (a repeated "please review", or the same text earlier as a broadcast) never surfaced. A directed
+  CMB that verifies is now de-duplicated on its assertion identity, or its signature until records carry
+  `assertionId` (§8.8.2). A replay of the same signed record is still suppressed. A record that does not verify
+  keeps the content key, so no unsigned field can widen the key.
+- A directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere. It now surfaces as
+  delivered-not-stored (`remixed: false`, `decision: 'redundant'`). The rest of the admitted path runs as
+  before, for directed and broadcast CMBs alike.
+
+A rejected directed CMB with a non-neutral mood still delivers its mood on the separate §9.3 channel
+(`mood-delivered`) as well as surfacing.
 
 ### Fixed — admission no longer re-authors a peer's record (MMP §8.8.4, §15.2)
 
 When an admitted CMB added nothing new, the receiver stored it at the author's address but with `createdBy`
 set to the receiver, a fresh timestamp and no signature, and served that record to anyone who fetched the
-address. The author's record, signature and lineage are now kept as signed, on the heuristic and the neural
-path.
+address. The author's record is now kept as signed, on the heuristic and the neural path:
+
+- its categories, including each category's signed `meta`;
+- its metadata, signature and lineage.
+
+The stored record verifies under the author's key. A pre-boundary record (§7.8) cannot be kept as signed in
+that shape, but its author name is kept.
 
 ### Fixed — a directed send reports what happened to it
 
 - A directed send of the same words as the node's latest CMB, or of a record already stored, used to send
-  nothing (returning `{collapsed: true}` or `null`). It now delivers the stored record to that peer and
-  carries the same `delivery` result as any other send.
+  nothing (returning `{collapsed: true}` or `null`). It now sends the freshly signed record to that peer, a new
+  assertion that the peer surfaces, and carries the same `delivery` result as any other send. The already-stored
+  case returns the stored entry with `duplicate: true`.
+- A record that collapses onto HEAD is re-signed after its self-edge lineage is cleared, so what is returned or
+  sent still verifies.
 - `delivery.dispatched` counted frames handed to a closed socket or an unopened relay. Transports now return
   `false` from `send()` when the socket is closed, the relay is not open or the frame exceeds 1 MiB, and only
   accepted frames are counted.
@@ -44,20 +55,42 @@ path.
 - A zero or oversize length prefix left the parser reading payload bytes as the next length. It now stops
   parsing and the TCP connection is closed, as §4.1 requires.
 - A relay message `null` threw inside the WebSocket listener and ended the process. Relay messages that are
-  not objects, and envelopes whose payload has no string `type`, are ignored.
+  not objects, envelopes whose payload has no string `type`, and payloads over 1 MiB are ignored.
 - Frames that are `null`, not an object or have no string `type` are discarded silently; invalid UTF-8 is
   rejected instead of being replaced; a handler exception is no longer reported as "Invalid JSON".
 
 ### Added — `author` and a shared inbox id on delivered entries
 
-Every `cmb-accepted` entry carries `author: { name, nodeId, via: { name, nodeId } }`: the record's `createdBy`
-(a display label, not a verified identity), its `createdByNodeId` when present, and the peer that delivered
-it. The store envelope's `source` (`"<receiver>+<sender>"`) is receiver-local bookkeeping and should not be
+Every `cmb-accepted` entry carries `author: { name, nodeId, via: { name, nodeId } }`:
+
+- `name` is the record's `createdBy` (a display label, not a verified identity).
+- `nodeId` is set only when the record verified under the delivering peer's key and names that peer as its
+  author; otherwise it is `null`.
+- `via` is the peer that delivered it.
+
+The store envelope's `source` (`"<receiver>+<sender>"`) is receiver-local bookkeeping and should not be
 displayed as the sender. Inbox items read `from` from the author.
 
-The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-accepted` listeners run, and
-`node.inboxAck(id)` marks one item read out of cursor order: it stops counting as undrained, `inbox()` still
-returns it with `acked: true`, and the ack is persisted.
+The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-accepted` listeners run.
+`node.inboxAck(id)` marks one item read out of cursor order:
+
+- it stops counting as undrained;
+- `inbox()` still returns it, with `acked: true`;
+- the ack is persisted.
+
+`inboxStatus()` adds `ackedEvicted` (read items evicted before a drain), and an acked inbox no longer reports
+`neverDrained`.
+
+### Tests
+
+- The two integration tests that failed on 0.13.11 were stale, not broken code. `e2e-admission` put its nodes
+  in different rooms, which 0.13.11 correctly refuses. `e2e-cmb-path` expected a remix record where content
+  addressing collapses onto the author's record.
+- Both integration tests now stop their nodes in `finally`, so a failed assertion no longer hangs the run for
+  30 seconds.
+
+Known limit: identical arrivals handled concurrently can each pass de-duplication before SVAF finishes the
+first. This is pre-existing and affects broadcasts too.
 
 ## 0.13.11 (2026-09-28)
 

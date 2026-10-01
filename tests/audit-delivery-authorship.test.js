@@ -14,6 +14,12 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * - B-L1  admission rewrote the author's record to name the receiver as author and dropped the
  *         signature, while keeping the author's address
  * - the "<receiver>+<sender>" label: entries now carry `author`, and the inbox reads it
+ *
+ * Revised after the xmesh review of PR #43 (mission-79236e8a6dbb), which found that the first cut
+ * dropped a repeated directed send at the receiver (F1), keyed directed de-duplication on unsigned
+ * frame fields (F2), skipped the post-admit tail for broadcasts (F3), withheld §9.3 mood delivery
+ * from directed CMBs (F4), and signed rebuilt categories that had lost their `meta` (F5). Tests now
+ * sign real records and drive a real receiving node where the claim is about delivery.
  */
 
 const { describe, it } = require('node:test');
@@ -27,6 +33,17 @@ const { nodeDir } = require('../lib/config');
 const core = require('../lib/core');
 const { MemoryStore } = require('../lib/memory-store');
 const { recordCreatedBy } = require('../lib/record');
+const crypto = require('crypto');
+
+// Raw 32-byte Ed25519 keypair (base64url), the shape node identities use.
+function rawKeypair() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+  });
+  return { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+}
+const PEER_A = rawKeypair();
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -52,6 +69,7 @@ function mkCmb(focus, { by = 'peerA', parents, mood = NEUTRAL } = {}) {
   if (parents) cmb.metadata.lineage = { parents, method: 'rule-a' };
   return cmb;
 }
+const signed = (cmb, kp = PEER_A) => { core.signCMB(cmb, kp.priv); return cmb; };
 const frame = (cmb) => JSON.parse(JSON.stringify({ type: 'cmb', timestamp: Date.now(), cmb }));
 const directed = (node, cmb) => Object.assign(frame(cmb), { to: node.nodeId, directed: true });
 const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
@@ -88,27 +106,28 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
-  it('B-D2: a directed send of words already surfaced as a broadcast surfaces again', async () => {
+  it('B-D2: a new signed directed send of words already surfaced as a broadcast surfaces again', async () => {
     await withNode('d2', async (node) => {
-      node._svafEvaluator.evaluate = async () => REJECTED; // memory refuses both; delivery must not
+      node._pinPeerKey('peerA', PEER_A.pub);
       const seen = collect(node);
       node._svafEvaluator.evaluate = async () => ALIGNED;
-      node._frameHandler.handle('peerA', 'peerA', frame(mkCmb('status: done')));
+      node._frameHandler.handle('peerA', 'peerA', frame(signed(mkCmb('status: done'))));
       await settle();
       await tick();
-      node._svafEvaluator.evaluate = async () => REJECTED;
-      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('status: done')));
+      node._svafEvaluator.evaluate = async () => REJECTED; // memory refuses it; delivery must not
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('status: done'))));
       await settle();
       assert.strictEqual(seen.accepted.length, 2, 'the broadcast and the later directed send both surface');
       assert.strictEqual(seen.accepted[1].directed, true);
     });
   });
 
-  it('B-D2: a replay of the same directed record still surfaces only once', async () => {
+  it('B-D2: a replay of the same signed directed record still surfaces only once', async () => {
     await withNode('d2-replay', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
       node._svafEvaluator.evaluate = async () => REJECTED;
       const seen = collect(node);
-      const f = directed(node, mkCmb('please review the fix list'));
+      const f = directed(node, signed(mkCmb('please review the fix list')));
       node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
       await settle();
       node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
@@ -117,14 +136,33 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
+  it('F2: an unverified directed CMB cannot widen its de-duplication key with unsigned fields', async () => {
+    await withNode('d2-unsigned', async (node) => {
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(node);
+      const base = directed(node, mkCmb('unsigned flood attempt')); // peerA's key is unknown: unverified
+      for (let i = 0; i < 3; i++) {
+        const f = JSON.parse(JSON.stringify(base));
+        f.timestamp = i + 1; // a bare frame field the sender chooses
+        node._frameHandler.handle('peerA', 'peerA', f);
+        await settle(); // sequential arrivals: concurrent identical arrivals race SVAF (pre-existing, broadcast too)
+      }
+      await tick();
+      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('unsigned flood attempt'))); // new createdTimestamp, no signature
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1, 'one surface per content for records nothing authenticates');
+    });
+  });
+
   it('B-D3: an admitted directed CMB whose key is already stored surfaces as delivered-not-stored', async () => {
     await withNode('d3', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const seen = collect(node);
-      node._frameHandler.handle('peerA', 'peerA', frame(mkCmb('ack')));
+      node._frameHandler.handle('peerA', 'peerA', frame(signed(mkCmb('ack'))));
       await settle();
       await tick();
-      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('ack')));
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('ack'))));
       await settle();
       assert.strictEqual(seen.accepted.length, 2);
       assert.strictEqual(seen.accepted[1].directed, true);
@@ -133,14 +171,14 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
-  it('B-D4: a rejected directed CMB with a non-neutral mood surfaces exactly once', async () => {
+  it('F4: a rejected directed CMB surfaces once AND still delivers its mood (MMP §9.3)', async () => {
     await withNode('d4', async (node) => {
       node._svafEvaluator.evaluate = async () => REJECTED;
       const seen = collect(node);
       node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('urgent: the build is red', { mood: { text: 'alarmed', valence: -0.7, arousal: 0.8 } })));
       await settle();
-      assert.strictEqual(seen.accepted.length, 1);
-      assert.strictEqual(seen.moods, 0, 'the mood fast-path does not deliver it a second time');
+      assert.strictEqual(seen.accepted.length, 1, 'one cmb-accepted');
+      assert.strictEqual(seen.moods, 1, 'the affect channel is separate and has no directed exemption');
     });
   });
 
@@ -151,6 +189,26 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       node._frameHandler.handle('peerA', 'peerA', frame(mkCmb('the build is red', { mood: { text: 'alarmed', valence: -0.7, arousal: 0.8 } })));
       await settle();
       assert.strictEqual(seen.moods, 1);
+    });
+  });
+});
+
+describe('F3: an admitted broadcast the store already holds', () => {
+  it('still emits memory-received and is marked, so a replay does not re-run SVAF', async () => {
+    await withNode('f3', async (node) => {
+      const cats = { focus: 'shared anchor', issue: 'audit regression', intent: 'verify', motivation: 'MMP 2.0 audit', commitment: 'guard', perspective: 'peerA', mood: NEUTRAL };
+      node.remember(cats); // the receiver already holds this cognition key, as its own
+      let evaluations = 0;
+      node._svafEvaluator.evaluate = async () => { evaluations++; return ALIGNED; };
+      let memoryReceived = 0;
+      node.on('memory-received', () => { memoryReceived++; });
+      const cmb = core.createCMB({ categories: cats, createdBy: 'peerA' });
+      node._frameHandler.handle('peerA', 'peerA', frame(cmb));
+      await settle();
+      node._frameHandler.handle('peerA', 'peerA', frame(cmb));
+      await settle();
+      assert.strictEqual(memoryReceived, 1, 'the admitted path still completes');
+      assert.strictEqual(evaluations, 1, 'the replay is suppressed before SVAF');
     });
   });
 });
@@ -171,6 +229,34 @@ describe('author and inbox id on surfaced entries', () => {
       assert.strictEqual(item.seq, e.inboxSeq);
     });
   });
+
+  it('F15: an unverified createdByNodeId is not presented as the author identity, and msg.source is ignored', async () => {
+    await withNode('author-forged', async (node) => {
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const seen = collect(node);
+      const cmb = mkCmb('who wrote this', { by: 'peerA' });
+      cmb.metadata.createdByNodeId = 'victim-node-id';
+      const f = frame(cmb);
+      f.source = 'founder';
+      node._frameHandler.handle('peer-a-id', 'peerA', f);
+      await settle();
+      assert.strictEqual(seen.accepted[0].author.name, 'peerA');
+      assert.strictEqual(seen.accepted[0].author.nodeId, null);
+    });
+  });
+
+  it('F15: a signed record whose createdByNodeId is the verified delivering peer carries that nodeId', async () => {
+    await withNode('author-verified', async (node) => {
+      node._pinPeerKey('peer-a-id', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const seen = collect(node);
+      const cmb = mkCmb('signed by its author', { by: 'peerA' });
+      cmb.metadata.createdByNodeId = 'peer-a-id';
+      node._frameHandler.handle('peer-a-id', 'peerA', frame(signed(cmb)));
+      await settle();
+      assert.strictEqual(seen.accepted[0].author.nodeId, 'peer-a-id');
+    });
+  });
 });
 
 describe('inboxAck (channel push/receive share one id)', () => {
@@ -187,6 +273,7 @@ describe('inboxAck (channel push/receive share one id)', () => {
       assert.strictEqual(node.inboxAck(second.inboxId), false, 'acking twice is a no-op');
       assert.strictEqual(node.inboxAck('in9999'), false, 'unknown id');
       assert.strictEqual(node.inboxStatus().undrained, 1);
+      assert.strictEqual(node.inboxStatus().neverDrained, false, 'an ack is a read: the inbox is attended');
       const drained = node.inbox();
       assert.strictEqual(drained.drained, 2, 'acked items are returned, not skipped');
       assert.deepStrictEqual(drained.messages.map((m) => !!m.acked), [false, true]);
@@ -225,9 +312,15 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
     try {
       const texts = ['lineage tether audit of the remix path', 'remix lineage tether audit, the sender label on the receive path'];
       for (const [i, focus] of texts.entries()) { // #0 takes the cold-start exit, #1 the main path
-        const incoming = mkCmb(focus, { by: 'claude-sym-agent-a', parents: ['cmb-' + String(i).repeat(64)] });
-        incoming.metadata.sig = `test-signature-${i}`;
-        incoming.metadata.sigAlg = 'ed25519';
+        const incoming = core.createCMB({
+          categories: { focus, issue: 'audit regression', intent: 'verify', motivation: 'MMP 2.0 audit', commitment: 'guard', perspective: 'claude-sym-agent-a', mood: NEUTRAL },
+          createdBy: 'claude-sym-agent-a',
+          lineage: { parents: ['cmb-' + String(i).repeat(64)], method: 'rule-a' },
+          // A signed per-category section that fusion must carry through (review F5).
+          categoryParents: { issue: ['cmb-' + 'f'.repeat(64)] },
+        });
+        signed(incoming);
+        assert.strictEqual(core.verifyCMB(incoming, PEER_A.pub).valid, true, 'precondition: the author\'s record verifies');
         const msg = { type: 'cmb', timestamp: Date.now(), cmb: JSON.parse(JSON.stringify(incoming)) };
         const tetherAnchor = core.resolveTetherAnchor(msg.cmb, (k) => store.get(k));
         const r = await core.processHeuristicSVAF({
@@ -240,6 +333,7 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
         assert.strictEqual(recordCreatedBy(stored.cmb), 'claude-sym-agent-a', `#${i} author unchanged`);
         assert.strictEqual(stored.cmb.metadata.createdTimestamp, incoming.metadata.createdTimestamp);
         assert.strictEqual(stored.cmb.metadata.sig, incoming.metadata.sig, `#${i} signature carried`);
+        assert.strictEqual(core.verifyCMB(stored.cmb, PEER_A.pub).valid, true, `#${i} the stored record still verifies under the author's key`);
         assert.deepStrictEqual(stored.cmb.metadata.lineage?.parents, incoming.metadata.lineage.parents, `#${i} author's lineage carried`);
       }
     } finally {
@@ -254,7 +348,46 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
     node._peers.set(peerId, { peerId, name: peerId, lastSeen: Date.now(), transport: { send: (f) => { frames.push(f); return accept; }, close() {} } });
     return frames;
   }
+  // A real receiving node: every frame A hands to its transport is handled by B's frame handler.
+  function pipe(a, b) {
+    b._pinPeerKey(a.nodeId, a._identity.publicKey);
+    a._peers.set(b.nodeId, {
+      peerId: b.nodeId, name: b.name, lastSeen: Date.now(),
+      transport: { send: (f) => { const copy = JSON.parse(JSON.stringify(f)); setImmediate(() => b._frameHandler.handle(a.nodeId, a.name, copy)); return true; }, close() {} },
+    });
+  }
   const cats = (focus) => ({ focus, issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
+
+  for (const [label, verdict] of [['memory rejects', REJECTED], ['memory admits', ALIGNED]]) {
+    it(`F1: the same words sent twice to the same peer surface twice at that peer (${label})`, async () => {
+      await withNode('d5-a', (a) => withNode('d5-b', async (b) => {
+        pipe(a, b);
+        b._svafEvaluator.evaluate = async () => verdict;
+        const seen = collect(b);
+        const first = a.remember(cats('please review'), { to: b.nodeId });
+        await settle();
+        await tick();
+        const second = a.remember(cats('please review'), { to: b.nodeId });
+        await settle();
+        assert.strictEqual(first.delivery.dispatched, 1);
+        assert.strictEqual(second.delivery.dispatched, 1);
+        assert.strictEqual(seen.accepted.filter((e) => e.directed).length, 2, 'the receiver surfaced both requests');
+        for (const e of seen.accepted) assert.strictEqual(e._cmbVerified, true, 'each re-sent record verifies under the sender\'s key');
+      }));
+    });
+  }
+
+  it('F12: a directed send of an already-stored record returns an entry with its delivery result', async () => {
+    await withNode('d5-dup', async (node) => {
+      fakePeer(node, 'peer-a');
+      node.remember(cats('first'), { to: 'peer-a' });
+      node.remember(cats('second'), { to: 'peer-a' });
+      const again = node.remember(cats('first'), { to: 'peer-a' }); // stored, but not HEAD
+      assert.ok(again && typeof again.content === 'string', 'entry-shaped, not a bare {key, cmb}');
+      assert.strictEqual(again.duplicate, true);
+      assert.strictEqual(again.delivery.dispatched, 1);
+    });
+  });
 
   it('the same words sent to a second peer are sent, not collapsed into silence', async () => {
     await withNode('d5', async (node) => {
