@@ -139,6 +139,41 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
     });
   });
 
+  // §15.8 anchors on a root reached by recursively VERIFYING parent records. A peer block this node
+  // admitted without verifying its author is not such a record: whoever wrote it chose its content
+  // and its claimed parents, so treating it as the anchor let an unattributable block certify the
+  // next remix. The remix is stored unchanged (unverifiable is a trust state, never a severance),
+  // but the integrator signs no tether naming that block.
+  for (const [label, verified] of [['an UNVERIFIED admission is not an anchor', false], ['a VERIFIED admission is (control)', true]]) {
+    it(`parent stored from a peer: ${label}`, async () => {
+      await withNode(`tether-verify-${verified}`, async (node) => {
+        await awaitSemantic();
+        for (const t of TOPIC_B) node.remember(cat7(t));
+        const accepted = [];
+        node.on('cmb-accepted', (e) => accepted.push(e));
+        const now = Date.now();
+        const parent = createCMB({ categories: cat7(TOPIC_B_ROOT), createdBy: 'peerA' });
+        // The frame handler sets this from the author-key signature check before admission; the
+        // gate is driven directly here, so the verdict is set the way that check would leave it.
+        const parentFrame = { type: 'cmb', timestamp: now, content: TOPIC_B_ROOT, cmb: parent, _cmbVerified: verified };
+        await node._frameHandler._processHeuristicSVAF(parentFrame, 'peerA', 'peerA', now, now, 0);
+        assert.ok(node._store.get(parent.metadata.key), 'precondition: the parent was admitted and stored');
+
+        await node._frameHandler._processHeuristicSVAF(inboundFrame(TOPIC_B_NEW, parent.metadata.key), 'peerA', 'peerA', now, now, 0);
+        const remix = accepted.find((e) => e.cmb.categories.focus.text === TOPIC_B_NEW);
+        assert.ok(remix, 'the remix admits');
+        assert.deepStrictEqual(remix.cmb.metadata.lineage.parents, [parent.metadata.key], 'lineage is kept either way');
+        if (verified) {
+          assert.strictEqual(remix.cmb.tether?.anchor, parent.metadata.key, 'a verified parent anchors the tether');
+          assert.strictEqual(remix.cmb.tether.verdict, 'tethered');
+        } else {
+          assert.strictEqual(remix.cmb.tether, undefined, 'no tether attestation names an unverified record');
+          assert.strictEqual(remix.cmb.provenance?.tether, undefined, 'the tether is unverified, not evaluated');
+        }
+      });
+    });
+  }
+
   it('tether disabled (SYM_LINEAGE_TETHER analogue: opts.lineageTether=false) → no severance', async () => {
     const name = `tether-off-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), lineageTether: false });
