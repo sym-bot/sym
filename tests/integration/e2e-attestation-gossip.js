@@ -46,6 +46,8 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     A._addPeer(A._createPeer(tA, B.nodeId, bName, true, 'bonjour'));
     B._addPeer(B._createPeer(tB, A.nodeId, aName, false, 'bonjour'));
     await sleep(400);
+    const announced = [];
+    B.on('attestation-received', (e) => announced.push(e));
     assert.ok(B._peerIdentityKeys.get(A.nodeId), 'B has A\'s authenticated identity key from the handshake');
 
     const entry = B.remember({
@@ -63,6 +65,16 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     assert.strictEqual(att.of, K, 'bound to B\'s gated CMB');
     assert.deepStrictEqual(verifyAttestation(att, A._identity.publicKey), { signed: true, valid: true }, 'A\'s original signature verifies end-to-end');
     assert.ok(A.attestationsFor(K).length >= 1, 'the gater A also holds it');
+    // The author sees A's verdict live, over the real frame path, without polling.
+    const live = announced.filter((e) => e.of === K);
+    assert.strictEqual(live.length, 1, "B announced A's attestation once");
+    assert.strictEqual(live[0].by, A.nodeId);
+    assert.strictEqual(live[0].byName, aName);
+    assert.strictEqual(live[0].from, aName);
+    assert.strictEqual(live[0].relayed, false);
+    assert.strictEqual(live[0].verified, true);
+    assert.strictEqual(live[0].keySource, 'handshake');
+    assert.strictEqual(live[0].sig, att.sig);
 
     // A forged attestation (bad signature) must be dropped on ingest.
     const before = B._attestations.size();
@@ -72,6 +84,7 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     });
     await sleep(50);
     assert.strictEqual(B._attestations.size(), before, 'a forged attestation is rejected, not recorded');
+    assert.strictEqual(announced.filter((e) => e.sig === 'AAAAforged').length, 0, 'a forged attestation is never announced');
 
     await A.stop(); await B.stop();
     fs.rmSync(nodeDir(aName), { recursive: true, force: true });
