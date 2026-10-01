@@ -112,3 +112,38 @@ describe('the inbox names a proven author (K5)', () => {
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
+
+describe('a malformed v2.0 frame is refused, never thrown (0.13.15 review F1)', () => {
+  // Declares the v2.0 suite but carries no room and no signature: it has no preimage, and building
+  // one throws. On the relay path that throw reached the process and ended the daemon.
+  function malformed() {
+    const cmb = createCMB({ categories: { focus: 'x' }, createdBy: 'alice', emitV2: true, createdByNodeId: 'node-alice', room: 'default' });
+    cmb.metadata.assertionId = 'asrt-0';
+    delete cmb.metadata.room;
+    return cmb;
+  }
+
+  it('the signature check rejects it as a mismatch', () => {
+    withNode((node) => {
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      const msg = { cmb: malformed() };
+      assert.doesNotThrow(() => assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', msg), true));
+      assert.ok(metrics.some((m) => m.type === 'cmb-signature-rejected'), 'rejected through the ordinary path, with its metric');
+    });
+  });
+
+  it('a frame that throws anywhere in handling is dropped and counted, and the node goes on', () => {
+    withNode((node) => {
+      node._roomDoor = () => ({ pass: true });
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      assert.doesNotThrow(() => node._frameHandler.handle('node-alice', 'alice', { type: 'cmb', cmb: malformed() }));
+      const original = node._frameHandler._handleMemoryShare;
+      node._frameHandler._handleMemoryShare = () => { throw new Error('boom'); };
+      assert.doesNotThrow(() => node._frameHandler.handle('node-alice', 'alice', { type: 'cmb', cmb: malformed() }));
+      node._frameHandler._handleMemoryShare = original;
+      assert.ok(metrics.some((m) => m.type === 'frame-handler-error' && /boom/.test(m.error)));
+    });
+  });
+});
