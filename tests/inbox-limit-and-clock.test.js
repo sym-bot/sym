@@ -31,8 +31,23 @@ describe('inbox limit (K4)', () => {
       const r = node.inbox({ limit: 2 });
       const unread = r.messages.filter((m) => !m.acked).map((m) => m.id);
       assert.deepStrictEqual(unread, [ids[3], ids[4]], 'two unread deliveries, as asked');
-      assert.ok(r.messages.slice(0, 3).every((m) => m.acked), 'the acked ones come back marked');
+      assert.deepStrictEqual(r.messages.filter((m) => m.acked).map((m) => m.id), [ids[0], ids[1]], 'acked ones come back marked, up to the same limit');
       assert.strictEqual(r.remaining, 1);
+    } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  // 0.13.15 review F6: counting only unread items let the reply grow to the whole ring.
+  it('the limit still bounds the reply when most of the ring is acked', () => {
+    const name = uniq('inbox-bound');
+    const node = mkNode(name);
+    try {
+      for (let i = 0; i < 300; i++) node._pushInbox({ cmb: { categories: { focus: { text: `m${i}` } } }, content: `m${i}`, source: 'peer' });
+      for (const m of node._inbox.slice(0, 299)) node.inboxAck(m.id);
+      const r = node.inbox({ limit: 1 });
+      assert.ok(r.messages.length <= 2, `one unread and at most one acked, not ${r.messages.length}`);
+      assert.deepStrictEqual(r.messages.filter((m) => !m.acked).map((m) => m.id), [node._inbox[299].id], 'the unread delivery is not starved by acked ones');
+      assert.strictEqual(r.remaining, 0, 'acked items passed over are behind the cursor');
+      assert.strictEqual(node.inbox({ limit: 1 }).messages.length, 0, 'and are not handed back next time');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
