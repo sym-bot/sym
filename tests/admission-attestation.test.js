@@ -19,7 +19,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { verifyAttestation, verifyAttestationRole } = require('../lib/core');
+const { verifyAttestation, verifyAttestationRole, signAttestation } = require('../lib/core');
 
 // Construct (no start) — the builder needs only identity / room / role / chain state.
 function withNode(baseName, opts, fn) {
@@ -225,6 +225,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       const att = A._buildAdmissionAttestation('cmb-request-5', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
       assert.strictEqual(seen[0].role, 'anchor', 'what A stamped');
+      assert.strictEqual(seen[0].roleClaimed, 'anchor');
       assert.strictEqual(seen[0].roleResolved, 'participant', 'B holds no grant that makes A an anchor');
       assert.strictEqual(seen[0].roleMatches, false);
     });
@@ -281,6 +282,82 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
+  it("gives a foreign attester's object-valued or missing fields in their signed form", () => {
+    withPair({}, ({ A, B, seen }) => {
+      // Validly signed but unusual: the canonicalizer signs an array through ToString, and no role.
+      const base = A._buildAdmissionAttestation('cmb-request-13', 'aligned', verdicts, 'heuristic');
+      const att = { ...base, prev: ['abc'] };
+      delete att.role;
+      signAttestation(att, A._identity.privateKey);
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      const e = seen[0];
+      assert.strictEqual(e.prev, 'abc', 'a string, so no listener can change it under the next one');
+      assert.strictEqual(e.role, null, 'no role was signed');
+      assert.strictEqual(e.roleClaimed, 'participant', 'the claim roleMatches is computed against');
+      assert.strictEqual(e.roleMatches, true);
+      assert.deepStrictEqual(verifyAttestation(e, A._identity.publicKey), { signed: true, valid: true });
+      for (const [k, v] of Object.entries(e)) {
+        if (k !== 'categories') assert.ok(v === null || typeof v !== 'object', `${k} is a primitive`);
+      }
+    });
+  });
+
+  it('dispatches in listener order from a snapshot, like emit', () => {
+    withPair({}, ({ A, B, seen }) => {
+      const order = [];
+      const collector = B.rawListeners('attestation-received')[0];
+      const late = () => order.push('late');
+      B.prependListener('attestation-received', () => {
+        order.push('first');
+        B.off('attestation-received', collector); // removed mid-dispatch: still sees this event
+        B.on('attestation-received', late);       // added mid-dispatch: does not
+      });
+      const att = A._buildAdmissionAttestation('cmb-request-14', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.deepStrictEqual(order, ['first']);
+      assert.strictEqual(seen.length, 1, 'the collector removed during dispatch still got this event');
+      const next = A._buildAdmissionAttestation('cmb-request-15', 'aligned', verdicts, 'heuristic');
+      B._ingestAttestation(next, A.nodeId, 'concierge');
+      assert.deepStrictEqual(order, ['first', 'first', 'late']);
+      assert.strictEqual(seen.length, 1, 'and nothing after it was removed');
+    });
+  });
+
+  it('reports an event it could not build on metric, and still records the attestation', () => {
+    withPair({}, ({ A, B, seen }) => {
+      const metrics = [];
+      B.on('metric', (m) => metrics.push(m));
+      B.resolveRole = () => { throw new Error('grant chain unreadable'); };
+      const att = A._buildAdmissionAttestation('cmb-request-16', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.strictEqual(seen.length, 0);
+      const dropped = metrics.filter((m) => m.type === 'attestation-event-dropped');
+      assert.strictEqual(dropped.length, 1);
+      assert.strictEqual(dropped[0].of, 'cmb-request-16');
+      assert.strictEqual(dropped[0].reason, 'grant chain unreadable');
+      assert.strictEqual(B.attestationsFor('cmb-request-16').length, 1);
+    });
+  });
+
+  it('a log sink that throws does not turn a failing listener into a failed ingest', async () => {
+    const { A, B, cleanup } = makePair();
+    const unhandled = [];
+    const onUnhandled = (r) => unhandled.push(r);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      B._log = () => { throw new Error('log pipe closed'); };
+      B.on('attestation-received', () => { throw new Error('listener bug'); });
+      B.on('attestation-received', async () => { throw new Error('view socket closed'); });
+      const att = A._buildAdmissionAttestation('cmb-request-17', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      await new Promise((r) => setTimeout(r, 20));
+      assert.deepStrictEqual(unhandled, []);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      cleanup();
+    }
+  });
+
   it('a failing listener cannot reach the stored record, starve a later listener, or undo the ingest', async () => {
     const { A, B, seen, cleanup, collect } = makePair();
     const unhandled = [];
@@ -299,8 +376,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true, 'the ingest still reports success');
       const second = A._buildAdmissionAttestation('cmb-request-12', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(second, A.nodeId, 'concierge').ok, true);
-      await new Promise((r) => setImmediate(r));
-      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 20));
 
       assert.strictEqual(seen.length, 2, 'the later listener saw both events');
       assert.strictEqual(once, 1, 'a once-listener fired once and removed itself');

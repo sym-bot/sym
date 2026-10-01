@@ -22,8 +22,9 @@ Fields this node adds, which the signature does not vouch for:
 
 - `verified: true`, and `keySource`, where the verifying key came from: `anchor`, `grant`, or `handshake`. A
   `handshake` key is trusted on first use: it belongs to whoever completed the handshake under that nodeId;
-- `roleResolved` and `roleMatches`, the role this node's grant chain resolves for the attester. Weight a
-  verdict by these, not by `role`;
+- `roleResolved` and `roleMatches`, the role this node's grant chain resolves for the attester, and
+  `roleClaimed`, the claim `roleMatches` compares against (`participant` when the attester stamped none).
+  Weight a verdict by these, not by `role`;
 - `methodUnsigned`, the evaluation method (`heuristic` / `neural`). It is outside the signed bytes, so a relay
   could have changed it;
 - `byName`, the name the attester announced when it connected, only when it is a direct peer. It is a label,
@@ -35,10 +36,13 @@ Fields this node adds, which the signature does not vouch for:
 A duplicate, a rate-limited copy, a roster mismatch, an unknown attester or a bad signature emits nothing.
 Neither does this node's own verdict: read that from `svaf-decision` or `attestationsFor()`.
 
-The event is built from a copy and frozen, so a listener cannot change the stored record or what the next
-listener sees. Each listener is called on its own. One that throws (any value), or an async listener whose
-promise rejects, is logged with the attestation it was handling. It does not stop later listeners, undo the
-ingest, or become an unhandled rejection.
+The event holds only primitives and is frozen. A field the attester filled with an object is given as the
+string its signature covers, so a listener cannot change the stored record or what the next listener sees.
+Each listener is called on its own, in registration order, from a snapshot taken when dispatch starts. A
+listener that throws (any value), or an async listener whose promise rejects, is logged with the attestation
+it was handling. It does not stop later listeners, undo the ingest, or become an unhandled rejection. An event
+that cannot be built is reported on `metric` as `attestation-event-dropped`, and the attestation is still
+recorded. With no listener, none of this work is done.
 
 ## 0.13.13 (2026-10-01)
 
