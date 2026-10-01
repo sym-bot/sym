@@ -68,6 +68,48 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **Cold-start admissions had no tether (B-L6).**
 - The tether audit's fetch fallback no longer returns a local record the walk had refused.
 
+### Changed — read these before upgrading
+
+- **A stored record is exactly what its author signed.** The store used to add members to a
+  two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an expanded
+  top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and those
+  annotations live on the store **entry**. Stored files from earlier releases are read as before and
+  moved on first touch. **Code outside sym that reads `entry.cmb.admission`, `.tether`,
+  `.provenance` or `.collapsed`, from stored entries or from `cmb-accepted` / `memory-received`
+  events, must read them from the entry.** xmesh 0.10.11 reads both places.
+- **SVAF anchors decay with age (§9.2.1).** The gate treated every stored anchor as fresh at full
+  weight, because the anchor view carried neither the entry's age nor its weight. Anchors now carry
+  both: `storedAt`, and the store's §6.4 `anchorWeight` (2.0 once validated, 0.5 once dismissed, never
+  the sender's unsigned confidence). At the default freshness of 1800 s, an anchor older than about
+  nine hours carries no weight. **A node whose recent memory is all older than that admits the next
+  block under the empty-memory rule**, as §9.2.1 specifies.
+
+### Fixed — SVAF and the store
+
+- Anchor vectors are measured through a side map and are never written onto stored records, where a
+  later save persisted them.
+- A vector is cached under the kernel that produced it. When the semantic encoder finished loading
+  during a gate, lexical vectors were cached under the semantic key.
+- The neural admission path applies the §15.8 tether exactly as the heuristic path does, through the
+  same helpers. It stores a copy, never the caller's record. When a carried address did not match
+  the content, it now mints this node's own remix, as the heuristic path does; before, it rewrote the
+  author's record under the author's name with a signature that no longer covered it.
+- §15.8 severance no longer edits a signed record (that broke the author's signature). Severance is
+  recorded on the entry and in the lineage index, and every reader of stored lineage honours it:
+  the anchor walk, an index rebuild from disk, the tether audit, and mesh-agent's remix check.
+- The tether audit reads the store's lineage, not an `ancestors` list a sender chose, and never
+  fetches a local record the walk had refused.
+- A frame cannot supply `admission`, `tether`, `provenance`, `collapsed` or `svaf` that this node
+  would then store as its own.
+- The semantic encoder no longer starts a second model load while the first is loading.
+  `semanticSettled()` resolves when it is ready or has failed.
+
+### Fixed — dependencies
+
+- `npm audit` is clean. Floors are raised past the vulnerable versions, because `overrides` do not
+  reach a consumer's install: `ws` `^8.20.2`, `@huggingface/transformers` `^4.3.0`, and `sharp` and
+  `adm-zip` as overrides.
+
 ### Fixed — the daemon
 
 - **The log flood.** Every peer re-sends its whole wake-channel list on every connect, and the
@@ -99,6 +141,7 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   test on every platform. The lease test uses a live foreign holder with a real start time; it never
   reached the start-time check before, on any OS. The relay-only test uses the platform's IPC endpoint.
 - Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
+- Tests wait on what they test instead of fixed sleeps: in-flight frames, and the encoder's own load.
 
 ## 0.13.14 (2026-10-01)
 
