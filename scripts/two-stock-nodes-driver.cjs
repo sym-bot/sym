@@ -101,16 +101,17 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   const stored = evt.entry;
   assert.ok(stored, 'ADMIT: the admitted record must be handed back as a stored entry');
 
-  // The durable, signed record of the verdict is the Admission Attestation on the remix — the
-  // heuristic gate (the ratified production default) carries no `svaf` block on the entry, so
-  // asserting one here would have gated on the neural path nobody runs.
-  const admission = stored.cmb && stored.cmb.admission;
+  // The durable, signed record of the verdict is the Admission Attestation on the remix's store
+  // entry, beside the record (§8.8.1: the record is exactly its two sections) — the heuristic gate
+  // (the ratified production default) carries no `svaf` block on the entry, so asserting one here
+  // would have gated on the neural path nobody runs.
+  const admission = stored.admission;
   assert.ok(admission, 'ADMIT: an admitted remix must carry its signed Admission Attestation');
   assert.strictEqual(admission.of, sent.key,
     `ADMIT: the attestation must bind A's record ${sent.key}, got ${admission.of}`);
   assert.strictEqual(admission.verdict, evt.decision,
     'ADMIT: the persisted verdict must be the verdict that was reached');
-  assert.ok(stored.cmb.provenance && typeof stored.cmb.provenance.totalDrift === 'number',
+  assert.ok(stored.provenance && typeof stored.provenance.totalDrift === 'number',
     'ADMIT: the remix must record the drift it was admitted at');
 
   // LINEAGE, AS v2 DEFINES IT. Heuristic fusion keeps the incoming category text verbatim and v2
@@ -120,7 +121,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   // are legitimate, so the gate asserts the property that must hold either way — the stored record
   // is reachable back to what A sent.
   const parents = (stored.cmb.metadata && stored.cmb.metadata.lineage && stored.cmb.metadata.lineage.parents) || [];
-  const collapsed = stored.key === sent.key && stored.cmb.collapsed === true;
+  const collapsed = stored.key === sent.key && stored.collapsed === true;
   assert.ok(collapsed || parents.includes(sent.key),
     `LINEAGE: stored remix must either collapse onto A's block ${sent.key} or parent it — ` +
     `got key ${stored.key}, parents [${parents.join(', ')}]`);
@@ -141,7 +142,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   assert.ok(survivor,
     `RESTART: after restarting B, the admitted record descending from ${sent.key} was not recallable ` +
     `(recall returned ${recalled.length} entr${recalled.length === 1 ? 'y' : 'ies'})`);
-  assert.ok(survivor.cmb && survivor.cmb.admission && survivor.cmb.admission.of === sent.key,
+  assert.ok(survivor.admission && survivor.admission.of === sent.key,
     'RESTART: the survivor must still carry the signed attestation of its admission — a record that ' +
     'survives without its verdict cannot be audited later');
   console.log(`  after restart B recalled it, lineage intact`);

@@ -86,9 +86,8 @@ function directedFrame(receiverNode, focusText, mood) {
   return frame;
 }
 
-async function settle(ms = 150) {
-  await new Promise((r) => setTimeout(r, ms));
-}
+// Waits for every in-flight frame to finish, not a fixed guess at how long that takes.
+const { settle } = require('./_settle');
 
 describe('inbound CMB surfacing — public real-time mesh claim', () => {
   it('a first-seen inbound CMB surfaces (admitted) — baseline receive works', async () => {

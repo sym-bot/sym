@@ -62,7 +62,8 @@ function signedCmbFrame(priv, createdBy = 'peerA') {
 
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
 const wire = (f) => JSON.parse(JSON.stringify(f));
-const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+// Waits for every in-flight frame to finish, not a fixed guess at how long that takes.
+const { settle } = require('./_settle');
 
 describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
   it('a node signs the CMBs it authors; the signature verifies against its own identity key', async () => {

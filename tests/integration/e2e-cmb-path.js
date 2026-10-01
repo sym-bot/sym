@@ -146,8 +146,8 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
       {
         const storedEntry = outcomes.memoryReceived.entry;
         assert.ok(storedEntry, 'memory-received event should carry the fused entry');
-        // The gate's evidence: the neural path writes `svaf`, the heuristic path `cmb.provenance`.
-        const evidence = storedEntry.svaf || storedEntry.cmb?.provenance;
+        // The gate's evidence, on the entry: the neural path writes `svaf`, the heuristic path `provenance`.
+        const evidence = storedEntry.svaf || storedEntry.provenance;
         assert.ok(evidence, 'an admission carries the SVAF evaluation (§9.2)');
         assert.ok(typeof evidence.totalDrift === 'number', 'totalDrift is numeric');
         // B adds no new cognition (the heuristic gate keeps the text verbatim), so content
