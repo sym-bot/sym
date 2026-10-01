@@ -13,6 +13,7 @@ const {
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
   normalizeMdnsHostname, pidIsAlive, lockHolderPid, log,
   acquireIdentityLock, readLockFile, processStartTime, _clearProcessStartTimeCache,
+  primeProcessStartTimes, _windowsStartTimes,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -346,6 +347,21 @@ describe('acquireIdentityLock', () => {
     _clearProcessStartTimeCache(); // a second real PowerShell call, not the cache
     assert.strictEqual(processStartTime(process.pid), a, 'same process, same string');
     assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
+  });
+
+  it('on Windows, one PowerShell call reads several pids and agrees with single reads', { skip: process.platform !== 'win32' }, () => {
+    // A pid that is gone must not cost the others their answer: PowerShell exits 1 when any id
+    // in the list is missing, and the lookup must still return the ones it read.
+    const both = _windowsStartTimes([process.pid, liveChild.pid, DEAD_PID]);
+    assert.strictEqual(both.has(DEAD_PID), false);
+    _clearProcessStartTimeCache();
+    primeProcessStartTimes([process.pid, liveChild.pid]);
+    const batched = [processStartTime(process.pid), processStartTime(liveChild.pid)];
+    assert.deepStrictEqual(batched, [both.get(process.pid), both.get(liveChild.pid)]);
+    assert.deepStrictEqual(batched, [
+      processStartTime(process.pid, { fresh: true }), processStartTime(liveChild.pid, { fresh: true }),
+    ], 'a single-pid read gives the same strings');
+    assert.match(String(batched[1]), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
   });
 
   it('on Windows, a lock recorded with a recycled PID\'s old start time is reclaimed', { skip: process.platform !== 'win32' }, () => {
