@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const realHome = os.homedir();
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-discovery-home-'));
+process.env.USERPROFILE = process.env.HOME; // os.homedir() reads USERPROFILE on Windows
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');

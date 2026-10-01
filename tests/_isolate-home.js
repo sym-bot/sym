@@ -23,6 +23,9 @@ const path = require('path');
 
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-test-home-'));
 process.env.HOME = sandbox;
+// os.homedir() reads USERPROFILE on Windows, not HOME: without this, Windows runs wrote into the
+// real ~/.sym and the ask tests read the user's real mesh memory.
+process.env.USERPROFILE = sandbox;
 
 process.once('exit', () => {
   try {
