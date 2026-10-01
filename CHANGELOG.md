@@ -9,16 +9,18 @@ review of the first cut. Every bug listed here has a test that fails on 0.13.11.
 
 §9.2.2 says a CMB addressed to this node surfaces regardless of the SVAF verdict. Three paths dropped one anyway:
 
-- A directed reply citing one of the receiver's own CMBs as its parent was skipped as an echo. Echo
-  suppression now applies to broadcasts only.
+- A directed reply citing one of the receiver's own CMBs as its parent was skipped as an echo. A reply its
+  author signed to this node (the signed `metadata.to`) is now exempt from echo suppression. A record that is
+  only flagged directed in the unsigned frame is not, so no peer can reopen the §14 ping-pong. A verified
+  record whose signed addressee is not this node is not treated as directed, whatever the frame says.
 - Receive-path de-duplication used the content key for seven days, so a new directed send of words this node had
   already seen (a repeated "please review", or the same text earlier as a broadcast) never surfaced. A directed
   CMB that verifies is now de-duplicated on its assertion identity, or its signature until records carry
   `assertionId` (§8.8.2). A replay of the same signed record is still suppressed. A record that does not verify
   keeps the content key, so no unsigned field can widen the key.
 - A directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere. It now surfaces as
-  delivered-not-stored (`remixed: false`, `decision: 'redundant'`). The rest of the admitted path runs as
-  before, for directed and broadcast CMBs alike.
+  delivered-not-stored (`remixed: false`), with `decision: 'redundant'`, or `'not-stored'` when the store's
+  write failed. The rest of the admitted path runs as before, for directed and broadcast CMBs alike.
 
 A rejected directed CMB with a non-neutral mood still delivers its mood on the separate §9.3 channel
 (`mood-delivered`) as well as surfacing.
@@ -29,7 +31,7 @@ When an admitted CMB added nothing new, the receiver stored it at the author's a
 set to the receiver, a fresh timestamp and no signature, and served that record to anyone who fetched the
 address. The author's record is now kept as signed, on the heuristic and the neural path:
 
-- its categories, including each category's signed `meta`;
+- its categories, including each category's signed `meta` and the mood's valence and arousal;
 - its metadata, signature and lineage.
 
 The stored record verifies under the author's key. A pre-boundary record (§7.8) cannot be kept as signed in
@@ -39,8 +41,12 @@ that shape, but its author name is kept.
 
 - A directed send of the same words as the node's latest CMB, or of a record already stored, used to send
   nothing (returning `{collapsed: true}` or `null`). It now sends the freshly signed record to that peer, a new
-  assertion that the peer surfaces, and carries the same `delivery` result as any other send. The already-stored
-  case returns the stored entry with `duplicate: true`.
+  assertion that the peer surfaces, and carries the same `delivery` result as any other send.
+  - The already-stored case returns an entry built from the caller's record, with `duplicate: true`.
+  - A caller-supplied `opts.cmb` that collapses cannot be re-signed, so it is not sent. Its `delivery` says
+    `undelivered`, with a reason.
+- A node's own records get strictly increasing `createdTimestamp`, so two sends of the same words in one
+  millisecond are still two assertions.
 - A record that collapses onto HEAD is re-signed after its self-edge lineage is cleared, so what is returned or
   sent still verifies.
 - `delivery.dispatched` counted frames handed to a closed socket or an unopened relay. Transports now return
@@ -78,16 +84,18 @@ The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-a
 - `inbox()` still returns it, with `acked: true`;
 - the ack is persisted.
 
-`inboxStatus()` adds `ackedEvicted` (read items evicted before a drain), and an acked inbox no longer reports
-`neverDrained`.
+`inboxStatus()` adds `ackedEvicted` (read items evicted before a drain). `neverDrained` clears only when every
+item has been read. `stop()` flushes a pending inbox write, so a drain or an ack in the last second before
+shutdown is kept.
 
 ### Tests
 
 - The two integration tests that failed on 0.13.11 were stale, not broken code. `e2e-admission` put its nodes
   in different rooms, which 0.13.11 correctly refuses. `e2e-cmb-path` expected a remix record where content
   addressing collapses onto the author's record.
-- Both integration tests now stop their nodes in `finally`, so a failed assertion no longer hangs the run for
-  30 seconds.
+- Both integration tests now stop their nodes independently in `finally`, so a failed assertion no longer
+  hangs the run for 30 seconds.
+- `e2e-cmb-path` now requires a real CMB outcome, not just a liveness bump, and asserts the collapse directly.
 
 Known limit: identical arrivals handled concurrently can each pass de-duplication before SVAF finishes the
 first. This is pre-existing and affects broadcasts too.

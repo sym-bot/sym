@@ -137,6 +137,8 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
 
       // When SVAF admits the CMB, the stored remix must carry the MMP-spec
       // contract: svaf block + lineage.parents pointing to A's CMB.
+      assert.ok(outcomes.memoryReceived || outcomes.moodDelivered,
+        'nodeB produced a CMB outcome, not just a liveness bump');
       if (outcomes.memoryReceived && outcomes.memoryReceived.decision !== 'rejected') {
         const storedEntry = outcomes.memoryReceived.entry;
         assert.ok(storedEntry, 'memory-received event should carry the fused entry');
@@ -144,22 +146,17 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
         const evidence = storedEntry.svaf || storedEntry.cmb?.provenance;
         assert.ok(evidence, 'an admission carries the SVAF evaluation (§9.2)');
         assert.ok(typeof evidence.totalDrift === 'number', 'totalDrift is numeric');
-        if (storedEntry.key === entry.key) {
-          // Collapsed integration: B added no new cognition, so it keeps A's record as signed and
-          // mints nothing (the remix-rule RFC; §8.8.2 content addressing). No self-edge, A stays author.
-          assert.strictEqual(storedEntry.cmb?.metadata?.createdBy, aName, 'A remains the author');
-          const parents = storedEntry.cmb?.metadata?.lineage?.parents || [];
-          assert.ok(!parents.includes(entry.key), 'no K -> K self-edge');
-        } else {
-          // A genuine remix: new cognition, descended from A's CMB (§15.2).
-          const parents = storedEntry.cmb?.metadata?.lineage?.parents || storedEntry.cmb?.lineage?.parents || [];
-          assert.strictEqual(parents[0], entry.key, 'parent key points back to nodeA\'s original CMB');
-        }
+        // B adds no new cognition (the heuristic gate keeps the text verbatim), so content
+        // addressing collapses onto A's record: B keeps it as signed and mints nothing (the
+        // remix-rule amendment, §15.5 collapsed integration). No self-edge, A stays author.
+        assert.strictEqual(storedEntry.key, entry.key, 'content addressing collapses onto the author\'s record');
+        assert.strictEqual(storedEntry.cmb?.metadata?.createdBy, aName, 'A remains the author');
+        const parents = storedEntry.cmb?.metadata?.lineage?.parents || [];
+        assert.ok(!parents.includes(entry.key), 'no K -> K self-edge');
       }
 
     } finally {
-      await nodeA.stop();
-      await nodeB.stop();
+      await Promise.allSettled([nodeA.stop(), nodeB.stop()]);
       fs.rmSync(nodeDir(aName), { recursive: true, force: true });
       fs.rmSync(nodeDir(bName), { recursive: true, force: true });
     }
@@ -215,9 +212,7 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
       assert.ok(cGotIt, 'nodeC frame-handler must process inbound broadcast CMB');
 
     } finally {
-      await nodeA.stop();
-      await nodeB.stop();
-      await nodeC.stop();
+      await Promise.allSettled([nodeA.stop(), nodeB.stop(), nodeC.stop()]);
       fs.rmSync(nodeDir(aName), { recursive: true, force: true });
       fs.rmSync(nodeDir(bName), { recursive: true, force: true });
       fs.rmSync(nodeDir(cName), { recursive: true, force: true });

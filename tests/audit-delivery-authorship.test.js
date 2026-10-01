@@ -61,10 +61,11 @@ const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focu
 const REJECTED = { decision: 'rejected', total_drift: 9, category_drifts: {}, gate_values: { g: 0 } };
 const NEUTRAL = { text: 'neutral', valence: 0, arousal: 0 };
 
-function mkCmb(focus, { by = 'peerA', parents, mood = NEUTRAL } = {}) {
+function mkCmb(focus, { by = 'peerA', parents, mood = NEUTRAL, to } = {}) {
   const cmb = core.createCMB({
     categories: { focus, issue: 'audit regression', intent: 'verify', motivation: 'MMP 2.0 audit', commitment: 'guard', perspective: by, mood },
     createdBy: by,
+    to: to ?? null,
   });
   if (parents) cmb.metadata.lineage = { parents, method: 'rule-a' };
   return cmb;
@@ -83,15 +84,43 @@ function collect(node) {
 }
 
 describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
-  it('B-D1: a directed reply whose parent is the receiver\'s own CMB surfaces', async () => {
+  it('B-D1: a signed directed reply whose parent is the receiver\'s own CMB surfaces', async () => {
     await withNode('d1', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const mine = node.remember({ focus: 'my question to peerA', issue: 'x', intent: 'ask', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
       assert.ok(mine?.key, 'precondition: a local CMB exists');
       const seen = collect(node);
-      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('peerA answers your question', { parents: [mine.key] })));
+      const reply = signed(mkCmb('peerA answers your question', { parents: [mine.key], to: node.nodeId }));
+      node._frameHandler.handle('peerA', 'peerA', directed(node, reply));
       await settle();
       assert.strictEqual(seen.accepted.length, 1);
+    });
+  });
+
+  it('re-review F1: frame flags alone do not exempt a reply from echo suppression', async () => {
+    await withNode('d1-forged', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const mine = node.remember({ focus: 'my broadcast', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
+      const seen = collect(node);
+      // Unsigned, frame says directed: no authenticated addressee.
+      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('remix ping', { parents: [mine.key] })));
+      // Signed as a broadcast (metadata.to null), frame forged to say directed.
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('remix pong', { parents: [mine.key] }))));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 0, 'both are echoes of my own CMB');
+    });
+  });
+
+  it('re-review F1: a signed broadcast with a forged directed frame is not treated as directed', async () => {
+    await withNode('d1-signed-to', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(node);
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('signed for everyone'))));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 0, 'memory rejected it and it was never addressed to me');
     });
   });
 
@@ -115,7 +144,7 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       await settle();
       await tick();
       node._svafEvaluator.evaluate = async () => REJECTED; // memory refuses it; delivery must not
-      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('status: done'))));
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('status: done', { to: node.nodeId }))));
       await settle();
       assert.strictEqual(seen.accepted.length, 2, 'the broadcast and the later directed send both surface');
       assert.strictEqual(seen.accepted[1].directed, true);
@@ -127,7 +156,7 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       node._pinPeerKey('peerA', PEER_A.pub);
       node._svafEvaluator.evaluate = async () => REJECTED;
       const seen = collect(node);
-      const f = directed(node, signed(mkCmb('please review the fix list')));
+      const f = directed(node, signed(mkCmb('please review the fix list', { to: node.nodeId })));
       node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
       await settle();
       node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
@@ -162,7 +191,7 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       node._frameHandler.handle('peerA', 'peerA', frame(signed(mkCmb('ack'))));
       await settle();
       await tick();
-      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('ack'))));
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('ack', { to: node.nodeId }))));
       await settle();
       assert.strictEqual(seen.accepted.length, 2);
       assert.strictEqual(seen.accepted[1].directed, true);
@@ -189,6 +218,21 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       node._frameHandler.handle('peerA', 'peerA', frame(mkCmb('the build is red', { mood: { text: 'alarmed', valence: -0.7, arousal: 0.8 } })));
       await settle();
       assert.strictEqual(seen.moods, 1);
+    });
+  });
+});
+
+describe('re-review F7: a directed CMB the store failed to write', () => {
+  it('surfaces with decision not-stored, not redundant', async () => {
+    await withNode('f7', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      node._store._persist = () => false; // the disk refuses the write
+      const seen = collect(node);
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('store me', { to: node.nodeId }))));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1);
+      assert.strictEqual(seen.accepted[0].decision, 'not-stored');
     });
   });
 });
@@ -291,10 +335,12 @@ describe('inboxAck (channel push/receive share one id)', () => {
       assert.strictEqual(node.inboxAck(second.inboxId), false, 'acking twice is a no-op');
       assert.strictEqual(node.inboxAck('in9999'), false, 'unknown id');
       assert.strictEqual(node.inboxStatus().undrained, 1);
-      assert.strictEqual(node.inboxStatus().neverDrained, false, 'an ack is a read: the inbox is attended');
+      assert.strictEqual(node.inboxStatus().neverDrained, true, 're-review F4: one ack does not make an undrained inbox attended');
+      node.inboxAck(seen.accepted[0].inboxId);
+      assert.strictEqual(node.inboxStatus().neverDrained, false, 'every item read: the inbox is attended');
       const drained = node.inbox();
       assert.strictEqual(drained.drained, 2, 'acked items are returned, not skipped');
-      assert.deepStrictEqual(drained.messages.map((m) => !!m.acked), [false, true]);
+      assert.deepStrictEqual(drained.messages.map((m) => !!m.acked), [true, true]);
       assert.strictEqual(node.inboxStatus().undrained, 0);
     });
   });
@@ -309,8 +355,7 @@ describe('inboxAck (channel push/receive share one id)', () => {
       node._frameHandler.handle('peerA', 'peerA', frame(mkCmb('survives restart')));
       await settle();
       node.inboxAck(seen.accepted[0].inboxId);
-      await settle(1200); // the inbox write is throttled to one per second
-      await node.stop();
+      await node.stop(); // re-review F8: stop() flushes the throttled inbox write
       node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
       await node.start();
       assert.strictEqual(node.inboxStatus().undrained, 0);
@@ -331,7 +376,7 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
       const texts = ['lineage tether audit of the remix path', 'remix lineage tether audit, the sender label on the receive path'];
       for (const [i, focus] of texts.entries()) { // #0 takes the cold-start exit, #1 the main path
         const incoming = core.createCMB({
-          categories: { focus, issue: 'audit regression', intent: 'verify', motivation: 'MMP 2.0 audit', commitment: 'guard', perspective: 'claude-sym-agent-a', mood: NEUTRAL },
+          categories: { focus, issue: 'audit regression', intent: 'verify', motivation: 'MMP 2.0 audit', commitment: 'guard', perspective: 'claude-sym-agent-a', mood: { text: 'alarmed', valence: -0.7, arousal: 0.8 } },
           createdBy: 'claude-sym-agent-a',
           lineage: { parents: ['cmb-' + String(i).repeat(64)], method: 'rule-a' },
           // A signed per-category section that fusion must carry through (review F5).
@@ -352,6 +397,9 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
         assert.strictEqual(stored.cmb.metadata.createdTimestamp, incoming.metadata.createdTimestamp);
         assert.strictEqual(stored.cmb.metadata.sig, incoming.metadata.sig, `#${i} signature carried`);
         assert.strictEqual(core.verifyCMB(stored.cmb, PEER_A.pub).valid, true, `#${i} the stored record still verifies under the author's key`);
+        assert.deepStrictEqual(
+          { v: stored.cmb.categories.mood.valence, a: stored.cmb.categories.mood.arousal },
+          { v: -0.7, a: 0.8 }, `#${i} re-review F6: the author's affect is kept`);
         assert.deepStrictEqual(stored.cmb.metadata.lineage?.parents, incoming.metadata.lineage.parents, `#${i} author's lineage carried`);
       }
     } finally {
@@ -394,6 +442,47 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
       }));
     });
   }
+
+  it('re-review F9: two directed sends of the same words in one millisecond both surface', async () => {
+    await withNode('d5-a', (a) => withNode('d5-b', async (b) => {
+      pipe(a, b);
+      b._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(b);
+      a.remember(cats('ping'), { to: b.nodeId });
+      a.remember(cats('ping'), { to: b.nodeId }); // no await, no tick
+      await settle();
+      assert.strictEqual(seen.accepted.length, 2);
+    }));
+  });
+
+  it('re-review F2: a caller-supplied record that collapses is not sent unre-signed, and says so', async () => {
+    await withNode('d5-caller', async (node) => {
+      const frames = fakePeer(node, 'peer-a');
+      const first = node.remember(cats('forwarded'), { to: 'peer-a' });
+      const own = JSON.parse(JSON.stringify(first.cmb)); // a record the caller holds, already signed
+      const r = node.remember(null, { cmb: own, to: 'peer-a' }); // same content: collapses onto HEAD
+      assert.strictEqual(r.collapsed, true);
+      assert.strictEqual(r.delivery.undelivered, true, 'not sent, and the caller is told');
+      assert.strictEqual(frames.length, 1, 'only the first send went out');
+    });
+  });
+
+  it('re-review F5: a directed send matching a peer\'s stored CMB returns the caller\'s entry, not the peer\'s', async () => {
+    await withNode('d5-peer-dup', async (node) => {
+      fakePeer(node, 'peer-a');
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const shared = { focus: 'shared words', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'peerA', mood: NEUTRAL };
+      node._frameHandler.handle('peerA', 'peerA', frame(core.createCMB({ categories: shared, createdBy: 'peerA' })));
+      await settle();
+      const r = node.remember(shared, { to: 'peer-a' });
+      assert.strictEqual(r.duplicate, true);
+      for (const f of ['source', 'peerId', 'remixed', 'author', 'inboxId', 'svaf']) {
+        assert.strictEqual(r[f], undefined, `no peer provenance field ${f} on the caller's result`);
+      }
+      assert.strictEqual(typeof r.content, 'string');
+      assert.strictEqual(r.delivery.dispatched, 1);
+    });
+  });
 
   it('F12: a directed send of an already-stored record returns an entry with its delivery result', async () => {
     await withNode('d5-dup', async (node) => {

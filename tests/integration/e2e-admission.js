@@ -70,7 +70,7 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
       assert.deepStrictEqual(verifyAttestation(att, B._identity.publicKey), { signed: true, valid: true }, 'signature verifies against B\'s identity key');
 
     } finally {
-      await A.stop(); await B.stop();
+      await Promise.allSettled([A.stop(), B.stop()]);
       fs.rmSync(nodeDir(aName), { recursive: true, force: true });
       fs.rmSync(nodeDir(bName), { recursive: true, force: true });
     }
