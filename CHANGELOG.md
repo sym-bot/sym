@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.16 (2026-10-02)
+
+Follow-ups to the 0.13.15 witness-storm fix, from its last review.
+
+### Fixed
+
+- **The checkpoint log is read at start up to what its caps hold** (32 checkpoints for each of 1,024
+  attesters, 16 MiB), not 8 MiB.
+- **A waiting witness that signs a second root is a conflict**, surfaced once, as it is for a stored
+  one; it was taken for a duplicate.
+- **This node remembers a witness it signed even while that witness waits** for its checkpoint or is
+  refused. One its position is too full to hold is still written to the log, so after a restart the
+  node knows it signed it and does not sign it again.
+- **A conflict on a held position is remembered as long as the position is held**, so the conflicting
+  copy is appended and reported once; a position that is dropped takes its mark with it.
+- **A waiting witness read from the log is not appended to it again** when its checkpoint arrives.
+- **Peer-info gossip no longer floods the log.** Every peer re-sends its whole list on every connect,
+  and each frame logged one line per entry and rewrote the wake-channel file, so a daemon's log
+  reached 1 GB. Only a channel that changed is set and saved, with one line per frame, and a frame is
+  read for its first 256 entries (a longer one is said). The relay's peer list, sent on every connect,
+  is handled the same way. (Which source may replace a phone's token is fixed in 0.14.0.)
+
 ## 0.13.15 (2026-10-01)
 
 A hotfix for one fault: the witness storm. Every node should take it: a node keeps relaying the
