@@ -445,3 +445,85 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     }
   });
 });
+
+// The witness storm (2026-10-01): two signed copies of one witness were relayed back and forth by
+// every node without end. A node relays a witness once, whatever copy arrives, witnesses a checkpoint
+// once across restarts, and drops repeats before checking their signatures.
+describe('the witness storm', () => {
+  const { signCheckpoint, signWitness } = require('../lib/core');
+  const kp = () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+    return { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  };
+  const signed = (fields, priv, sign) => { const o = { ...fields }; sign(o, priv); return o; };
+
+  it('a second copy of a witness is not relayed, and a held checkpoint is not witnessed again', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-storm', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      const relayed = [];
+      node._gossipToRoster = (frame) => relayed.push(frame.type);
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness'], 'relayed once and witnessed once');
+      const copy = (at) => signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }, WIT.priv, signWitness);
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, true);
+      assert.strictEqual(node._ingestWitness(copy(2), 'node-wit').ok, false, 'a second signing of the same witness is not new');
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, false, 'nor is the first one, again');
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness', 'witness'], 'one relay per witness statement');
+      node._witnessCheckpoint(cp);
+      assert.strictEqual(relayed.length, 3, 'this node does not sign a second copy of its own witness');
+    });
+  });
+
+  it('a repeat is dropped before its signature is checked; nothing unverified changes state', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-early', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      node._gossipToRoster = () => {};
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      node._ingestCheckpoint(cp, 'node-att');
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, sig: 'not-a-signature' }, 'node-att').reason, 'duplicate', 'not even verified');
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: 'garbage' }, 'node-att').reason, 'bad-signature', 'a different root is verified first');
+      assert.strictEqual(node._attestations.hasConflict('node-att', 8), false, 'and an unverified one marks nothing');
+      const w = signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 }, WIT.priv, signWitness);
+      node._ingestWitness(w, 'node-wit');
+      assert.strictEqual(node._ingestWitness({ ...w, sig: 'garbage' }, 'node-wit').reason, 'duplicate');
+    });
+  });
+
+  it('a signed second root is a conflict: surfaced once, reported by reconcile, never relayed', () => {
+    const ATT = kp();
+    withNode('att-conflict', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      const relayed = [];
+      node._gossipToRoster = (f) => relayed.push(f.type);
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      const cp = (root, at) => signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root, at }, ATT.priv, signCheckpoint);
+      node._ingestCheckpoint(cp('r8', 1), 'peer-x');
+      const n = relayed.length;
+      assert.strictEqual(node._ingestCheckpoint(cp('r-after-reset', 2), 'peer-x').reason, 'conflict');
+      node._ingestCheckpoint(cp('r-after-reset', 3), 'peer-x');
+      assert.strictEqual(relayed.length, n, 'a conflict is not relayed');
+      const conflicts = metrics.filter((x) => x.type === 'attestation-conflict');
+      assert.strictEqual(conflicts.length, 1, 'said once per position');
+      assert.deepStrictEqual([conflicts[0].keptRoot, conflicts[0].otherRoot], ['r8', 'r-after-reset']);
+      assert.strictEqual(node.reconcileChain('node-att').conflicted, true);
+    });
+  });
+
+  it('a replayed checkpoint with its position spelled as text is refused', () => {
+    const ATT = kp();
+    withNode('att-text-seq', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._gossipToRoster = () => {};
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      node._ingestCheckpoint(cp, 'node-att');
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, upto_seq: '8' }, 'node-att').reason, 'malformed', 'refused before any signature check');
+      assert.deepStrictEqual(node._attestations.checkpointsOf('node-att').map((c) => c.upto_seq), [8]);
+    });
+  });
+});
