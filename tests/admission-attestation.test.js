@@ -522,8 +522,7 @@ describe('the witness storm', () => {
       node._gossipToRoster = () => {};
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');
-      assert.strictEqual(node._ingestCheckpoint({ ...cp, upto_seq: '8' }, 'node-att').ok, false);
-      assert.strictEqual(node._ingestCheckpoint({ ...cp, upto_seq: '08' }, 'node-att').ok, false);
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, upto_seq: '8' }, 'node-att').reason, 'malformed', 'refused before any signature check');
       assert.deepStrictEqual(node._attestations.checkpointsOf('node-att').map((c) => c.upto_seq), [8]);
     });
   });

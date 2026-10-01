@@ -15,25 +15,33 @@ storm until it runs this release.
   is now held once per (attester, position) and a witness once per (attester, position, witness): a
   later copy is a duplicate and is not relayed. A node witnesses a checkpoint once, across restarts.
 - **A second root for a held position is a conflict.** It is not stored or relayed; the first copy
-  stays held. The first time a position conflicts, an `attestation-conflict` metric names both roots,
-  and `reconcileChain` reports `conflicted: true`, so an attester that signed two roots (by
-  equivocating, or by restarting its chain after losing its log) is told apart from tampering.
+  stays held. The first time a checkpoint position conflicts, the conflicting copy is appended once
+  (so a restart re-derives the conflict), an `attestation-conflict` metric names both roots, and
+  `reconcileChain` reports `conflicted: true`, so an attester that signed two roots (by
+  equivocating, or by restarting its chain after losing its log) is told apart from tampering. A
+  witness that signs a second root raises the same metric (`kind: 'witness'`).
 - **A position is an integer.** The signed payload spells a position as text, so `8` and `"8"`
   verified alike and a replayed checkpoint could be stored under many positions; a position that is
-  not a non-negative integer is refused.
+  not a non-negative integer is refused, before any signature check.
 - **Repeats are cheap.** An attestation, checkpoint or witness already held is dropped before its
   signature is checked.
+- **A witness is kept only for a checkpoint this node holds.** One that arrives first waits in memory
+  (at most 2,048) until its checkpoint does, so no peer can grow the witness log with positions
+  nobody committed. A node also remembers the checkpoints it witnessed itself, so it signs a witness
+  once even after its witness index has dropped it.
 - **Checkpoints and witnesses are bounded.** At most 32 checkpoints per attester (dropping the oldest
-  with its witnesses), for at most 1,024 attesters, and 1,024 witnesses per witnessing node (20,000 in
-  all), so one peer cannot crowd out another's.
-- **An oversized attestation log is read from its newest 8 MiB only.** Reading the whole of one held
-  a node's thread for minutes at every start. The logs are append-only and are not rewritten; one
-  grown by the storm keeps its size on disk, and stops growing.
+  with its witnesses), for at most 1,024 attesters, and 256 witnesses per checkpoint (50,000 in all,
+  the oldest checkpoints' witnesses dropped first).
+- **An oversized attestation log is read from its newest part only.** Each log is read at start up
+  to a budget that covers what its cap holds (attestations 64 MiB, witnesses 32 MiB, checkpoints
+  8 MiB); reading the whole of one grown by the storm held a node's thread for minutes. The logs are
+  append-only and are not rewritten: one grown by the storm keeps its size on disk, and stops growing.
 
 ### Not in this release
 
 The logs are still not rotated, and gossiped attestations still have no per-peer budget beyond the
-existing per-(CMB, attester) limit; both are planned for 0.14.0.
+existing per-(CMB, attester) limit (whose table now drops closed windows); both are planned for
+0.14.0.
 
 ## 0.13.14 (2026-10-01)
 
