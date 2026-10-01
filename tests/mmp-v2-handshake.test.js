@@ -123,3 +123,33 @@ describe('MMP v2.0 transcript construction + extension binding', () => {
     assert.ok(buildTranscript(withExt).includes(Buffer.from(EXT_CMB_ENCRYPTED_V2, 'utf8')));
   });
 });
+
+// The room and the two names are the human-typed values in the transcript, and the same visible
+// text arrives as different code points depending on where it was typed (macOS tends to NFD,
+// most other systems NFC). The reference NFC-normalizes them; a transcript that did not would
+// make two honest peers hash different bytes and reject each other's proofs.
+describe('MMP v2.0 transcript: room and names are NFC-normalized', () => {
+  const NFC = 'café-rööm';                 // composed é, ö
+  const NFD = 'café-rööm';              // e + combining acute, o + combining diaeresis
+  const withText = (room, clientName, serverName) => {
+    const h = JSON.parse(JSON.stringify(vec.fixture.handshake));
+    h.room = room;
+    h.client.name = clientName;
+    h.server.name = serverName;
+    return h;
+  };
+
+  it('precondition: the two spellings are different code points for the same text', () => {
+    assert.notStrictEqual(NFC, NFD);
+    assert.strictEqual(NFD.normalize('NFC'), NFC);
+  });
+
+  it('a decomposed room or name produces the same transcript bytes as the composed one', () => {
+    const composed = buildTranscript(withText(NFC, NFC, NFC));
+    assert.strictEqual(buildTranscript(withText(NFD, NFC, NFC)).toString('hex'), composed.toString('hex'), 'room');
+    assert.strictEqual(buildTranscript(withText(NFC, NFD, NFC)).toString('hex'), composed.toString('hex'), 'client name');
+    assert.strictEqual(buildTranscript(withText(NFC, NFC, NFD)).toString('hex'), composed.toString('hex'), 'server name');
+    assert.ok(composed.includes(Buffer.from(NFC, 'utf8')), 'the transcript carries the composed form');
+    assert.ok(!buildTranscript(withText(NFD, NFD, NFD)).includes(Buffer.from(NFD, 'utf8')), 'never the decomposed one');
+  });
+});
