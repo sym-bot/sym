@@ -190,7 +190,7 @@ describe('AttestationStore — one record per statement, bounded, archived', () 
     assert.strictEqual(st.recordWitness(w('copy-1')).stored, true);
     assert.deepStrictEqual(st.recordWitness(w('copy-2', { at: 2 })), { stored: false, reason: 'duplicate' });
     assert.deepStrictEqual(st.recordWitness(w('copy-1')), { stored: false, reason: 'duplicate' }, 'and the first copy is not new again');
-    assert.deepStrictEqual(st.recordWitness(w('other-root', { root: 'r-other' })), { stored: false, reason: 'conflict' });
+    assert.strictEqual(st.recordWitness(w('other-root', { root: 'r-other' })).reason, 'conflict');
     assert.strictEqual(st.witnessesFor('A', 8).length, 1);
     assert.strictEqual(st.hasWitnessed('A', 8, 'W1'), true);
   });
@@ -199,7 +199,11 @@ describe('AttestationStore — one record per statement, bounded, archived', () 
     const st = new AttestationStore();
     assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' }).stored, true);
     assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8-resigned' }), { stored: false, reason: 'duplicate' });
-    assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'c8x' }), { stored: false, reason: 'conflict' });
+    const c = st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'c8x' });
+    assert.strictEqual(c.reason, 'conflict');
+    assert.strictEqual(c.kept.root, 'r8', 'the first copy stays the one held');
+    assert.deepStrictEqual(st.conflictsOf('A').map((x) => [x.upto_seq, x.kept.root, x.conflicting.root]), [[8, 'r8', 'r-forked']], 'and the other is kept as evidence');
+    assert.strictEqual(st.hasConflict('A', 8), true);
   });
 
   it('checkpoints are bounded per attester, and a dropped checkpoint takes its witnesses with it', () => {
@@ -250,5 +254,94 @@ describe('AttestationStore — one record per statement, bounded, archived', () 
       const archived = fs.readdirSync(path.join(dir, 'archive'));
       assert.strictEqual(fs.statSync(path.join(dir, 'archive', archived[0])).size, size, 'the original is archived unchanged');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+// 0.13.15 hotfix review (F1, F2, F4, F5, F9, F10, F12, F13).
+describe('AttestationStore — rotation, archive and per-witness bounds', () => {
+  const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
+  const wit = (i, by = 'W') => ({ attester: 'A', upto_seq: i, root: `r${i}`, by, sig: `w${i}`.padEnd(80, 'x') });
+  const archives = (dir) => (fs.existsSync(path.join(dir, 'archive')) ? fs.readdirSync(path.join(dir, 'archive')) : []);
+
+  it('a held set larger than the budget rotates once per budget appended, not on every append (F1, F13)', () => {
+    const dir = tmp('att-thrash-');
+    try {
+      const st = new AttestationStore({ dir, maxWitnesses: 100000, maxWitnessesPerWitness: 100000, maxLiveBytes: 2048, maxArchiveBytes: 1e9 });
+      for (let i = 0; i < 2000; i++) st.recordWitness(wit(i));
+      const n = archives(dir).length;
+      // ~280 KB appended against a 2 KB budget: thrash would make ~2000 archives; doubling makes ~10.
+      assert.ok(n > 0 && n < 40, `${n} archives for 2000 appends`);
+      const again = new AttestationStore({ dir, maxWitnesses: 100000, maxWitnessesPerWitness: 100000 });
+      assert.strictEqual(again.witnessesFor('A', 1999).length, 1);
+      assert.strictEqual(again.witnessesFor('A', 0).length, 1, 'every held record is in the live log');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('two rotations in the same millisecond keep both archives (F2)', () => {
+    const dir = tmp('att-same-ms-');
+    try {
+      const st = new AttestationStore({ dir, maxArchiveBytes: 1e9 });
+      st.recordWitness(wit(1));
+      const RealDate = global.Date;
+      const fixed = RealDate.now();
+      global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } };
+      try {
+        st._rotate('witnesses.jsonl');
+        st.recordWitness(wit(2));
+        st._rotate('witnesses.jsonl');
+      } finally { global.Date = RealDate; }
+      assert.strictEqual(archives(dir).length, 2, archives(dir).join(','));
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a failure part way through a rotation leaves a complete live log (F5)', () => {
+    const dir = tmp('att-crash-');
+    try {
+      const st = new AttestationStore({ dir });
+      for (let i = 0; i < 5; i++) st.recordWitness(wit(i));
+      const before = fs.readFileSync(path.join(dir, 'witnesses.jsonl'), 'utf8');
+      const realRename = fs.renameSync;
+      fs.renameSync = () => { throw Object.assign(new Error('disk gone'), { code: 'EIO' }); };
+      try { st._rotate('witnesses.jsonl'); } finally { fs.renameSync = realRename; }
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'witnesses.jsonl'), 'utf8'), before, 'the live log is untouched');
+      assert.strictEqual(new AttestationStore({ dir }).witnessesFor('A', 4).length, 1);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('archive/ is bounded per log, oldest first, never the newest (F12)', () => {
+    const dir = tmp('att-archive-');
+    try {
+      const st = new AttestationStore({ dir, maxLiveBytes: 1024, maxArchiveBytes: 4096, maxWitnesses: 10 });
+      for (let i = 0; i < 500; i++) st.recordWitness(wit(i));
+      const files = archives(dir);
+      const total = files.reduce((s, f) => s + fs.statSync(path.join(dir, 'archive', f)).size, 0);
+      const newest = Math.max(...files.map((f) => fs.statSync(path.join(dir, 'archive', f)).size));
+      assert.ok(files.length >= 1 && total <= 4096 + newest, `${files.length} archives, ${total} bytes`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('one witnessing node cannot evict another\'s witnesses (F4)', () => {
+    const st = new AttestationStore({ maxWitnessesPerWitness: 50, maxWitnesses: 120 });
+    for (let i = 0; i < 20; i++) st.recordWitness(wit(i, 'honest'));
+    for (let i = 0; i < 5000; i++) st.recordWitness({ ...wit(1000 + i, 'flooder'), attester: `fake-${i}` });
+    let honest = 0; for (let i = 0; i < 20; i++) honest += st.witnessesFor('A', i).length;
+    assert.strictEqual(honest, 20, 'the honest witness keeps all of its own');
+  });
+
+  it('a refused checkpoint leaves no empty entry, and the attester count is bounded (F9)', () => {
+    const st = new AttestationStore({ maxAttesters: 3 });
+    st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r', sig: 's' });
+    st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r', sig: 's2' });
+    for (const by of ['B', 'C', 'D', 'E']) st.recordCheckpoint({ by, upto_seq: 1, root: 'r', sig: by });
+    assert.strictEqual(st._checkpoints.size, 3);
+    assert.strictEqual(st.latestCheckpoint('A'), null, 'the least recently updated gave up its place');
+  });
+
+  it('ids containing the old separator are evicted cleanly (F10)', () => {
+    const st = new AttestationStore({ maxWitnessesPerWitness: 2 });
+    for (let i = 0; i < 6; i++) st.recordWitness({ attester: 'a|b', upto_seq: i, root: 'r', by: 'w|x', sig: `s${i}` });
+    let held = 0; for (let i = 0; i < 6; i++) held += st.witnessesFor('a|b', i).length;
+    assert.strictEqual(held, 2);
+    assert.strictEqual(st._witnessCount, 2);
   });
 });

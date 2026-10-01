@@ -13,17 +13,27 @@ storm until it runs this release.
   node stored and relayed it again. On one host this grew one node's `witnesses.jsonl` to 625,079
   lines (257 MB) of two witnesses, re-read at every start, and kept every node in the room busy
   relaying them. A checkpoint is now held once per (attester, position) and a witness once per
-  (attester, position, witness): a later copy is a duplicate and is not relayed, and one asserting a
-  different root is a conflict, kept out. A node witnesses a checkpoint once, across restarts.
-- **The attestation logs are bounded.** At most 32 checkpoints per attester (with their witnesses)
-  and 20,000 witnesses are kept, the oldest dropped first. A log past 8 MiB is moved, unchanged, into
-  `attestations/archive/` and restarted from the records held, so nothing appended is lost. A node
-  reads only the live logs at start, and of an oversized log from an earlier release only its last
-  8 MiB; reading the whole of one held a node's thread for minutes.
-- **A repeat cost a signature check, and one peer could flood a node.** An attestation, checkpoint or
-  witness already held is dropped before its signature is verified. One peer's gossip frames
-  (attestation, checkpoint, witness) are capped at a burst of 500 and 100 a second; the excess is
-  dropped and counted (`gossip-rate-limited`).
+  (attester, position, witness): a later copy is a duplicate and is not relayed. A node witnesses a
+  checkpoint once, across restarts.
+- **Two roots for one position are kept as evidence.** A checkpoint or witness asserting a different
+  root for a held position is a conflict: the first copy stays the one relayed and reconciled
+  against, the other is kept (`conflictsOf`), an `attestation-conflict` metric names both roots, and
+  `reconcileChain` reports `conflicted: true`. An attester that signed two roots, whether by
+  equivocating or by restarting its chain after losing its log, is told apart from tampering.
+- **The attestation logs are bounded, and nothing appended is lost.** At most 32 checkpoints per
+  attester (for at most 1,024 attesters) and 1,024 witnesses per witnessing node (20,000 in all) are
+  kept, so one peer cannot evict another's. A log rotates once 8 MiB (or the size of what it holds,
+  if larger) has been appended since its last rotation: the old log is linked unchanged into
+  `attestations/archive/` under a unique name, and a new log with the records held replaces it by
+  rename, so a crash at any step leaves a complete log. `archive/` keeps at most 64 MiB per log, the
+  oldest dropped first. A node reads only the live logs at start, and of one over 64 MiB only its
+  newest 64 MiB; reading a whole oversized log held a node's thread for minutes.
+- **Repeats are cheap, and one peer cannot flood a node.** An attestation, checkpoint or witness
+  already held is dropped before its signature is checked. Only a new checkpoint or witness spends
+  its peer's gossip budget (a burst of 500, then 100 a second; the excess is dropped and counted,
+  `gossip-rate-limited`), so a storm of repeats cannot crowd out a genuine frame. Attestations are
+  not budgeted: a busy room's legitimate rate can exceed it, and a dropped one reads as an omission.
+- The attestation ingest rate table drops windows that have closed, instead of growing without bound.
 
 ## 0.13.14 (2026-10-01)
 

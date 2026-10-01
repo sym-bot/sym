@@ -504,20 +504,48 @@ describe('gossip repeats are cheap, and one peer cannot flood a node', () => {
     });
   });
 
-  it('one peer past its gossip budget is dropped and counted; another peer is unaffected', () => {
+  it('only new frames spend a peer\'s budget, which is a burst of 500 then 100 a second (F6, F11)', () => {
     withNode('att-rate', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      const t0 = 1_000_000;
+      let allowed = 0;
+      for (let i = 0; i < 2000; i++) if (node._gossipBudget('flooder', t0)) allowed++;
+      assert.strictEqual(allowed, 500, 'the burst, exactly');
+      assert.strictEqual(node._gossipBudget('flooder', t0 + 10), true, 'refilled after 10 ms: one token');
+      assert.strictEqual(node._gossipBudget('quiet-peer', t0), true, 'another peer has its own budget');
+    });
+  });
+
+  it('repeats do not spend the budget, so a storm of them cannot crowd out a new witness (F6)', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-repeat', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      node._gossipToRoster = () => {};
       node._roomDoor = () => ({ pass: true });
-      let ingested = 0;
-      node._ingestWitness = () => { ingested++; return { ok: false }; };
+      const cp = { type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 };
+      signCheckpoint(cp, ATT.priv);
+      // As frames from one peer, the way the storm arrives.
+      for (let i = 0; i < 5000; i++) node._frameHandler.handle('peer-x', 'peer-x', { type: 'checkpoint', checkpoint: cp });
+      const w = { type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 };
+      signWitness(w, WIT.priv);
+      node._frameHandler.handle('peer-x', 'peer-x', { type: 'witness', witness: w });
+      assert.strictEqual(node._attestations.hasWitnessed('node-att', 8, 'node-wit'), true, 'the new witness got through after 5000 repeats');
+    });
+  });
+
+  it('a conflicting checkpoint is surfaced and reconcile reports it as a conflict (F3, F7)', () => {
+    const ATT = kp();
+    withNode('att-conflict', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._gossipToRoster = () => {};
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
-      const frame = { type: 'witness', witness: { attester: 'a', upto_seq: 1, root: 'r', by: 'b', sig: 's' } };
-      for (let i = 0; i < 2000; i++) node._frameHandler.handle('flooder', 'flooder', frame);
-      assert.ok(ingested <= 520, `at most the burst (and what refilled meanwhile) was handled: ${ingested}`);
-      assert.ok(metrics.some((m) => m.type === 'gossip-rate-limited' && m.from === 'flooder'));
-      const before = ingested;
-      node._frameHandler.handle('quiet-peer', 'quiet-peer', frame);
-      assert.strictEqual(ingested, before + 1, 'another peer has its own budget');
+      const cp = (root) => { const c = { type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root, at: 1 }; signCheckpoint(c, ATT.priv); return c; };
+      node._ingestCheckpoint(cp('r8'), 'peer-x');
+      assert.strictEqual(node._ingestCheckpoint(cp('r-after-reset'), 'peer-x').reason, 'conflict');
+      const m = metrics.find((x) => x.type === 'attestation-conflict');
+      assert.ok(m && m.keptRoot === 'r8' && m.otherRoot === 'r-after-reset', JSON.stringify(m));
+      assert.strictEqual(node.reconcileChain('node-att').conflicted, true);
     });
   });
 });
