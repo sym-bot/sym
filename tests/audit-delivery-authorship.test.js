@@ -728,3 +728,29 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
     });
   });
 });
+
+// 0.13.15 review F7: a hedged Ed25519 signer (WebKit) signs one assertion differently each time, so
+// a mark taken from the signature bytes named one directed assertion twice.
+describe('directed de-duplication marks the assertion, not its signature bytes', () => {
+  const { assertionMark } = require('../lib/frame-handler');
+  const crypto = require('crypto');
+  const otherSig = () => crypto.randomBytes(64).toString('base64url');
+
+  it('two signatures over one v2.0 assertion give one mark; different words give another', () => {
+    const cmb = core.createCMB({ categories: { focus: 'directed once' }, createdBy: 'alice', emitV2: true, createdByNodeId: 'node-alice', room: 'default' });
+    const a = structuredClone(cmb); a.metadata.sig = otherSig();
+    const b = structuredClone(cmb); b.metadata.sig = otherSig();
+    assert.strictEqual(assertionMark(a), assertionMark(b));
+    assert.match(assertionMark(a), /^asrt-/);
+    const other = core.createCMB({ categories: { focus: 'directed twice' }, createdBy: 'alice', emitV2: true, createdByNodeId: 'node-alice', room: 'default' });
+    other.metadata.sig = a.metadata.sig;
+    assert.notStrictEqual(assertionMark(other), assertionMark(a), 'the same signature bytes do not make two assertions one');
+  });
+
+  it('records of the older suite are marked by their preimage digest the same way', () => {
+    const cmb = core.createCMB({ categories: { focus: 'older suite' }, createdBy: 'alice', room: 'default' });
+    const a = structuredClone(cmb); a.metadata.sig = otherSig();
+    const b = structuredClone(cmb); b.metadata.sig = otherSig();
+    assert.strictEqual(assertionMark(a), assertionMark(b));
+  });
+});
