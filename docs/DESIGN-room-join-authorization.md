@@ -68,8 +68,9 @@ B cannot mint an invite for any room xmesh actually creates.
 
 ## What already exists to build on (read, not imagined)
 
-- **Ed25519 node identity** and **roster-keys** (`lib/roster-keys.js`): authenticated
-  nodeId→publicKey bindings with source precedence — anchor (2) > handshake (1) > grant (0);
+- **Ed25519 node identity** and **roster-keys** (`lib/roster-keys.js`): nodeId→publicKey
+  bindings (a handshake-learned key is trusted on first use until Core Secure proves possession)
+  with source precedence — anchor (2) > handshake (1) > grant (0);
   a gossiped grant can never overwrite a handshake-learned key; the relayer never vouches.
 - **Signed grants** along the rooted authority chain (`lib/role-grant-store.js`): a grant
   binds the grantee's key into the grantor's signed payload — tamper-evident vouching that
