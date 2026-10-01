@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // sandbox HOME/USERPROFILE before anything reads os.homedir()
+
 // `sym ask` — ask the whole mesh one question, get one answer.
 //
 // These tests run the CLI offline: no daemon, no LLM provider (env cleared),
@@ -18,7 +20,8 @@ const CLI = path.join(__dirname, '..', 'bin', 'sym.js');
 
 // Run `sym ask` with a throwaway mesh home and no LLM provider configured.
 function runAsk(homeDir, argv) {
-  const env = { ...process.env, HOME: homeDir };
+  // USERPROFILE too: os.homedir() reads it on Windows, where HOME alone left the child on the real profile.
+  const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
   // Force the no-provider path so the test is hermetic and free.
   for (const k of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'SYM_LLM_API_KEY', 'SYM_LLM_PROVIDER', 'CLAUDE_AGENT_MODEL']) {
     delete env[k];

@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * B-2 / AC-2.4 — Rule A and the collapse property.
  *
