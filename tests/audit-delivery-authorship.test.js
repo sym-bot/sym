@@ -194,6 +194,20 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
+  it('B-R8: a signed addressee decides: a relay that strips the frame\'s directed flag cannot turn it into a broadcast', async () => {
+    await withNode('r8', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => REJECTED; // as a broadcast it would be gated away
+      const seen = collect(node);
+      const f = frame(signed(mkCmb('for your eyes: the rollback plan', { to: node.nodeId })));
+      assert.strictEqual(f.directed, undefined, 'precondition: the frame does not say directed');
+      node._frameHandler.handle('peerA', 'peerA', f);
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1, 'it surfaces as the directed CMB its author signed');
+      assert.strictEqual(seen.accepted[0].directed, true);
+    });
+  });
+
   it('N1: a relay cannot replay a signed directed record by re-spelling its signature or adding an assertionId', async () => {
     await withNode('d2-respell', async (node) => {
       node._pinPeerKey('peerA', PEER_A.pub);
