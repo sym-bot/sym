@@ -146,7 +146,7 @@ describe('loopback self-clean on abrupt exit', () => {
       process.exit(0);
     `;
     const r = spawnSync(process.execPath, ['-e', src], {
-      env: { ...process.env, HOME: tmpHome },
+      env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
       encoding: 'utf8',
     });
 

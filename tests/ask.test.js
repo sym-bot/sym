@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // sandbox HOME/USERPROFILE before anything reads os.homedir()
+
 // `sym ask` — ask the whole mesh one question, get one answer.
 //
 // These tests run the CLI offline: no daemon, no LLM provider (env cleared),

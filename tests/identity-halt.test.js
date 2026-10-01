@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // sandbox HOME/USERPROFILE before anything reads os.homedir()
+
 /**
  * B-3 / AC-3.2 — the system refuses to start rather than replace an identity.
  *

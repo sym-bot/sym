@@ -20,7 +20,7 @@ test('SYM_RELAY_ONLY=1: LAN discovery off, relay-auth still sent', async () => {
   wss.on('connection', (ws) => ws.on('message', (m) => { const f = JSON.parse(String(m)); if (f.type === 'relay-auth') auths.push(f); }));
   const relayUrl = `ws://127.0.0.1:${wss.address().port}`;
   const daemon = spawn(process.execPath, [path.join(__dirname, '..', 'bin', 'sym-daemon.js')], {
-    env: { ...process.env, HOME: home, SYM_SOCKET: path.join(home, 'd.sock'), SYM_NODE_NAME: 'relay-only-test',
+    env: { ...process.env, HOME: home, USERPROFILE: home, SYM_SOCKET: path.join(home, 'd.sock'), SYM_NODE_NAME: 'relay-only-test',
       SYM_ROOM: 'relay-only-room', SYM_RELAY_ONLY: '1', SYM_RELAY_URL: relayUrl, SYM_RELAY_TOKEN: 'x'.repeat(32) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
