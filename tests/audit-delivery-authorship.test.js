@@ -338,6 +338,25 @@ describe('author and inbox id on surfaced entries', () => {
     }
   });
 
+  it('a frame-supplied source never names the deliverer (agent-a review, mission-56a137ffa8e4 F2)', async () => {
+    for (const [label, verdict, mk] of [
+      ['admitted broadcast', ALIGNED, (node) => frame(mkCmb('forged deliverer A'))],
+      ['rejected directed', REJECTED, (node) => directed(node, mkCmb('forged deliverer B'))],
+    ]) {
+      await withNode(`src-${label.replace(' ', '-')}`, async (node) => {
+        node._svafEvaluator.evaluate = async () => verdict;
+        const seen = collect(node);
+        const f = mk(node);
+        f.source = node.name; // pose as the receiver itself
+        node._frameHandler.handle('peer-a-id', 'peerA', f);
+        await settle();
+        assert.strictEqual(seen.accepted.length, 1, label);
+        assert.ok(String(seen.accepted[0].source).endsWith('peerA'), `${label}: source names the connection, got ${seen.accepted[0].source}`);
+        assert.notStrictEqual(seen.accepted[0].source, node.name, `${label}: not the receiver's own name`);
+      });
+    }
+  });
+
   it('F15: an unverified createdByNodeId is not presented as the author identity, and msg.source is ignored', async () => {
     await withNode('author-forged', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;

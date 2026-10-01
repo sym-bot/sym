@@ -79,7 +79,8 @@ Every `cmb-accepted` entry carries `author: { name, nodeId, via: { name, nodeId 
 - `via` is the peer that delivered it.
 
 The store envelope's `source` (`"<receiver>+<sender>"`) is receiver-local bookkeeping and should not be
-displayed as the sender. Inbox items read `from` from the author.
+displayed as the sender. A `source` field in an incoming CMB frame is now ignored, so it can no longer name
+the deliverer. Before, a peer could pose as another peer, or as the receiver itself. Inbox items read `from` from the author.
 
 The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-accepted` listeners run.
 `node.inboxAck(id)` marks one item read out of cursor order:
