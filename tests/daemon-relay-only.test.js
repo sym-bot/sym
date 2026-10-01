@@ -19,6 +19,7 @@ const { WebSocketServer } = require('ws');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const net = require('net');
 const { ipcEndpoint } = require('../lib/platform');
 
 const BIN = path.join(__dirname, '..', 'bin');
@@ -84,6 +85,7 @@ test('a daemon with SYM_STATE_DIR keeps its own files in that root, not in ~/.sy
   // The relay config and the room live only in the root: a daemon reading ~/.sym finds neither.
   fs.writeFileSync(path.join(root, 'relay.env'), `SYM_RELAY_URL=ws://127.0.0.1:${wss.address().port}\nSYM_RELAY_TOKEN=${'y'.repeat(32)}\n`);
   fs.writeFileSync(path.join(root, 'room'), 'rooted-room');
+  fs.writeFileSync(path.join(root, 'tasks.json'), JSON.stringify({ tasks: [{ id: 'task-1', title: 'kept in the root', status: 'backlog' }], nextId: 2 }));
   const socket = path.join(base, 'r.sock');
   const env = { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: root, SYM_SOCKET: socket, SYM_NODE_NAME: 'rooted-test', SYM_RELAY_ONLY: '1' };
   delete env.SYM_RELAY_URL; delete env.SYM_RELAY_TOKEN; delete env.SYM_ROOM;
@@ -95,6 +97,32 @@ test('a daemon with SYM_STATE_DIR keeps its own files in that root, not in ~/.sy
     for (let i = 0; i < 100 && daemon.exitCode === null && !auths.length; i++) await new Promise((r) => setTimeout(r, 100));
     assert.ok(auths.length >= 1, `the relay config was read from the root; log:\n${out.slice(-800)}`);
     assert.match(out, /rooted-room/, 'the room was read from the root');
+    const endpoint = ipcEndpoint(socket);
+    for (let i = 0; i < 100 && !out.includes(`IPC server listening: ${endpoint}`); i++) await new Promise((r) => setTimeout(r, 100));
+    const ipc = (msg) => new Promise((resolve, reject) => {
+      const c = net.createConnection(endpoint);
+      let buf = '';
+      c.on('data', (d) => {
+        buf += d;
+        for (const line of buf.split('\n').slice(0, -1)) {
+          const m = JSON.parse(line);
+          if (m.type === 'result' && m.action === msg.type) { c.end(); resolve(m); return; }
+        }
+      });
+      c.on('error', reject);
+      c.on('connect', () => c.write(JSON.stringify(msg) + '\n'));
+    });
+    const listed = await ipc({ type: 'task-list' });
+    assert.deepEqual(listed.tasks.map((t) => t.title), ['kept in the root'], 'the task board was read from the root');
+    // A refused record answers with the SDK's reason and its code, so a client can say why.
+    const big = await ipc({ type: 'remember', categories: { focus: 'x'.repeat(300 * 1024) } });
+    assert.match(String(big.error), /at most/);
+    assert.equal(big.code, 'ECMBSIZE');
+    // A handler that throws answers the request with the error instead of leaving it unanswered.
+    assert.ok((await ipc({ type: 'remember', categories: { focus: 'one stored record' } })).key);
+    const bad = await ipc({ type: 'recall', query: 123 });
+    assert.ok(bad.error, `the throw is reported to the caller: ${JSON.stringify(bad)}`);
+    assert.equal(daemon.exitCode, null, 'and the daemon is still running');
     assert.equal(fs.existsSync(path.join(home, '.sym')), false, 'nothing was written to ~/.sym');
   } finally {
     daemon.kill('SIGTERM');

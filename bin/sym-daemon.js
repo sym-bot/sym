@@ -450,7 +450,7 @@ function handleIPCMessage(socketId, socket, msg) {
           }
         } catch (err) {
           log(`remember failed: ${err.message}`);
-          sendIPC(socket, { type: 'result', action: 'remember', error: err.message });
+          sendIPC(socket, { type: 'result', action: 'remember', error: err.message, code: err.code });
         }
       }
       break;
