@@ -46,6 +46,8 @@ test('SYM_RELAY_ONLY=1: LAN discovery off, relay-auth still sent, CLI reaches th
 
     // The relay leg, on its own.
     assert.match(out, /relay-only: LAN discovery off \(SYM_RELAY_ONLY\); joining ws:/, out.slice(-800));
+    assert.match(out, /Room beacon: off \(relay-only\)/, 'a relay-only daemon does not announce its room on the LAN');
+    assert.doesNotMatch(out, /Room beacon: room=/);
     assert.equal(auths.length >= 1, true, `relay-auth expected; log:\n${out.slice(-800)}`);
     assert.equal(auths[0].name, 'relay-only-test');
     assert.equal(typeof auths[0].engine, 'string');
@@ -69,5 +71,34 @@ test('SYM_RELAY_ONLY=1: LAN discovery off, relay-auth still sent, CLI reaches th
     daemon.kill('SIGTERM');
     await new Promise((r) => wss.close(() => r()));
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a daemon with SYM_STATE_DIR keeps its own files in that root, not in ~/.sym', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-rooted-'));
+  const home = path.join(base, 'home'); fs.mkdirSync(home);
+  const root = path.join(base, 'root'); fs.mkdirSync(root);
+  const wss = new WebSocketServer({ port: 0 });
+  const auths = [];
+  wss.on('connection', (ws) => ws.on('message', (m) => { const f = JSON.parse(String(m)); if (f.type === 'relay-auth') auths.push(f); }));
+  // The relay config and the room live only in the root: a daemon reading ~/.sym finds neither.
+  fs.writeFileSync(path.join(root, 'relay.env'), `SYM_RELAY_URL=ws://127.0.0.1:${wss.address().port}\nSYM_RELAY_TOKEN=${'y'.repeat(32)}\n`);
+  fs.writeFileSync(path.join(root, 'room'), 'rooted-room');
+  const socket = path.join(base, 'r.sock');
+  const env = { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: root, SYM_SOCKET: socket, SYM_NODE_NAME: 'rooted-test', SYM_RELAY_ONLY: '1' };
+  delete env.SYM_RELAY_URL; delete env.SYM_RELAY_TOKEN; delete env.SYM_ROOM;
+  const daemon = spawn(process.execPath, [path.join(BIN, 'sym-daemon.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  daemon.stdout.on('data', (b) => { out += b; });
+  daemon.stderr.on('data', (b) => { out += b; });
+  try {
+    for (let i = 0; i < 100 && daemon.exitCode === null && !auths.length; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(auths.length >= 1, `the relay config was read from the root; log:\n${out.slice(-800)}`);
+    assert.match(out, /rooted-room/, 'the room was read from the root');
+    assert.equal(fs.existsSync(path.join(home, '.sym')), false, 'nothing was written to ~/.sym');
+  } finally {
+    daemon.kill('SIGTERM');
+    await new Promise((r) => wss.close(() => r()));
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });

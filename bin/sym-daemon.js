@@ -61,7 +61,10 @@ require('../lib/core/state-root').assertTestSandbox();
 
 // ── Configuration ──────────────────────────────────────────────
 
-const SYM_DIR = path.join(os.homedir(), '.sym');
+// The daemon's own files live in the same state root as every node's: SYM_STATE_DIR when set, else
+// ~/.sym. Building it from the home dir sent a rooted daemon's room, tasks and relay.env to the
+// user's real ~/.sym.
+const SYM_DIR = require('../lib/core/state-root').SYM_STATE_DIR;
 const { getSocketPath, getLogDir } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or platform-scoped default
@@ -78,7 +81,7 @@ const LOG_DIR = getLogDir('sym-daemon');
 
 // Load relay config from ~/.sym/relay.env if env vars not set
 if (!process.env.SYM_RELAY_URL) {
-  const envFile = path.join(os.homedir(), '.sym', 'relay.env');
+  const envFile = path.join(SYM_DIR, 'relay.env');
   if (fs.existsSync(envFile)) {
     for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
       const m = line.match(/^(\w+)=(.*)$/);
@@ -871,7 +874,9 @@ async function main() {
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
 
-  startRoomBeacon();
+  // A relay-only daemon has LAN discovery off, so it must not announce its room on the LAN either.
+  if (RELAY_ONLY) log('Room beacon: off (relay-only)');
+  else startRoomBeacon();
 
   loadTasks();
   log(`Loaded ${tasks.size} task(s)`);
