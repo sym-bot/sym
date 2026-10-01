@@ -228,10 +228,13 @@ function startIPCServer() {
         const line = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 1);
         if (line.trim()) {
+          let msg;
+          try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
           try {
-            handleIPCMessage(socketId, socket, JSON.parse(line));
+            handleIPCMessage(socketId, socket, msg);
           } catch (err) {
-            log(`IPC parse error: ${err.message}`);
+            log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
+            if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
           }
         }
       }
