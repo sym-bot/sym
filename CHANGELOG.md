@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.13.13 (unreleased)
+## 0.13.13 (2026-10-01)
 
 ### Fixed — a crashed Windows session no longer locks its node name until reboot
 
