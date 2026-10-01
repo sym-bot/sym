@@ -1,5 +1,7 @@
 'use strict';
 
+require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * End-to-end checkpoint + witness cycle (Phase D3).
  *

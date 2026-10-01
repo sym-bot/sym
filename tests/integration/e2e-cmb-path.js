@@ -1,5 +1,7 @@
 'use strict';
 
+require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * End-to-end CMB path integration test — MMP §4.2 wire frame, §4.4.4
  * targeted routing envelope, §9.2 receiver-autonomous SVAF evaluation,

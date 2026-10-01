@@ -1,5 +1,7 @@
 'use strict';
 
+require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * End-to-end Admission Attestation — the gate attaches a signed attestation to the
  * remix it stores (MMP admission-attestation layer, Phase C).
