@@ -15,6 +15,10 @@ Follow-ups to the 0.13.15 witness-storm fix, from its last review.
 - **A conflict on a held position is remembered as long as the position can be held**, so the
   conflicting copy is appended and reported once, not again after 1,024 other conflicts.
 - **A waiting witness read from the log is not appended to it again** when its checkpoint arrives.
+- **Peer-info gossip no longer floods the log.** Every peer re-sends its whole list on every connect,
+  and each frame logged one line per entry and rewrote the wake-channel file, so a daemon's log
+  reached 1 GB. Only a channel that changed is set and saved, with one line per frame, and a frame is
+  read for its first 256 entries. (Which source may replace a phone's token is fixed in 0.14.0.)
 
 ## 0.13.15 (2026-10-01)
 
