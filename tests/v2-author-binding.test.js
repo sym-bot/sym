@@ -91,3 +91,23 @@ describe('assertionId (B-R6)', () => {
     });
   });
 });
+
+describe('the inbox names a proven author (K5)', () => {
+  it('a relayed v2.0 record verified against its signed node id is from its author, not the relay', async () => {
+    const name = `v2inbox-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      node._pinPeerKey('node-alice', ALICE.pub);
+      node._pinPeerKey('node-relay', RELAY.pub);
+      node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
+      const got = [];
+      node.on('cmb-accepted', (e) => got.push(e));
+      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
+      await new Promise((r) => setTimeout(r, 150));
+      assert.strictEqual(got.length, 1);
+      assert.strictEqual(got[0].author.nodeId, 'node-alice');
+      assert.strictEqual(node.inboxGet(got[0].inboxId).from, 'alice');
+    } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+});

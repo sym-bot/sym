@@ -381,7 +381,7 @@ describe('F3: an admitted broadcast the store already holds', () => {
 });
 
 describe('author and inbox id on surfaced entries', () => {
-  it('carries the author and the delivering peer, and the inbox reads the author', async () => {
+  it('carries the author and the delivering peer; the inbox `from` is the peer when nothing proves the author (K5)', async () => {
     await withNode('author', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const seen = collect(node);
@@ -392,8 +392,23 @@ describe('author and inbox id on surfaced entries', () => {
       assert.ok(!String(e.author.name).includes('+'));
       const item = node.inboxGet(e.inboxId);
       assert.ok(item, 'the surfaced entry names its inbox id');
-      assert.strictEqual(item.from, 'claude-sym-agent-a');
+      assert.strictEqual(item.from, 'peerA', 'an unsigned claim is not who the inbox says it is from');
+      assert.strictEqual(item.author.name, 'claude-sym-agent-a', 'the claim is kept, as a claim');
       assert.strictEqual(item.seq, e.inboxSeq);
+    });
+  });
+
+  it('K5: the inbox `from` is the author when its signature proved who that is', async () => {
+    await withNode('author-proven', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const seen = collect(node);
+      const cmb = signed(mkCmb('proven authorship', { by: 'peerA' }));
+      cmb.metadata.createdByNodeId = undefined;
+      node._frameHandler.handle('peerA', 'peerA', frame(cmb));
+      await settle();
+      const item = node.inboxGet(seen.accepted[0].inboxId);
+      assert.strictEqual(item.from, 'peerA');
     });
   });
 
