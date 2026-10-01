@@ -1,6 +1,7 @@
 {
   "protocolVersion": "2.0",
   "warning": "all private keys and nonces are fixed conformance fixtures",
+  "usage": "Verification only, for clientProofBase64url and serverProofBase64url: check that your implementation ACCEPTS each proof over its pinned payload and key; never sign the payload and compare bytes. Every other pinned value here — transcript hash, HKDF outputs, key confirmations — is deterministic and MUST reproduce exactly.",
   "fixture": {
     "handshake": {
       "protocolVersion": "2.0",

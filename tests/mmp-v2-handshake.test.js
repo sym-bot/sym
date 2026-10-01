@@ -1,8 +1,10 @@
 'use strict';
 
 // MMP v2.0 handshake proof-of-possession conformance (P0.3). sym must reproduce
-// meshcognition.org's transcript hash, session id, and proofs byte-for-byte, and must REJECT an
-// unproven/tampered handshake — the impersonation fix. Vector: website #12, digest-pinned.
+// meshcognition.org's transcript, transcript hash, session id, proof payloads and key schedule
+// byte-for-byte, must ACCEPT the published proofs, and must REJECT an unproven/tampered
+// handshake — the impersonation fix. Vector: the published handshake-v2.json, copied verbatim
+// (digest pinned in mmp-v2-vectors-published.test.js).
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
@@ -31,13 +33,36 @@ describe('MMP v2.0 handshake proof-of-possession (P0.3)', () => {
     assert.strictEqual(sessionIdFromTranscript(tx), e.sessionId);
   });
 
-  it('client proof payload is byte-identical to the vector', () => {
+  it('client and server proof payloads are byte-identical to the vector', () => {
     assert.strictEqual(proofPayload('client', tx).toString('hex'), e.clientProofPayloadHex);
+    assert.strictEqual(proofPayload('server', tx).toString('hex'), e.serverProofPayloadHex);
   });
 
-  it('client and server proofs are byte-identical to the vector', () => {
-    assert.strictEqual(signProof('client', tx, vec.fixture.clientIdentityPrivateSeedBase64url), e.clientProofBase64url);
-    assert.strictEqual(signProof('server', tx, vec.fixture.serverIdentityPrivateSeedBase64url), e.serverProofBase64url);
+  // The vector's `usage` (2026-09-14 errata): the proofs are for VERIFICATION only — never sign
+  // the payload and compare bytes, because a hedged Ed25519 signer (WebKit, CryptoKit) returns a
+  // different valid signature on every call. Every other pinned value here is deterministic and
+  // is compared exactly. So our own proofs are checked the way the contract checks anyone's:
+  // two signings over one transcript both verify, and nothing is asserted about their bytes.
+  it('the vector marks the proofs as verification-only', () => {
+    assert.match(vec.usage, /Verification only/);
+    assert.match(vec.usage, /clientProofBase64url and serverProofBase64url/);
+  });
+
+  it('our proofs verify against the presented identity keys (signed twice, bytes not compared)', () => {
+    for (const [role, seed, pub] of [
+      ['client', vec.fixture.clientIdentityPrivateSeedBase64url, clientPub],
+      ['server', vec.fixture.serverIdentityPrivateSeedBase64url, serverPub],
+    ]) {
+      const a = signProof(role, tx, seed);
+      const b = signProof(role, tx, seed);
+      assert.ok(verifyProof(role, tx, a, pub), `${role}: first proof verifies`);
+      assert.ok(verifyProof(role, tx, b, pub), `${role}: second proof verifies`);
+    }
+  });
+
+  it('the presented identity keys are the ones the vector pins in the handshake', () => {
+    assert.strictEqual(clientPub, vec.fixture.handshake.client.identityPublicKey);
+    assert.strictEqual(serverPub, vec.fixture.handshake.server.identityPublicKey);
   });
 
   it('the published proofs verify against the presented identity keys', () => {
