@@ -237,6 +237,40 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
+  it('K1: two copies of one record in flight at once surface once', async () => {
+    await withNode('k1', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._pinPeerKey('peerB', PEER_A.pub);
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      node._svafEvaluator.evaluate = async () => { await gate; return ALIGNED; }; // the first copy is still in SVAF
+      const seen = collect(node);
+      const f = frame(signed(mkCmb('the same record, arriving twice')));
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      node._frameHandler.handle('peerB', 'peerB', JSON.parse(JSON.stringify(f))); // via a second peer, meanwhile
+      release();
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1);
+      assert.strictEqual(node._frameHandler._inFlightKeys.size, 0, 'the in-flight mark is released');
+    });
+  });
+
+  it('K3: a broadcast flood cannot evict a directed assertion mark', async () => {
+    await withNode('k3', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(node);
+      const f = directed(node, signed(mkCmb('approve the release', { to: node.nodeId })));
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      await settle();
+      const now = Date.now();
+      for (let i = 0; i <= 10000; i++) node._frameHandler._recordSeenCmbKey(`cmb-flood-${i}`, now);
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1, 'the replay is still recognised');
+    });
+  });
+
   it('F2: an unverified directed CMB cannot widen its de-duplication key with unsigned fields', async () => {
     await withNode('d2-unsigned', async (node) => {
       node._svafEvaluator.evaluate = async () => REJECTED;
