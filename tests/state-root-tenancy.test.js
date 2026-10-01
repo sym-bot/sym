@@ -84,3 +84,22 @@ test('and the SAME root still refuses a second holder — the single-writer rule
     assert.equal(out, 'REFUSED EIDENTITYLOCK', 'rooting the tree must not weaken the lock within a root');
   } finally { holder.kill(); }
 });
+
+// The CLI's own state follows SYM_STATE_DIR, as its daemon's does (0.13.15 review F5): rooted in
+// the home, two rooted deployments shared one pid file, so `sym stop` for one stopped the other,
+// and a room or relay set for a rooted daemon was written where that daemon never reads.
+test('the CLI reads its room from SYM_STATE_DIR, not the home (pid and relay.env resolve the same way)', () => {
+  const home = tmpdir('cli-home-');
+  const root = tmpdir('cli-root-');
+  try {
+    fs.writeFileSync(path.join(root, 'room'), 'rooted-room\n');
+    fs.mkdirSync(path.join(home, '.sym'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.sym', 'room'), 'home-room\n');
+    const env = { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: root };
+    const out = execFileSync(process.execPath, [path.resolve(__dirname, '..', 'bin', 'sym.js'), 'room'], { env, encoding: 'utf8' });
+    assert.match(out, /current room: rooted-room/, out);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

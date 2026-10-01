@@ -38,13 +38,18 @@ const { recordCreatedBy } = require('../lib/record');
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
 const { isValidRoom, roomServiceType } = require('../lib/rooms');
-const ROOM_FILE = path.join(os.homedir(), '.sym', 'room');
-const PID_FILE = path.join(os.homedir(), '.sym', 'daemon.pid');
+// The CLI's state lives where its daemon's does (SYM_STATE_DIR, default ~/.sym): rooted in the
+// home, two SYM_STATE_DIR deployments shared one pid file (`sym stop` for one stopped the other),
+// and a room or relay set for a rooted daemon went to a file it never reads.
+const { symPath } = require('../lib/core/state-root');
+const { NODES_DIR } = require('../lib/config');
+const ROOM_FILE = symPath('room');
+const PID_FILE = symPath('daemon.pid');
+const RELAY_ENV = symPath('relay.env');
 
 // Portable synchronous sleep — no shell dependency (`sleep` is POSIX-only and
 // absent on Windows). Used between daemon stop/start on a room switch.
@@ -139,9 +144,9 @@ function readRoom() {
 }
 
 function persistRelay(url, token, relayOnly) {
-  const dir = path.join(os.homedir(), '.sym');
+  const dir = path.dirname(RELAY_ENV);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const f = path.join(dir, 'relay.env');
+  const f = RELAY_ENV;
   const kv = {};
   try {
     for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
@@ -192,7 +197,7 @@ function applyStartFlags() {
 function readRelayEnv() {
   const kv = {};
   try {
-    for (const line of fs.readFileSync(path.join(os.homedir(), '.sym', 'relay.env'), 'utf8').split('\n')) {
+    for (const line of fs.readFileSync(RELAY_ENV, 'utf8').split('\n')) {
       const m = line.match(/^([A-Z_]+)=(.*)$/);
       if (m) kv[m[1]] = m[2];
     }
@@ -504,10 +509,10 @@ function cmdPublish() {
 async function standaloneObserve(categories, opts) {
   const { SymNode } = require('..');
 
-  // Load relay credentials from ~/.sym/relay.env if the env vars are
+  // Load relay credentials from the state root's relay.env if the env vars are
   // not already present. Same pattern as MeshAgent (sym/lib/mesh-agent.js:160).
   if (!process.env.SYM_RELAY_URL || !process.env.SYM_RELAY_TOKEN) {
-    const envFile = path.join(os.homedir(), '.sym', 'relay.env');
+    const envFile = RELAY_ENV;
     if (fs.existsSync(envFile)) {
       for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
         const m = line.match(/^(\w+)=(.*)$/);
@@ -636,7 +641,7 @@ function cmdRecall() {
   }
   const query = recallArgs.join(' ').toLowerCase();
 
-  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  const nodesDir = NODES_DIR;
   if (!fs.existsSync(nodesDir)) {
     console.log('No memories found.');
     return;
@@ -820,7 +825,7 @@ function broadcastQuestion(question) {
  * most recent memories when nothing matches, so `ask` always has context.
  */
 function gatherMeshMemory(question, limit) {
-  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  const nodesDir = NODES_DIR;
   if (!fs.existsSync(nodesDir)) return [];
   const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 
