@@ -145,4 +145,56 @@ describe('MMP §15.8 retroactive tether audit', () => {
       fs.rmSync(nodeDir(name), { recursive: true, force: true });
     }
   });
+
+  // The audit's knowledge of a remix's ancestry is the store's own closure, held on the entry and in
+  // its index. It used to read the closure off the RECORD, which held it only because the store
+  // stapled a copy there. On a two-section record the read found metadata.lineage instead, which
+  // carries direct parents only, or, from a non-conformant sender, an `ancestors` list the sender
+  // chose (§7.5: never carried, never trusted).
+  it('sever: the remix is unhooked from every ancestor the store indexed it under', async () => {
+    const name = `audit-unhook-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      await awaitSemantic();
+      const root = node.remember(cat7(TOPIC_A));
+      // A faithful hop, admitted from a verified peer, then a laundered hop citing it.
+      const hop = createCMB({ categories: cat7(`${TOPIC_A} for the second quarter`), createdBy: 'peer', lineage: { parents: [root.key], method: 'SVAF-v2' } });
+      node._store.receiveFromPeer('peer', { key: hop.metadata.key, content: 'hop', source: 'peer', cmb: hop, _cmbVerified: true });
+      const laundered = createCMB({ categories: cat7(TOPIC_B2), createdBy: 'peer', lineage: { parents: [hop.metadata.key], method: 'SVAF-v2' } });
+      node._store.receiveFromPeer('peer', { key: laundered.metadata.key, content: 'laundered', source: 'peer', cmb: laundered, _cmbVerified: true });
+      assert.ok(node._store.descendants(root.key).includes(laundered.metadata.key), 'precondition: indexed under the root through the hop');
+
+      const r = await node.auditLineageTethers({ sever: true });
+      assert.strictEqual(r.severed, 1, 'the laundered hop is severed');
+      for (const [label, k] of [['the hop', hop.metadata.key], ['the root', root.key]]) {
+        assert.ok(!node._store.descendants(k).includes(laundered.metadata.key), `no longer a descendant of ${label}`);
+      }
+      assert.deepStrictEqual(node._store.ancestors(laundered.metadata.key), [], 'a severed remix is a root in the index');
+      assert.deepStrictEqual(node._store.parents(laundered.metadata.key), []);
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
+
+  it('fetch: the candidates are the store\'s closure, never an ancestors list the record carries', async () => {
+    const name = `audit-anc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      const parent = 'cmb-' + 'a'.repeat(64);
+      const chosen = 'cmb-' + 'b'.repeat(64);
+      const cmb = createCMB({ categories: cat7(TOPIC_B), createdBy: 'peer' });
+      cmb.metadata.lineage = { parents: [parent], ancestors: [chosen], method: 'SVAF-v2' };
+      node._store.receiveFromPeer('peer', { key: cmb.metadata.key, content: TOPIC_B, source: 'peer', cmb });
+      const asked = [];
+      node.fetchCMB = async (k) => { asked.push(k); return null; };
+      await node.auditLineageTethers({ fetch: true, timeoutMs: 50 });
+      assert.deepStrictEqual(asked, [parent], 'only the parent the store derived its closure from is fetched');
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
 });
