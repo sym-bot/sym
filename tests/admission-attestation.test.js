@@ -302,11 +302,41 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
+  it("coerces an object-valued role claim, so it neither aliases the record nor fails to match", () => {
+    withPair({ aOpts: { lifecycleRole: 'participant' } }, ({ A, B, seen }) => {
+      const base = A._buildAdmissionAttestation('cmb-request-18', 'aligned', verdicts, 'heuristic');
+      const att = { ...base, role: ['participant'] }; // signs exactly as 'participant' does
+      signAttestation(att, A._identity.privateKey);
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      const e = seen[0];
+      assert.strictEqual(e.role, 'participant');
+      assert.strictEqual(e.roleClaimed, 'participant');
+      assert.strictEqual(e.roleMatches, true, 'a byte-identical claim matches');
+      for (const [k, v] of Object.entries(e)) {
+        if (k !== 'categories') assert.ok(v === null || typeof v !== 'object', `${k} is a primitive`);
+      }
+      assert.deepStrictEqual(verifyAttestation(B.attestationsFor('cmb-request-18')[0], A._identity.publicKey), { signed: true, valid: true });
+    });
+  });
+
+  it('does no work when nothing listens', () => {
+    const { A, B, cleanup } = makePair();
+    try {
+      const metrics = [];
+      B.on('metric', (m) => metrics.push(m));
+      B.resolveRole = () => { throw new Error('must not be called without a listener'); };
+      const att = A._buildAdmissionAttestation('cmb-request-19', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.strictEqual(metrics.filter((m) => m.type === 'attestation-event-dropped').length, 0);
+    } finally { cleanup(); }
+  });
+
   it('dispatches in listener order from a snapshot, like emit', () => {
     withPair({}, ({ A, B, seen }) => {
       const order = [];
       const collector = B.rawListeners('attestation-received')[0];
       const late = () => order.push('late');
+      B.on('attestation-received', () => order.push('appended'));
       B.prependListener('attestation-received', () => {
         order.push('first');
         B.off('attestation-received', collector); // removed mid-dispatch: still sees this event
@@ -314,11 +344,11 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       });
       const att = A._buildAdmissionAttestation('cmb-request-14', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
-      assert.deepStrictEqual(order, ['first']);
+      assert.deepStrictEqual(order, ['first', 'appended'], 'the prepended listener runs first');
       assert.strictEqual(seen.length, 1, 'the collector removed during dispatch still got this event');
       const next = A._buildAdmissionAttestation('cmb-request-15', 'aligned', verdicts, 'heuristic');
       B._ingestAttestation(next, A.nodeId, 'concierge');
-      assert.deepStrictEqual(order, ['first', 'first', 'late']);
+      assert.deepStrictEqual(order, ['first', 'appended', 'first', 'appended', 'late']);
       assert.strictEqual(seen.length, 1, 'and nothing after it was removed');
     });
   });
@@ -326,6 +356,8 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
   it('reports an event it could not build on metric, and still records the attestation', () => {
     withPair({}, ({ A, B, seen }) => {
       const metrics = [];
+      B.on('metric', () => { throw new Error('counter rejects an unknown type'); }); // must not starve the next
+      B.on('metric', async () => { throw new Error('shipper offline'); });          // must not go unhandled
       B.on('metric', (m) => metrics.push(m));
       B.resolveRole = () => { throw new Error('grant chain unreadable'); };
       const att = A._buildAdmissionAttestation('cmb-request-16', 'aligned', verdicts, 'heuristic');
@@ -346,12 +378,18 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     process.on('unhandledRejection', onUnhandled);
     try {
       B._log = () => { throw new Error('log pipe closed'); };
-      B.on('attestation-received', () => { throw new Error('listener bug'); });
-      B.on('attestation-received', async () => { throw new Error('view socket closed'); });
+      // Only an async listener first, so the rejection handler's own logging is what is under test.
+      const onlyAsync = async () => { throw new Error('view socket closed'); };
+      B.on('attestation-received', onlyAsync);
       const att = A._buildAdmissionAttestation('cmb-request-17', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
       await new Promise((r) => setTimeout(r, 20));
-      assert.deepStrictEqual(unhandled, []);
+      assert.deepStrictEqual(unhandled, [], 'the rejection handler cannot itself reject');
+      // Then a synchronous throw, whose catch block logs through the same failing sink.
+      B.off('attestation-received', onlyAsync);
+      B.on('attestation-received', () => { throw new Error('listener bug'); });
+      const next = A._buildAdmissionAttestation('cmb-request-20', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(next, A.nodeId, 'concierge').ok, true, 'the catch block cannot throw out');
     } finally {
       process.off('unhandledRejection', onUnhandled);
       cleanup();
