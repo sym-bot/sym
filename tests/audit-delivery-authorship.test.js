@@ -73,7 +73,8 @@ function mkCmb(focus, { by = 'peerA', parents, mood = NEUTRAL, to } = {}) {
 const signed = (cmb, kp = PEER_A) => { core.signCMB(cmb, kp.priv); return cmb; };
 const frame = (cmb) => JSON.parse(JSON.stringify({ type: 'cmb', timestamp: Date.now(), cmb }));
 const directed = (node, cmb) => Object.assign(frame(cmb), { to: node.nodeId, directed: true });
-const settle = (ms = 150) => new Promise((r) => setTimeout(r, ms));
+// Waits for every in-flight frame to finish, not a fixed guess at how long that takes.
+const { settle } = require('./_settle');
 const tick = () => new Promise((r) => setTimeout(r, 5)); // distinct createdTimestamp
 
 function collect(node) {

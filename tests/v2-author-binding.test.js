@@ -19,6 +19,7 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { createCMB, signCMB, assertionIdV2_0 } = require('../lib/core');
+const { settle } = require('./_settle'); // waits for every in-flight frame, not a fixed guess
 
 function kp() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', {
@@ -104,7 +105,7 @@ describe('the inbox names a proven author (K5)', () => {
       const got = [];
       node.on('cmb-accepted', (e) => got.push(e));
       node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
-      await new Promise((r) => setTimeout(r, 150));
+      await settle();
       assert.strictEqual(got.length, 1);
       assert.strictEqual(got[0].author.nodeId, 'node-alice');
       assert.strictEqual(node.inboxGet(got[0].inboxId).from, 'alice');
