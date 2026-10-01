@@ -6,21 +6,39 @@
 
 A receiver signs an Admission Attestation for every CMB it gates and gossips it to the room. Until now the
 author, or anything watching the mesh, could see those verdicts only by polling `attestationsFor(cmbKey)`.
-The node now emits `attestation-received` the first time it verifies and records a peer's attestation:
+The node now emits `attestation-received` the first time it verifies and records a peer's attestation.
 
-- `of` (the gated CMB key), `by` (the attester's nodeId) and `byName` (its peer name, when it is a direct
-  peer);
-- `verdict`, the per-field `categories` (admit / guard / redundant / reject / silent), `method` and `role`;
-- `seq` and `prev`, its place on the attester's hash chain, plus `sig`, `roster` and `at`;
-- `verified: true` and `keySource`, which names where the key that verified it came from: `anchor`, `grant`,
-  or `handshake`. A `handshake` key is trusted on first use: it belongs to whoever completed the handshake
-  under that nodeId;
-- `from` / `fromPeerId`, the peer that delivered the frame, and `relayed`, true when that peer is not the
-  attester.
+Fields covered by the attester's signature, passed on as signed:
+
+- `of` (the gated CMB key), `by` (the attester's nodeId), `at`, `roster`, `seq` and `prev` (its place on the
+  attester's hash chain);
+- `verdict`, and `categories`: the seven CAT7 fields (admit / guard / redundant / reject / silent), as the
+  strings the signature covers. Any other key in the frame is unsigned and dropped;
+- `role`, the role the attester claims. A node can stamp any role and still sign validly;
+- `sig` and `sigAlg`, so a consumer holding the attester's key can re-check the event with
+  `verifyAttestation(event, key)` instead of trusting `verified`.
+
+Fields this node adds, which the signature does not vouch for:
+
+- `verified: true`, and `keySource`, where the verifying key came from: `anchor`, `grant`, or `handshake`. A
+  `handshake` key is trusted on first use: it belongs to whoever completed the handshake under that nodeId;
+- `roleResolved` and `roleMatches`, the role this node's grant chain resolves for the attester. Weight a
+  verdict by these, not by `role`;
+- `methodUnsigned`, the evaluation method (`heuristic` / `neural`). It is outside the signed bytes, so a relay
+  could have changed it;
+- `byName`, the name the attester announced when it connected, only when it is a direct peer. It is a label,
+  not an authenticated name: `by` is the identity;
+- `from` / `fromPeerId`, the peer that delivered the frame, and `relayed`: true when that peer is not the
+  attester, false when it is, null when the deliverer is unknown;
+- `receivedAt`, this node's clock, not the attester's `at`.
 
 A duplicate, a rate-limited copy, a roster mismatch, an unknown attester or a bad signature emits nothing.
-The event is a copy of the stored attestation, so a listener cannot change the audit record. A listener that
-throws does not undo the ingest.
+Neither does this node's own verdict: read that from `svaf-decision` or `attestationsFor()`.
+
+The event is built from a copy and frozen, so a listener cannot change the stored record or what the next
+listener sees. Each listener is called on its own. One that throws (any value), or an async listener whose
+promise rejects, is logged with the attestation it was handling. It does not stop later listeners, undo the
+ingest, or become an unhandled rejection.
 
 ## 0.13.13 (2026-10-01)
 

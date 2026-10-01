@@ -152,17 +152,24 @@ describe('node checkpoints its chain; reconciliation catches omission (D3)', () 
 describe("'attestation-received' — a peer's verified verdict is observable as it lands", () => {
   // B ingests attestations A built, as it would from an `attestation` frame. B holds A's key the
   // way a handshake leaves it (_pinPeerKey), so verification runs for real; no transport is needed.
-  function withPair(fn) {
-    return withNode('att-rx-a', { room: 'hotel' }, (A) => withNode('att-rx-b', { room: 'hotel' }, (B) => {
-      B._pinPeerKey(A.nodeId, A._identity.publicKey);
-      const seen = [];
-      B.on('attestation-received', (e) => seen.push(e));
-      return fn(A, B, seen);
-    }));
+  function makePair({ aOpts = {}, aAsPeer = null } = {}) {
+    const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const A = new SymNode({ name: `att-rx-a-${tag()}`, silent: true, discovery: new NullDiscovery(), room: 'hotel', ...aOpts });
+    const B = new SymNode({ name: `att-rx-b-${tag()}`, silent: true, discovery: new NullDiscovery(), room: 'hotel' });
+    B._pinPeerKey(A.nodeId, A._identity.publicKey);
+    // A direct peer is what gives the attester a name; the label is whatever it announced.
+    if (aAsPeer) B._peers.set(A.nodeId, { peerId: A.nodeId, name: aAsPeer, transport: { send() {} } });
+    const seen = [];
+    const cleanup = () => { for (const n of [A, B]) fs.rmSync(nodeDir(n.name), { recursive: true, force: true }); };
+    return { A, B, seen, cleanup, collect: () => B.on('attestation-received', (e) => seen.push(e)) };
+  }
+  function withPair(opts, fn) {
+    const p = makePair(opts);
+    try { p.collect(); return fn(p); } finally { p.cleanup(); }
   }
 
-  it('emits once per verified attestation, carrying who judged which CMB, how, and where on the chain', () => {
-    withPair((A, B, seen) => {
+  it('emits once per verified attestation: who judged which CMB, how, where on the chain, re-verifiable', () => {
+    withPair({}, ({ A, B, seen }) => {
       const first = A._buildAdmissionAttestation('cmb-request-1', 'aligned', verdicts, 'heuristic');
       const att = A._buildAdmissionAttestation('cmb-request-2', 'guarded', verdicts, 'neural');
       assert.deepStrictEqual(B._ingestAttestation(att, A.nodeId, 'concierge'), { ok: true, reason: undefined });
@@ -171,65 +178,140 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       assert.strictEqual(e.of, 'cmb-request-2');
       assert.strictEqual(e.by, A.nodeId);
       assert.strictEqual(e.verdict, 'guarded');
-      assert.deepStrictEqual(e.categories, verdicts);
-      assert.strictEqual(e.method, 'neural');
+      assert.deepStrictEqual({ ...e.categories }, verdicts);
+      assert.strictEqual(e.methodUnsigned, 'neural');
       assert.strictEqual(e.roster, 'hotel');
       assert.strictEqual(e.seq, 2);
       assert.strictEqual(e.prev, crypto.createHash('sha256').update(first.sig).digest('hex'));
       assert.strictEqual(e.sig, att.sig);
+      assert.strictEqual(e.sigAlg, 'ed25519');
       assert.strictEqual(e.verified, true);
       assert.strictEqual(e.keySource, 'handshake');
       assert.strictEqual(e.from, 'concierge');
       assert.strictEqual(e.fromPeerId, A.nodeId);
       assert.strictEqual(e.relayed, false);
       assert.strictEqual(typeof e.receivedAt, 'number');
+      assert.deepStrictEqual(verifyAttestation(e, A._identity.publicKey), { signed: true, valid: true },
+        'a consumer holding the key can re-check the event itself');
+      assert.ok(Object.isFrozen(e) && Object.isFrozen(e.categories), 'the event is frozen');
     });
   });
 
-  it('marks a copy that arrived through another peer as relayed', () => {
-    withPair((A, B, seen) => {
+  it('names the attester by its own peer entry, never by the peer that relayed the copy', () => {
+    withPair({ aAsPeer: 'front-desk' }, ({ A, B, seen }) => {
       const att = A._buildAdmissionAttestation('cmb-request-3', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, 'relay-node-id', 'housekeeping').ok, true);
       assert.strictEqual(seen.length, 1);
       assert.strictEqual(seen[0].by, A.nodeId);
+      assert.strictEqual(seen[0].byName, 'front-desk');
       assert.strictEqual(seen[0].from, 'housekeeping');
+      assert.strictEqual(seen[0].fromPeerId, 'relay-node-id');
       assert.strictEqual(seen[0].relayed, true);
     });
   });
 
-  it('stays silent for a duplicate, a forgery, a foreign roster and an unknown attester', () => {
-    withPair((A, B, seen) => {
+  it('reports relayed as unknown, not direct, when the deliverer is unknown', () => {
+    withPair({}, ({ A, B, seen }) => {
       const att = A._buildAdmissionAttestation('cmb-request-4', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att).ok, true);
+      assert.strictEqual(seen[0].relayed, null);
+      assert.strictEqual(seen[0].from, null);
+      assert.strictEqual(seen[0].byName, null, 'not a direct peer, so no name');
+    });
+  });
+
+  it('gives the claimed role beside the role this node resolves', () => {
+    withPair({ aOpts: { lifecycleRole: 'anchor' } }, ({ A, B, seen }) => {
+      const att = A._buildAdmissionAttestation('cmb-request-5', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.strictEqual(seen[0].role, 'anchor', 'what A stamped');
+      assert.strictEqual(seen[0].roleResolved, 'participant', 'B holds no grant that makes A an anchor');
+      assert.strictEqual(seen[0].roleMatches, false);
+    });
+  });
+
+  it('passes on only what the signature covers: CAT7 categories as signed strings, nothing a relay added', () => {
+    withPair({}, ({ A, B, seen }) => {
+      // A signs a nested object as a category value: the signature covers its string form only.
+      const att = A._buildAdmissionAttestation('cmb-request-6', 'aligned', { ...verdicts, focus: { verdict: 'admit' } }, 'heuristic');
+      // A relay adds a category key and rewrites the method; neither is in the signed bytes.
+      const tampered = { ...att, method: 'neural', categories: { ...att.categories, recommendation: 'escalate' } };
+      assert.strictEqual(B._ingestAttestation(tampered, 'relay-node-id', 'housekeeping').ok, true, 'still verifies');
+      const e = seen[0];
+      assert.deepStrictEqual(Object.keys(e.categories), ['focus', 'issue', 'intent', 'motivation', 'commitment', 'perspective', 'mood']);
+      assert.strictEqual(e.categories.focus, '[object Object]', 'the signed form, not the object');
+      assert.strictEqual('method' in e, false, 'an unsigned method is never presented as signed');
+      assert.strictEqual(e.methodUnsigned, 'neural');
+      assert.deepStrictEqual(verifyAttestation(e, A._identity.publicKey), { signed: true, valid: true });
+    });
+  });
+
+  it('stays silent for a duplicate, a forgery, a foreign roster and an unknown attester', () => {
+    withPair({}, ({ A, B, seen }) => {
+      const att = A._buildAdmissionAttestation('cmb-request-7', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
       assert.strictEqual(B._ingestAttestation({ ...att }, A.nodeId, 'concierge').reason, 'duplicate');
 
-      const forged = { ...A._buildAdmissionAttestation('cmb-request-5', 'rejected', verdicts, 'heuristic'), verdict: 'aligned' };
+      const forged = { ...A._buildAdmissionAttestation('cmb-request-8', 'rejected', verdicts, 'heuristic'), verdict: 'aligned' };
       assert.strictEqual(B._ingestAttestation(forged, A.nodeId, 'concierge').ok, false);
 
-      const foreign = A._buildAdmissionAttestation('cmb-request-6', 'aligned', verdicts, 'heuristic');
+      const foreign = A._buildAdmissionAttestation('cmb-request-9', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation({ ...foreign, roster: 'other-room' }, A.nodeId, 'concierge').reason, 'roster-mismatch');
 
       withNode('att-rx-stranger', { room: 'hotel' }, (S) => {
-        const unknown = S._buildAdmissionAttestation('cmb-request-7', 'aligned', verdicts, 'heuristic');
+        const unknown = S._buildAdmissionAttestation('cmb-request-10', 'aligned', verdicts, 'heuristic');
         assert.strictEqual(B._ingestAttestation(unknown, S.nodeId, 'stranger').reason, 'unknown-attester-key');
       });
 
       assert.strictEqual(seen.length, 1, 'only the first verified copy is announced');
-      assert.strictEqual(seen[0].of, 'cmb-request-4');
+      assert.strictEqual(seen[0].of, 'cmb-request-7');
     });
   });
 
-  it('hands listeners a copy, and a failing listener does not undo the ingest', () => {
-    withPair((A, B, seen) => {
-      B.on('attestation-received', (e) => { e.verdict = 'rejected'; e.categories.focus = 'reject'; throw new Error('listener bug'); });
-      const att = A._buildAdmissionAttestation('cmb-request-8', 'aligned', verdicts, 'heuristic');
+  it('stays silent for a rate-limited copy: a flood about one CMB is not an event stream', () => {
+    withPair({}, ({ A, B, seen }) => {
+      const limit = B._attestations._ratePerWindow;
+      const reasons = [];
+      for (let i = 0; i <= limit; i++) {
+        const att = A._buildAdmissionAttestation('cmb-flooded', 'aligned', verdicts, 'heuristic');
+        reasons.push(B._ingestAttestation(att, A.nodeId, 'concierge').reason);
+      }
+      assert.strictEqual(reasons[limit], 'rate-limited');
+      assert.strictEqual(seen.length, limit, 'one event per recorded attestation, none for the rate-limited one');
+    });
+  });
+
+  it('a failing listener cannot reach the stored record, starve a later listener, or undo the ingest', async () => {
+    const { A, B, seen, cleanup, collect } = makePair();
+    const unhandled = [];
+    const onUnhandled = (r) => unhandled.push(r);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      // Registered BEFORE the collector, so a throw that escaped would starve it.
+      B.on('attestation-received', (e) => { e.categories.focus = 'reject'; });          // frozen: throws in strict mode
+      B.on('attestation-received', () => { throw null; });                              // not an Error
+      B.on('attestation-received', async () => { throw new Error('view socket closed'); });
+      let once = 0;
+      B.once('attestation-received', () => { once++; });
+      collect();
+
+      const att = A._buildAdmissionAttestation('cmb-request-11', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true, 'the ingest still reports success');
-      const stored = B.attestationsFor('cmb-request-8');
+      const second = A._buildAdmissionAttestation('cmb-request-12', 'aligned', verdicts, 'heuristic');
+      assert.strictEqual(B._ingestAttestation(second, A.nodeId, 'concierge').ok, true);
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      assert.strictEqual(seen.length, 2, 'the later listener saw both events');
+      assert.strictEqual(once, 1, 'a once-listener fired once and removed itself');
+      assert.deepStrictEqual(unhandled, [], 'an async listener that rejects is not an unhandled rejection');
+      const stored = B.attestationsFor('cmb-request-11');
       assert.strictEqual(stored.length, 1, 'the attestation is recorded');
-      assert.strictEqual(stored[0].verdict, 'aligned', 'the stored verdict is untouched');
       assert.strictEqual(stored[0].categories.focus, 'admit', 'the stored categories are untouched');
       assert.deepStrictEqual(verifyAttestation(stored[0], A._identity.publicKey), { signed: true, valid: true });
-      assert.strictEqual(seen.length, 1);
-    });
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      cleanup();
+    }
   });
 });
