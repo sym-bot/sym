@@ -1,5 +1,105 @@
 # Changelog
 
+## Unreleased
+
+Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
+debt, and the daemon's log flood. Every item has a test that fails without its fix.
+
+### Fixed — security
+
+- **A relay could replay a signed directed record.** The directed de-duplication mark was the raw
+  base64url signature or the carried `assertionId`. Base64url decoding ignores padding and the
+  unused bits of the last character, and no signature covers `assertionId`, so a relay could
+  re-spell either and make one signed directed record surface again and again. The mark is now
+  the hash of the decoded signature bytes.
+- **A peer could vouch for a v2.0 record by signing it under another node's id (B-R4).** A
+  published v2.0 record (mmp-sig-v2.0) signs its author's node id, but it was verified against the
+  key of whichever peer delivered it. It is now verified against the key held for its
+  `createdByNodeId`, so a genuine relay also verifies. A v2.0 record whose carried `assertionId`
+  is not the one its preimage yields is refused (B-R6). On other suites a carried `assertionId`,
+  which nothing signs, is dropped.
+- **Stripping the frame's `directed` flag turned a signed directed CMB into a broadcast (B-R8).**
+  A signed addressee could only veto directed treatment. When the author signed one, it now alone
+  decides.
+- **Unauthenticated gossip could repoint a phone's wake token.** Any room peer's `peer-info` could
+  overwrite a wake channel the phone had given this node itself. A channel learned from a weaker
+  source (gossip < relay < the peer itself) now never replaces a stronger one's token.
+- **A record with no room was admitted in every room it was replayed into (B-R10).** A record that
+  names no room is now in the literal room `default` (§7). `createCMB` names `default` instead of
+  null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
+- **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
+  before anything is stored or dispatched (§18.3.1).
+
+### Fixed — delivery and records
+
+- **Two copies of one record arriving together could both surface (K1).** A key is held in flight
+  from the de-duplication check until its SVAF pass settles.
+- **A broadcast flood could evict directed de-duplication marks (K3).** They have their own map and
+  cap now.
+- **`inbox()`'s limit counted acked items (K4).** It counts unread deliveries; acked ones still come
+  back, marked.
+- **The inbox `from` was the author's label whether or not anything proved it (K5).** It is now the
+  author when the signature proved who that is, and otherwise the peer that delivered it. The claim
+  stays in `author.name`. A v2.0 record verified against its signed node id carries `author.nodeId`,
+  even when relayed.
+- **Record timestamps ran ahead of the clock after a backward step, and restarted every process
+  (K6).** The ratchet starts from this node's newest stored record. After a step back of more than a
+  minute, timestamps follow the clock again, with a `clock-stepped-back` metric.
+- **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
+  must be numbers in [-1, 1], and a mood given only as numbers keeps them.
+- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB, the
+  seven at most 960 KiB, and an agent id at most 64 bytes (§3.1.2). The emitter throws `ECMBSIZE`, and
+  a receiver refuses an oversized record before rendering, verifying or storing it.
+- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
+  metadata whole, as a copy.
+- **A frame written to a destroyed socket counted as sent (B-D6, residual).**
+- **Unsigned records are now counted (B-R3, interim).** They are still accepted as unverified for
+  interop, but each is counted (`cmb-unsigned-received`) and the sending peer is named once in the
+  log, so the emitters a signed-only default would cut off can be found first.
+
+### Fixed — lineage
+
+- **The root walk trusted unverified records (B-L4).** It walks only through records whose address
+  recomputes and that this node wrote or admitted as verified. A remix with no verified ancestor in
+  reach resolves to no anchor, instead of being anchored to itself, and the result says whether the
+  walk was `complete`.
+- **A tether could not be reproduced by another node (B-L5).** It is measured on the stored record's
+  text, encoded in one kernel, instead of on vectors blended with local memory.
+- **Cold-start admissions had no tether (B-L6).**
+- The tether audit's fetch fallback no longer returns a local record the walk had refused.
+
+### Fixed — the daemon
+
+- **The log flood.** Every peer re-sends its whole wake-channel list on every connect, and the
+  receiver logged a line and rewrote `wake-channels.json` per entry per frame, so the daemon's
+  `stdout.log` reached 1 GB of `learned wake channel for unknown`. A repeat now changes nothing and
+  logs nothing; a frame that does teach something logs one line. Channels carry the time of the last
+  first-hand sighting (gossip forwards it instead of the time of sending) and expire after 30 days
+  unseen. A channel saved before this release gets one 30-day grace period, once.
+- **A daemon rooted with `SYM_STATE_DIR` kept its room, tasks and relay.env in `~/.sym`.** It uses
+  the state root now.
+- **A relay-only daemon still announced its room on the LAN.** It no longer does.
+- **IPC on Windows.** The daemon and every client now resolve the IPC endpoint one way, and on
+  Windows a file path becomes a named pipe. `SymDaemonClient` defaulted to `/tmp/sym.sock`, which no
+  daemon listens on (every OS).
+- **Windows lock checks.** A live pid's start time is cached until the pid is seen dead, and several
+  pids are read in one PowerShell call. A mismatch is re-read before a lock is reclaimed.
+- The daemon reports a failed IPC command as that command's error instead of a parse error.
+
+### Fixed — tests and conformance
+
+- **A test node can no longer reach the real `~/.sym`.** Under the Node test runner, a `SymNode` (or
+  the daemon) throws `ETESTHOME` when its home, state root or identity dir is outside the temp dir.
+  `SYM_TEST_REAL_HOME=1` opts out. **This affects other projects:** a suite that builds a `SymNode`
+  under `node --test` with the real HOME now fails until it sandboxes HOME and USERPROFILE.
+- The published v2 conformance vectors are consumed verbatim, with their errata, plus a new
+  application-v2 test. The handshake transcript and AAD normalise room and names to NFC, as the
+  reference does (B-R17).
+- Windows test debt is fixed. The SIGTERM lock test is skipped on Windows, with a hard-kill reclaim
+  test on every platform. The lease test uses a live foreign holder with a real start time; it never
+  reached the start-time check before, on any OS. The relay-only test uses the platform's IPC endpoint.
+- Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
+
 ## 0.13.14 (2026-10-01)
 
 ### Added — a peer's admission verdict is observable as it lands (`attestation-received`)
