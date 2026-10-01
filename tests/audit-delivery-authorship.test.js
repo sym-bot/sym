@@ -380,6 +380,29 @@ describe('F3: an admitted broadcast the store already holds', () => {
   });
 });
 
+describe('B-L3: admission that leaves the text unchanged is a collapse (spec PR #17, §15.5 "Collapsed integration")', () => {
+  it('stores the author\'s record exactly as signed, mints no receiver remix, writes no self-edge', async () => {
+    await withNode('collapse', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => ALIGNED;
+      const before = node.recall('').length;
+      const cmb = signed(mkCmb('an observation the receiver integrates unchanged'));
+      const key = cmb.metadata.key;
+      node._frameHandler.handle('peerA', 'peerA', frame(cmb));
+      await settle();
+      const stored = node._store.get(key);
+      assert.ok(stored, 'the record is held under the author\'s address');
+      assert.strictEqual(recordCreatedBy(stored.cmb), 'peerA', 'never attributed to the receiver');
+      assert.deepStrictEqual(core.verifyCMB(stored.cmb, PEER_A.pub).valid, true, 'kept exactly as signed');
+      const parents = stored.cmb.metadata?.lineage?.parents || [];
+      assert.ok(!parents.includes(key), 'no K→K self-edge');
+      const own = node.recall('').filter((e) => recordCreatedBy(e.cmb) === node.name);
+      assert.strictEqual(own.length, 0, 'the receiver minted no remix of its own');
+      assert.strictEqual(node.recall('').length, before + 1);
+    });
+  });
+});
+
 describe('author and inbox id on surfaced entries', () => {
   it('carries the author and the delivering peer; the inbox `from` is the peer when nothing proves the author (K5)', async () => {
     await withNode('author', async (node) => {
