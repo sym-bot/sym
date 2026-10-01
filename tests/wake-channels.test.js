@@ -80,6 +80,22 @@ describe('peer-info gossip', () => {
   });
 });
 
+describe('refreshes', () => {
+  it('a repeat sighting updates memory, and asks for a save only once it is an hour newer', () => {
+    withNode((node) => {
+      const wm = node._wakeManager;
+      let t = 1_000_000_000_000;
+      wm._now = () => t;
+      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('t'), { source: 'direct' }), 'added');
+      t += 5 * 60 * 1000;
+      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('t'), { source: 'direct' }), 'unchanged');
+      assert.strictEqual(node._peerWakeChannels.get('phone-1').lastSeen, t, 'memory still holds the newest sighting');
+      t += 61 * 60 * 1000;
+      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('t'), { source: 'direct' }), 'refreshed');
+    });
+  });
+});
+
 describe('gossip sent and expiry', () => {
   it('forwards the lastSeen it holds, not the time of sending, and drops expired channels', () => {
     withNode((node) => {
