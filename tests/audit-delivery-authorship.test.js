@@ -104,12 +104,41 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const mine = node.remember({ focus: 'my broadcast', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
       const seen = collect(node);
-      // Unsigned, frame says directed: no authenticated addressee.
-      node._frameHandler.handle('peerA', 'peerA', directed(node, mkCmb('remix ping', { parents: [mine.key] })));
       // Signed as a broadcast (metadata.to null), frame forged to say directed.
       node._frameHandler.handle('peerA', 'peerA', directed(node, signed(mkCmb('remix pong', { parents: [mine.key] }))));
       await settle();
-      assert.strictEqual(seen.accepted.length, 0, 'both are echoes of my own CMB');
+      assert.strictEqual(seen.accepted.length, 0, 'a signed broadcast citing my CMB is an echo, whatever the frame says');
+    });
+  });
+
+  it('r3 F1: a verified directed CMB from an emitter that signs no addressee field stays directed', async () => {
+    await withNode('d1-no-to-field', async (node) => {
+      node._pinPeerKey('peerA', PEER_A.pub);
+      node._svafEvaluator.evaluate = async () => REJECTED;
+      const seen = collect(node);
+      const cmb = mkCmb('from another implementation');
+      delete cmb.metadata.to; // signs no addressee at all
+      node._frameHandler.handle('peerA', 'peerA', directed(node, signed(cmb)));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1, 'delivered (§9.2.2) on the frame flags');
+    });
+  });
+
+  it('r3 F2: an unauthenticated directed reply citing my CMB is delivered once, not processed', async () => {
+    await withNode('d1-unsigned-reply', async (node) => {
+      let evaluations = 0;
+      node._svafEvaluator.evaluate = async () => { evaluations++; return ALIGNED; };
+      const mine = node.remember({ focus: 'my question', issue: 'x', intent: 'ask', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
+      const seen = collect(node);
+      const f = directed(node, mkCmb('unsigned answer', { parents: [mine.key] }));
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      await settle();
+      node._frameHandler.handle('peerA', 'peerA', JSON.parse(JSON.stringify(f)));
+      await settle();
+      assert.strictEqual(seen.accepted.length, 1, 'delivered once');
+      assert.strictEqual(seen.accepted[0].decision, 'echo');
+      assert.strictEqual(seen.accepted[0].remixed, false);
+      assert.strictEqual(evaluations, 0, 'never admitted or remixed: no ping-pong');
     });
   });
 
@@ -233,6 +262,23 @@ describe('re-review F7: a directed CMB the store failed to write', () => {
       await settle();
       assert.strictEqual(seen.accepted.length, 1);
       assert.strictEqual(seen.accepted[0].decision, 'not-stored');
+    });
+  });
+});
+
+describe('r3 F8 / R2-F12: inbox alarm on an empty ring; creatorRole reaches the store', () => {
+  it('neverDrained holds when every item was evicted undrained', async () => {
+    await withNode('f8', async (node) => {
+      node._inboxSeq = 3; node._inbox = []; node._inboxCursor = 0;
+      assert.strictEqual(node.inboxStatus().neverDrained, true);
+    });
+  });
+
+  it('a validator-origin admission is weighted 2.0 (§6.4)', async () => {
+    await withNode('r2f12', async (node) => {
+      const entry = { content: 'validator says', cmb: mkCmb('validator observation') };
+      const stored = node._store.receiveFromPeer('peer-v', entry, { creatorRole: 'validator' });
+      assert.strictEqual(stored.anchorWeight, 2.0);
     });
   });
 });
@@ -385,6 +431,7 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
         signed(incoming);
         assert.strictEqual(core.verifyCMB(incoming, PEER_A.pub).valid, true, 'precondition: the author\'s record verifies');
         const msg = { type: 'cmb', timestamp: Date.now(), cmb: JSON.parse(JSON.stringify(incoming)) };
+        msg.cmb.categories.focus.injected = 'a field no signature covers';
         const tetherAnchor = core.resolveTetherAnchor(msg.cmb, (k) => store.get(k));
         const r = await core.processHeuristicSVAF({
           msg, peerName: 'claude-sym-agent-a', localName: 'claude-sym-agent-b',
@@ -397,6 +444,7 @@ describe('B-L1: admission keeps the author\'s record (MMP §8.8.4, §15.2)', () 
         assert.strictEqual(stored.cmb.metadata.createdTimestamp, incoming.metadata.createdTimestamp);
         assert.strictEqual(stored.cmb.metadata.sig, incoming.metadata.sig, `#${i} signature carried`);
         assert.strictEqual(core.verifyCMB(stored.cmb, PEER_A.pub).valid, true, `#${i} the stored record still verifies under the author's key`);
+        assert.strictEqual(stored.cmb.categories.focus.injected, undefined, `#${i} r3 F5: unsigned extra fields are not carried`);
         assert.deepStrictEqual(
           { v: stored.cmb.categories.mood.valence, a: stored.cmb.categories.mood.arousal },
           { v: -0.7, a: 0.8 }, `#${i} re-review F6: the author's affect is kept`);
@@ -476,11 +524,36 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
       await settle();
       const r = node.remember(shared, { to: 'peer-a' });
       assert.strictEqual(r.duplicate, true);
-      for (const f of ['source', 'peerId', 'remixed', 'author', 'inboxId', 'svaf']) {
+      for (const f of ['peerId', 'remixed', 'author', 'inboxId', 'svaf']) {
         assert.strictEqual(r[f], undefined, `no peer provenance field ${f} on the caller's result`);
       }
+      assert.strictEqual(r.source, node.name, 'r3 F11: the caller\'s own source, like any entry it writes');
       assert.strictEqual(typeof r.content, 'string');
       assert.strictEqual(r.delivery.dispatched, 1);
+    });
+  });
+
+  it('r3 F3: a send whose store write failed is not reported as a duplicate', async () => {
+    await withNode('d5-persist', async (node) => {
+      fakePeer(node, 'peer-a');
+      node._store._persist = () => false;
+      const r = node.remember(cats('cannot store'), { to: 'peer-a' });
+      assert.ok(r, 'a result');
+      assert.strictEqual(r.duplicate, false);
+      assert.strictEqual(r.persisted, false);
+      assert.strictEqual(r.delivery.dispatched, 1, 'still delivered');
+    });
+  });
+
+  it('r3 F6: a caller-supplied record that collapses is returned unmodified', async () => {
+    await withNode('d5-unmodified', async (node) => {
+      fakePeer(node, 'peer-a');
+      const first = node.remember(cats('forwarded'), { to: 'peer-a' });
+      const own = JSON.parse(JSON.stringify(first.cmb));
+      own.metadata.lineage = { parents: ['cmb-' + 'e'.repeat(64)], method: 'rule-a' };
+      const before = JSON.stringify(own);
+      node.remember(null, { cmb: own, to: 'peer-a' });
+      assert.strictEqual(JSON.stringify(own), before, 'the caller\'s signed record is not mutated');
     });
   });
 

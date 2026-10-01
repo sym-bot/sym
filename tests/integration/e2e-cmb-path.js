@@ -137,9 +137,11 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
 
       // When SVAF admits the CMB, the stored remix must carry the MMP-spec
       // contract: svaf block + lineage.parents pointing to A's CMB.
-      assert.ok(outcomes.memoryReceived || outcomes.moodDelivered,
-        'nodeB produced a CMB outcome, not just a liveness bump');
-      if (outcomes.memoryReceived && outcomes.memoryReceived.decision !== 'rejected') {
+      // The first CMB into B's empty store is admitted (cold-start bootstrap, §9.2.1), so this fixture
+      // must produce an admission: anything else means the path under test did not run.
+      assert.ok(outcomes.memoryReceived, 'nodeB admitted the CMB, not just a liveness bump or a mood');
+      assert.notStrictEqual(outcomes.memoryReceived.decision, 'rejected', 'the bootstrap admission was not a rejection');
+      {
         const storedEntry = outcomes.memoryReceived.entry;
         assert.ok(storedEntry, 'memory-received event should carry the fused entry');
         // The gate's evidence: the neural path writes `svaf`, the heuristic path `cmb.provenance`.
