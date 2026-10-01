@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added — a peer's admission verdict is observable as it lands (`attestation-received`)
+
+A receiver signs an Admission Attestation for every CMB it gates and gossips it to the room. Until now the
+author, or anything watching the mesh, could see those verdicts only by polling `attestationsFor(cmbKey)`.
+The node now emits `attestation-received` the first time it verifies and records a peer's attestation:
+
+- `of` (the gated CMB key), `by` (the attester's nodeId) and `byName` (its peer name, when it is a direct
+  peer);
+- `verdict`, the per-field `categories` (admit / guard / redundant / reject / silent), `method` and `role`;
+- `seq` and `prev`, its place on the attester's hash chain, plus `sig`, `roster` and `at`;
+- `verified: true` and `keySource`, which names where the key that verified it came from: `anchor`, `grant`,
+  or `handshake`. A `handshake` key is trusted on first use: it belongs to whoever completed the handshake
+  under that nodeId;
+- `from` / `fromPeerId`, the peer that delivered the frame, and `relayed`, true when that peer is not the
+  attester.
+
+A duplicate, a rate-limited copy, a roster mismatch, an unknown attester or a bad signature emits nothing.
+The event is a copy of the stored attestation, so a listener cannot change the audit record. A listener that
+throws does not undo the ingest.
+
 ## 0.13.13 (2026-10-01)
 
 ### Fixed — a crashed Windows session no longer locks its node name until reboot
