@@ -76,7 +76,7 @@ const TOPIC_B_NEW = 'fresh snowfall reported on the upper mountain trail section
 // admit against the recents — near-duplicating one would be redundant-banned).
 const TOPIC_B_ROOT = 'overall report on snowy mountain hiking trail conditions this weekend';
 
-// The store normalizes a severed (null) lineage to root shape.
+// A record's lineage with no parents: a root.
 function isRootShaped(lineage) {
   return lineage == null
     || ((lineage.parents ?? []).length === 0 && (lineage.ancestors ?? []).length === 0);
@@ -108,7 +108,10 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
       assert.strictEqual(accepted.length, 1, 'incoming admits (aligned with recent topic-B anchors)');
       const entry = accepted[0];
       const cmb = entry.cmb;
-      assert.ok(isRootShaped(cmb.metadata.lineage), 'lineage severed — stored as a fresh root');
+      // Severed on the entry and in the index; the record is the author's and keeps its lineage.
+      assert.strictEqual(entry.lineage.severed, true, 'lineage severed — stored as a fresh root');
+      assert.deepStrictEqual(node._store.parents(entry.key), [], 'the store walks no parents from it');
+      assert.ok(!isRootShaped(cmb.metadata.lineage), 'the record\'s own lineage is untouched');
       assert.ok(entry.provenance.tether, 'tether recorded in provenance');
       assert.strictEqual(entry.provenance.tether.severed, true);
       assert.ok(entry.provenance.tether.drift > 0.5, `drift ${entry.provenance.tether.drift} exceeds the reject floor`);

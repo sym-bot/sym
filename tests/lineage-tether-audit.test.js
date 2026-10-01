@@ -85,7 +85,10 @@ describe('MMP §15.8 retroactive tether audit', () => {
       const r2 = await node.auditLineageTethers({ sever: true });
       assert.strictEqual(r2.severed, 1);
       const l2 = node._store.get(laundered.key);
-      assert.ok(!l2.cmb.metadata.lineage || (l2.cmb.metadata.lineage.parents || []).length === 0, 'laundered chain severed');
+      // Severed on the entry and in the index; the stored record is never edited.
+      assert.strictEqual(l2.lineage.severed, true, 'laundered chain severed');
+      assert.deepStrictEqual(node._store.parents(laundered.key), [], 'the store walks no parents from it');
+      assert.deepStrictEqual(l2.cmb.metadata.lineage.parents, [rootA.key], 'the record\'s own lineage is untouched');
       assert.strictEqual(l2.provenance.tether.departedFrom, rootA.key);
       assert.ok(![...node._store._index.byAncestor.get(rootA.key) ?? []].includes(laundered.key),
         'ancestor index no longer lists the severed remix');

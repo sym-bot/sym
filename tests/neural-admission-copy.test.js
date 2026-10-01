@@ -66,4 +66,23 @@ describe('neural admission works on a copy of the incoming record', () => {
       }
     });
   });
+
+  it('a record that does not collapse is minted as this node\'s own remix, never rewritten under its author\'s name', async () => {
+    // The path used to write the new key and lineage into the author's record and store that: a
+    // record naming the author, carrying the author's signature, over content and descent the author
+    // never signed. It is minted the way the heuristic gate mints one (buildFusedRecord).
+    await withNode(async (node) => {
+      const record = createCMB({ categories: cat7('a record whose carried address is not its own content'), createdBy: 'peerA' });
+      record.metadata.key = 'cmb-' + '8'.repeat(64);
+      record.metadata.sig = 'not-a-signature-over-anything-this-node-will-store';
+      const now = Date.now();
+      await node._frameHandler._processNeuralSVAF(ALIGNED, { type: 'cmb', timestamp: now, content: 'x', cmb: record }, 'peerA', 'peerA', now, now);
+      const minted = node._store.recall('').find((e) => e.cmb?.categories?.focus?.text === record.categories.focus.text);
+      assert.ok(minted, 'stored');
+      assert.strictEqual(minted.cmb.metadata.createdBy, node.name, 'this node authors the remix it mints');
+      assert.strictEqual(minted.cmb.metadata.sig, undefined, 'and carries no signature it did not make');
+      assert.deepStrictEqual(minted.cmb.metadata.lineage.parents, [record.metadata.key], 'citing the block it came from');
+      assert.notStrictEqual(minted.collapsed, true);
+    });
+  });
 });

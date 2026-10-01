@@ -111,7 +111,10 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
       const stored = node._store.get(frame.cmb.metadata.key);
       assert.ok(stored, 'the neural evaluator admitted the remix');
       assert.strictEqual(stored.svaf?.method, 'neural', 'precondition: the neural path stored it');
-      assert.strictEqual(stored.cmb.metadata.lineage, null, 'the laundered lineage is severed');
+      // Severed on the entry and in the index; the record is the author's and keeps its lineage.
+      assert.strictEqual(stored.lineage.severed, true, 'the laundered lineage is severed');
+      assert.deepStrictEqual(node._store.parents(stored.key), [], 'the store walks no parents from it');
+      assert.deepStrictEqual(stored.cmb.metadata.lineage, frame.cmb.metadata.lineage, 'the record\'s own lineage is untouched');
       assert.strictEqual(stored.provenance?.tether?.severed, true);
       assert.strictEqual(stored.provenance.tether.departedFrom, root.metadata.key);
       const att = stored.tether;
@@ -140,7 +143,8 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
       assert.strictEqual(neural.att.drift.toFixed(6), heuristic.att.drift.toFixed(6), 'same drift: one computation');
       const withoutDrift = ({ drift, ...rest }) => rest; // drift is compared above, to the precision it is signed at
       assert.deepStrictEqual(withoutDrift(neural.stored.provenance.tether), withoutDrift(heuristic.stored.provenance.tether), 'same provenance');
-      assert.deepStrictEqual(neural.stored.cmb.metadata.lineage, heuristic.stored.cmb.metadata.lineage, 'same lineage outcome');
+      assert.deepStrictEqual(neural.stored.cmb.metadata.lineage, heuristic.stored.cmb.metadata.lineage, 'same record lineage, as signed');
+      assert.deepStrictEqual(neural.stored.lineage, heuristic.stored.lineage, 'same lineage in the store: severed or kept alike');
       assert.strictEqual(neural.att.verdict, rootText === TOPIC_A ? 'severed' : 'tethered');
     });
   }
