@@ -14,6 +14,10 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * The gate measured the remix side on its FUSED vectors, and a fused vector is the receiver's
  * attention readout over its own recent anchors. Two nodes holding the same root and the same
  * record signed different drifts, and neither could reproduce the other's.
+ *
+ * The cold-start exit returned without a tether at all, so a node with nothing in its anchor window
+ * stored a remix with its lineage unexamined — a laundered chain passed exactly where memory is
+ * thinnest.
  */
 
 const { describe, it } = require('node:test');
@@ -23,7 +27,7 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const core = require('../lib/core');
-const { createCMB, isSemanticReady, evaluateLineageTetherFromText } = core;
+const { createCMB, isSemanticReady, evaluateLineageTetherFromText, processHeuristicSVAF } = core;
 
 // The reject-floor calibration assumes the semantic kernel (§9.2.1: thresholds are meaningful only
 // within a pinned encoder), and a comparison across two nodes is only meaningful in one kernel.
@@ -56,6 +60,7 @@ function cat7(t) {
 
 const ROOT = 'overall report on snowy mountain hiking trail conditions this weekend';
 const INCOMING = 'fresh snowfall reported on the upper mountain trail sections';
+const LAUNDERED_ROOT = 'quarterly financial audit of the accounting ledger and tax filings';
 // Two different memories of the same domain: both admit INCOMING, through different anchors.
 const MEMORY_1 = [
   'hiking trail conditions in the mountain snow this weekend',
@@ -71,6 +76,8 @@ const MEMORY_2 = [
   'mountain hut booking for the overnight hike in the snow',
   'icy patches reported on the lower forest section of the trail',
 ];
+
+const POLICY = { stableThreshold: 0.25, guardedThreshold: 0.5, temporalLambda: 0.3, freshnessSeconds: 1800 };
 
 function remixFrame(text, rootKey) {
   const cmb = createCMB({ categories: cat7(text), createdBy: 'peerA', lineage: { parents: [rootKey], method: 'SVAF-v2' } });
@@ -167,6 +174,46 @@ describe('§15.8 tether is reproducible by any holder of the root and the record
     } finally {
       require.cache[ctxPath] = realCtx;
       require.cache[ltPath] = realLt;
+    }
+  });
+});
+
+describe('§15.8 cold-start admissions carry a tether like warm ones (B-L6)', () => {
+  it('an empty-memory admission of a remix is tether-checked against its anchor', async () => {
+    await awaitSemantic();
+    const root = createCMB({ categories: cat7(LAUNDERED_ROOT), createdBy: 'author' });
+    const frame = remixFrame(INCOMING, root.metadata.key);
+    const r = await processHeuristicSVAF({
+      msg: frame, peerName: 'peerA', localName: 'receiver', originTs: Date.now(), now: Date.now(), ageSeconds: 0,
+      recentCMBs: [], config: POLICY,
+      tetherAnchor: { key: root.metadata.key, categories: root.categories },
+    });
+    assert.strictEqual(r.accepted, true, 'cold start admits to bootstrap memory');
+    assert.strictEqual(r.coldStartCause, 'empty-memory', 'precondition: this is the cold-start exit');
+    assert.ok(r.tether, 'the cold-start admission carries a tether');
+    assert.strictEqual(r.tether.anchorKey, root.metadata.key);
+    assert.strictEqual(r.tether.checked, true);
+    assert.strictEqual(r.tether.tethered, false, 'a remix drifted past the floor is caught at cold start too');
+
+    const recomputed = await evaluateLineageTetherFromText({
+      remixCategories: r.fusedEntry.cmb.categories, anchorCategories: root.categories, guardedThreshold: POLICY.guardedThreshold,
+    });
+    assert.strictEqual(r.tether.drift.toFixed(6), recomputed.drift.toFixed(6), 'the same computation as the warm path');
+    assert.strictEqual(r.tether.kernelId, recomputed.kernelId);
+  });
+
+  it('a fresh node signs a tether on its first (cold-start) admission, as a warm node does', async () => {
+    await awaitSemantic();
+    for (const warm of [false, true]) {
+      await withNode(`tether-cold-${warm ? 'warm' : 'cold'}`, async (node) => {
+        if (warm) for (const t of MEMORY_1) node.remember(cat7(t));
+        const peerRoot = createCMB({ categories: cat7(ROOT), createdBy: 'peerA' });
+        const stored = await admit(node, { type: 'cmb', timestamp: Date.now(), content: ROOT, cmb: peerRoot });
+        assert.ok(stored, `${warm ? 'warm' : 'cold'}: the root admits`);
+        assert.strictEqual(stored.cmb.tether?.anchor, peerRoot.metadata.key, `${warm ? 'warm' : 'cold'}: a root is its own anchor`);
+        assert.strictEqual(stored.cmb.tether.verdict, 'tethered');
+        assert.strictEqual(stored.cmb.provenance?.tether?.severed, false);
+      });
     }
   });
 });
