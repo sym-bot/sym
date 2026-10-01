@@ -55,6 +55,10 @@ process.on('unhandledRejection', (reason) => {
   console.error(`[${new Date().toISOString()}] [ERROR] Unhandled rejection: ${reason}`);
 });
 
+// Under the test runner, a daemon whose state root is the real home is refused (ETESTHOME)
+// before it reads relay.env, migrates stores or builds its node — all of which touch ~/.sym.
+require('../lib/core/state-root').assertTestSandbox();
+
 // ── Configuration ──────────────────────────────────────────────
 
 const SYM_DIR = path.join(os.homedir(), '.sym');
