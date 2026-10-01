@@ -149,3 +149,34 @@ describe('MeshAgent', () => {
     assert.deepStrictEqual(remixed, [cmb.metadata.key], 'the kept remix is not re-remixed; the severed one is a root');
   });
 });
+
+// 0.13.15 review F8: remember() throws ESIGN when the node cannot sign. The agent says so once and
+// stops, instead of an error for every admitted record and a model call it could never use.
+describe('MeshAgent when its node cannot sign', () => {
+  const { MeshAgent } = require('../lib/mesh-agent');
+  it('halts once on ESIGN and stops remixing and observing', async () => {
+    let remixCalls = 0;
+    const agent = new MeshAgent({
+      name: `esign-${Date.now()}`,
+      fetchDomain: async () => ({ data: 'd', fingerprint: String(Math.random()) }),
+      reason: async () => ({ focus: 'an observation' }),
+      remix: async () => { remixCalls++; return { focus: 'a remix' }; },
+      shouldRemix: () => true,
+    });
+    agent.node.canRemix = () => true;
+    agent.node.remember = () => { const e = new Error('CMB signing failed: key unreadable'); e.code = 'ESIGN'; throw e; };
+    const errors = [];
+    const origError = console.error, origLog = console.log;
+    console.error = (...a) => errors.push(a.join(' '));
+    console.log = () => {};
+    try {
+      const entry = () => ({ key: 'k-' + Math.random(), source: 'peer', cmb: { categories: { focus: { text: 'x' } } } });
+      await agent._onCMBAccepted(entry());
+      await agent._onCMBAccepted(entry());
+      await agent._checkDomain();
+    } finally { console.error = origError; console.log = origLog; }
+    assert.strictEqual(errors.filter((l) => /HALTED: this node cannot sign/.test(l)).length, 1, 'said once');
+    assert.strictEqual(remixCalls, 1, 'no model call after the halt');
+    assert.strictEqual(agent._signingHalted, true);
+  });
+});
