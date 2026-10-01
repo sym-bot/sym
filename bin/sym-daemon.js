@@ -214,12 +214,41 @@ const listeners = new Map(); // socketId → socket — real-time event subscrib
  * See MMP v0.2.0 Section 13 (Application).
  * @returns {net.Server}
  */
-function startIPCServer() {
+/**
+ * Whether a daemon is serving the socket path: a connect that succeeds means yes; a refused or
+ * missing socket is stale. Named pipes (Windows) have no file to remove, so they are not probed.
+ * @returns {Promise<boolean>}
+ */
+function socketServed() {
+  if (process.platform === 'win32' || !fs.existsSync(SOCKET_PATH)) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const c = net.createConnection(SOCKET_PATH);
+    const done = (v) => { c.destroy(); resolve(v); };
+    c.once('connect', () => done(true));
+    c.once('error', () => done(false));
+    setTimeout(() => done(false), 2000).unref();
+  });
+}
+
+/** The socket file this daemon created (its inode), so it never removes another daemon's. */
+let ownSocketIno = null;
+function socketIsOurs() {
+  if (process.platform === 'win32' || ownSocketIno === null) return false;
+  try { return fs.statSync(SOCKET_PATH).ino === ownSocketIno; } catch { return false; }
+}
+
+async function startIPCServer() {
   // Ensure ~/.sym/ exists
   if (!fs.existsSync(SYM_DIR)) {
     fs.mkdirSync(SYM_DIR, { recursive: true });
   }
-  // Clean up stale socket
+  // A socket file is removed only when nothing answers on it. Removing it unconditionally let a
+  // second daemon start take the path from the one already serving: that daemon kept running,
+  // reachable by no client, and every client reported "sym-daemon not running".
+  if (await socketServed()) {
+    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
+    process.exit(1);
+  }
   if (fs.existsSync(SOCKET_PATH)) {
     try { fs.unlinkSync(SOCKET_PATH); } catch {}
   }
@@ -264,13 +293,26 @@ function startIPCServer() {
     });
   });
 
-  server.listen(SOCKET_PATH, () => {
+  const onListening = () => {
     // chmod not applicable on Windows named pipes
     if (process.platform !== 'win32') {
       try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
+      try { ownSocketIno = fs.statSync(SOCKET_PATH).ino; } catch { ownSocketIno = null; }
     }
     log(`IPC server listening: ${SOCKET_PATH}`);
-  });
+  };
+  server.listen(SOCKET_PATH, onListening);
+
+  // If the socket file is removed or replaced while this daemon runs, clients can no longer reach
+  // it. It is checked every 30 s and, when gone, listened on again.
+  if (process.platform !== 'win32') {
+    setInterval(() => {
+      if (ownSocketIno === null || socketIsOurs()) return;
+      if (fs.existsSync(SOCKET_PATH)) return; // another process's socket now: leave it alone
+      log(`IPC socket ${SOCKET_PATH} was removed while this daemon was serving; listening again`);
+      server.close(() => server.listen(SOCKET_PATH, onListening));
+    }, Number(process.env.SYM_SOCKET_CHECK_MS) || 30_000).unref();
+  }
 
   server.on('error', (err) => {
     log(`IPC server error: ${err.message}`);
@@ -929,7 +971,7 @@ async function main() {
     broadcastToListeners({ type: 'event', event: 'peer-left', data: { name: data.name || 'unknown', peerId: data.peerId } });
   });
 
-  const ipcServer = startIPCServer();
+  const ipcServer = await startIPCServer();
 
   log('sym-daemon ready');
 
@@ -939,7 +981,8 @@ async function main() {
     stopRoomBeacon();
     node.stop();
     ipcServer.close();
-    if (fs.existsSync(SOCKET_PATH)) {
+    // Only our own socket file: a path another daemon now serves is left to it.
+    if (socketIsOurs()) {
       try { fs.unlinkSync(SOCKET_PATH); } catch {}
     }
     process.exit(0);

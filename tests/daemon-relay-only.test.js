@@ -130,3 +130,47 @@ test('a daemon with SYM_STATE_DIR keeps its own files in that root, not in ~/.sy
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// A second daemon start removed the socket of the daemon already serving it, which then ran on,
+// reachable by no client (every client: "sym-daemon not running"). A served socket is never
+// removed, and a daemon whose socket file is removed listens on it again.
+test('a second daemon never takes a served socket, and a removed socket is listened on again', { skip: process.platform === 'win32' && 'a socket file' }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-sock-'));
+  const socket = path.join(base, 'd.sock');
+  const start = (name) => {
+    const home = path.join(base, name); fs.mkdirSync(home);
+    const env = { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: path.join(home, '.sym'), SYM_SOCKET: socket, SYM_NODE_NAME: name, SYM_RELAY_ONLY: '1', SYM_SOCKET_CHECK_MS: '300' };
+    delete env.SYM_RELAY_URL; delete env.SYM_RELAY_TOKEN; delete env.SYM_ROOM;
+    const d = spawn(process.execPath, [path.join(BIN, 'sym-daemon.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    d.out = '';
+    d.stdout.on('data', (b) => { d.out += b; });
+    d.stderr.on('data', (b) => { d.out += b; });
+    return d;
+  };
+  const until = async (cond, ms = 15000) => { for (let t = 0; t < ms && !cond(); t += 100) await new Promise((r) => setTimeout(r, 100)); return cond(); };
+  const status = () => new Promise((resolve) => {
+    const c = net.createConnection(socket);
+    let buf = '';
+    c.on('data', (d) => { buf += d; if (buf.includes('\n')) { c.end(); resolve(true); } });
+    c.on('error', () => resolve(false));
+    c.on('connect', () => c.write(JSON.stringify({ type: 'status' }) + '\n'));
+    setTimeout(() => resolve(false), 3000);
+  });
+  const a = start('first');
+  let b = null;
+  try {
+    assert.ok(await until(() => a.out.includes('IPC server listening')), a.out.slice(-600));
+    b = start('second');
+    assert.ok(await until(() => b.exitCode !== null), `the second daemon exits: ${b.out.slice(-400)}`);
+    assert.match(b.out, /Another sym-daemon is serving/);
+    assert.equal(await status(), true, 'the first is still reachable on the socket');
+    fs.unlinkSync(socket);
+    assert.ok(await until(() => fs.existsSync(socket), 5000), 'the first listens again on its removed socket');
+    assert.equal(await status(), true);
+  } finally {
+    a.kill('SIGTERM');
+    if (b && b.exitCode === null) b.kill('SIGTERM');
+    await new Promise((r) => setTimeout(r, 300));
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
