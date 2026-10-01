@@ -230,6 +230,24 @@ describe('author and inbox id on surfaced entries', () => {
     });
   });
 
+  it('every surfaced path carries author.via: rejected-directed, CLI-host and admitted', async () => {
+    const paths = {
+      'rejected-directed': async (node) => { node._svafEvaluator.evaluate = async () => REJECTED; return directed(node, mkCmb('via rejected')); },
+      'cli-host': async (node) => { node._frameHandler._cliHostMode = true; return frame(mkCmb('via cli host')); },
+      admitted: async (node) => { node._svafEvaluator.evaluate = async () => ALIGNED; return frame(mkCmb('via admitted')); },
+    };
+    for (const [label, setup] of Object.entries(paths)) {
+      await withNode(`via-${label}`, async (node) => {
+        const seen = collect(node);
+        node._frameHandler.handle('peer-a-id', 'peerA', await setup(node));
+        await settle();
+        assert.strictEqual(seen.accepted.length, 1, label);
+        assert.deepStrictEqual(seen.accepted[0].author?.via, { name: 'peerA', nodeId: 'peer-a-id' }, `${label}: author.via`);
+        assert.deepStrictEqual(node.inboxGet(seen.accepted[0].inboxId).author?.via, { name: 'peerA', nodeId: 'peer-a-id' }, `${label}: inbox item author.via`);
+      });
+    }
+  });
+
   it('F15: an unverified createdByNodeId is not presented as the author identity, and msg.source is ignored', async () => {
     await withNode('author-forged', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
