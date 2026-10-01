@@ -99,6 +99,35 @@ describe('MMP §15.8 retroactive tether audit', () => {
     }
   });
 
+  it('fetch: a parent held locally but unverified does not come back as the anchor', async () => {
+    // fetchCMB answers from the local store before asking any peer, so the fetch fallback handed
+    // the audit the very record the verified walk had just refused, and the audit attested a tether
+    // to it. §15.8 anchors on records reached by VERIFYING parents; a local copy is not a second
+    // opinion about its own author.
+    const name = `audit-unv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      await awaitSemantic();
+      const parent = createCMB({ categories: cat7(TOPIC_B_ROOT), createdBy: 'unverifiable-peer' });
+      // A peer admission with no verified signature verdict, stored the way receiveFromPeer stores one.
+      node._store.receiveFromPeer('unverifiable-peer', {
+        key: parent.metadata.key, content: TOPIC_B_ROOT, source: 'unverifiable-peer', cmb: parent, storedAt: Date.now(),
+      });
+      const remix = storeLegacyRemix(node, parent.metadata.key, TOPIC_B);
+      const r = await node.auditLineageTethers({ fetch: true, timeoutMs: 50 });
+      assert.strictEqual(r.audited, 1);
+      assert.strictEqual(r.fetched, 0, 'the local unverified copy is not a fetch');
+      assert.strictEqual(r.unchecked, 1, 'the tether is unverified');
+      const e = node._store.get(remix.key);
+      assert.strictEqual(e.cmb.tether, undefined, 'no tether attestation names the unverified record');
+      assert.strictEqual(e.cmb.provenance?.tether, undefined);
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
+
   it('unresolvable roots are unchecked, never severed', async () => {
     const name = `audit-un-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
