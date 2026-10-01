@@ -21,18 +21,11 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady, verifyTetherAttestation } = require('../lib/core');
+const { createCMB, verifyTetherAttestation } = require('../lib/core');
 
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { focus: 1 } };
 
-// The reject floor is calibrated on the semantic kernel (§9.2.1), as in the other tether tests.
-async function awaitSemantic(timeoutMs = 30000) {
-  const t0 = Date.now();
-  while (!isSemanticReady()) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('semantic encoder did not become ready');
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+const { awaitSemantic } = require('./_semantic');
 
 function cat7(t) {
   return {

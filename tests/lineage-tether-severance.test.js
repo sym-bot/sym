@@ -25,19 +25,12 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady, verifyTetherAttestation, kernelId } = require('../lib/core');
+const { createCMB, verifyTetherAttestation, kernelId } = require('../lib/core');
 
 // The tether's reject-floor calibration assumes the semantic kernel (the
 // production default — §9.2.1: thresholds are meaningful only within a pinned
 // encoder). The encoder loads async at module require; wait for it so the
-// test exercises the deployed configuration, not the n-gram warmup fallback.
-async function awaitSemantic(timeoutMs = 30000) {
-  const t0 = Date.now();
-  while (!isSemanticReady()) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('semantic encoder did not become ready');
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+const { awaitSemantic } = require('./_semantic');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

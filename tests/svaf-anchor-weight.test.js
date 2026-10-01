@@ -16,20 +16,13 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const { tmpdir } = require('./_tmpdir');
 const { MemoryStore } = require('../lib/memory-store');
-const { createCMB, processHeuristicSVAF, isSemanticReady } = require('../lib/core');
+const { createCMB, processHeuristicSVAF } = require('../lib/core');
 
 const TAU = 3600;
 const POLICY = { stableThreshold: 0.35, guardedThreshold: 0.75, temporalLambda: 0.3, freshnessSeconds: TAU };
 
 // One kernel for every gate the test compares (§9.2.1: drifts compare only within a pinned
-// encoder), and the one a node runs once its semantic encoder has loaded.
-async function awaitSemantic(timeoutMs = 30000) {
-  const t0 = Date.now();
-  while (!isSemanticReady()) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('semantic encoder did not become ready');
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+const { awaitSemantic } = require('./_semantic');
 
 function cat7(t) {
   return {

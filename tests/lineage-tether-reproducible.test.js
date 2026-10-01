@@ -27,17 +27,10 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const core = require('../lib/core');
-const { createCMB, isSemanticReady, evaluateLineageTetherFromText, processHeuristicSVAF } = core;
+const { createCMB, evaluateLineageTetherFromText, processHeuristicSVAF } = core;
 
 // The reject-floor calibration assumes the semantic kernel (§9.2.1: thresholds are meaningful only
-// within a pinned encoder), and a comparison across two nodes is only meaningful in one kernel.
-async function awaitSemantic(timeoutMs = 30000) {
-  const t0 = Date.now();
-  while (!isSemanticReady()) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('semantic encoder did not become ready');
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+const { awaitSemantic } = require('./_semantic');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
