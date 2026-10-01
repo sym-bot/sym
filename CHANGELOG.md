@@ -9,11 +9,20 @@ unrelated process that reused the holder's PID. On Windows the start time came f
 exist there, so no start time was recorded. After a crash or a hard-killed terminal, once Windows reused the
 PID, the name stayed locked (`EIDENTITYLOCK`) for the rest of the boot.
 
-- Windows now reads the start time through PowerShell (UTC ISO-8601), for both the lock writer and a later
-  reader.
-- A lock with no start time (written by 0.13.12 or earlier) whose PID now belongs to a process that started
-  after the lock was written is reclaimed. The writer was running when it wrote the file, so a later process
-  cannot be it.
+- **Windows start time.** Windows now reads the start time through the system PowerShell, by absolute path,
+  as UTC ISO-8601. The lock writer and a later reader use the same form.
+- **Caching.** Results are cached for 10 s per PID. A daemon checking many node directories held by one
+  process therefore pays one lookup, about 0.45 s on Windows, measured.
+- **Failed lookups.** When the start time cannot be read (no PowerShell, a timeout, access denied), the lock
+  is treated as held, as before, and the process warns once. A failed lookup of the node's own start time is
+  retried at the next acquire instead of being remembered.
+
+Limits:
+
+- A lock written by 0.13.12 or earlier carries no start time, so it can still only be cleared by a reboot or
+  by deleting `~/.sym/nodes/<name>/lock.pid`. Guessing from the file's timestamp was considered and dropped:
+  a clock step could make a live holder look stale, and a live holder must never lose its lock.
+- Locks written from 0.13.13 on are covered.
 
 ## 0.13.12 (2026-10-01)
 

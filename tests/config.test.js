@@ -331,21 +331,17 @@ describe('acquireIdentityLock', () => {
     release();
   });
 
-  it('reclaims a pid-only lock written this boot when its PID now belongs to a later process', () => {
-    // Windows locks written by 0.13.12 and earlier carry no start time. The writer was alive when it
-    // wrote the file, so a process that started after the file was written cannot be the writer.
+  it('keeps a lock whose live holder\'s recorded start time matches (a live holder is never reclaimed)', () => {
     const name = mkName();
-    writeLock(name, String(liveChild.pid)); // alive, no start metadata
-    const before = new Date(Math.max(Date.now() - 60_000, Date.now() - os.uptime() * 1000 + 10_000));
-    fs.utimesSync(lockPathOf(name), before, before); // after boot, before liveChild started
-    const release = acquireIdentityLock(name); // must NOT throw
-    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
-    release();
+    const start = processStartTime(liveChild.pid);
+    assert.ok(start, 'precondition: this platform can read a process start time');
+    writeLock(name, `${liveChild.pid}\n${JSON.stringify({ start, createdAt: Date.now() })}\n`);
+    assert.throws(() => acquireIdentityLock(name), (e) => e.code === 'EIDENTITYLOCK' && e.holderPid === liveChild.pid);
   });
 
   it('on Windows, a process start time is read and is stable', { skip: process.platform !== 'win32' }, () => {
     const a = processStartTime(process.pid);
-    assert.match(String(a), /^\d{4}-\d{2}-\d{2}T/, 'ISO-8601 from PowerShell');
+    assert.match(String(a), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, 'UTC ISO-8601 from PowerShell');
     assert.strictEqual(processStartTime(process.pid), a, 'same process, same string');
     assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
   });
