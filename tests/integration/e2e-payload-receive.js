@@ -1,5 +1,7 @@
 'use strict';
 
+require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * End-to-end PAYLOAD receive integration test — the cross-device drop hunt.
  *

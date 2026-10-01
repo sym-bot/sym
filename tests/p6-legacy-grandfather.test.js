@@ -1,5 +1,7 @@
 'use strict';
 
+require('./_isolate-home'); // sandbox HOME/USERPROFILE: node state must never land in the real ~/.sym
+
 /**
  * P-6 — a pre-boundary block is UNATTESTED, not FORGED.
  *

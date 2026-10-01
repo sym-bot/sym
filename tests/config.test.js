@@ -12,7 +12,7 @@ const {
   SYM_DIR, NODES_DIR, ensureDir, nodeDir,
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
   normalizeMdnsHostname, pidIsAlive, lockHolderPid, log,
-  acquireIdentityLock, readLockFile, processStartTime,
+  acquireIdentityLock, readLockFile, processStartTime, _clearProcessStartTimeCache,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -327,6 +327,31 @@ describe('acquireIdentityLock', () => {
     const old = new Date(Date.now() - 365 * 24 * 3600 * 1000);
     fs.utimesSync(lockPathOf(name), old, old); // …but the lock predates boot
     const release = acquireIdentityLock(name); // must NOT throw
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('keeps a lock whose live holder\'s recorded start time matches (a live holder is never reclaimed)', () => {
+    const name = mkName();
+    const start = processStartTime(liveChild.pid);
+    assert.ok(start, 'precondition: this platform can read a process start time');
+    writeLock(name, `${liveChild.pid}\n${JSON.stringify({ start, createdAt: Date.now() })}\n`);
+    assert.throws(() => acquireIdentityLock(name), (e) => e.code === 'EIDENTITYLOCK' && e.holderPid === liveChild.pid);
+  });
+
+  it('on Windows, a process start time is read and is stable', { skip: process.platform !== 'win32' }, () => {
+    _clearProcessStartTimeCache();
+    const a = processStartTime(process.pid);
+    assert.match(String(a), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/, 'UTC ISO-8601 from PowerShell');
+    _clearProcessStartTimeCache(); // a second real PowerShell call, not the cache
+    assert.strictEqual(processStartTime(process.pid), a, 'same process, same string');
+    assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
+  });
+
+  it('on Windows, a lock recorded with a recycled PID\'s old start time is reclaimed', { skip: process.platform !== 'win32' }, () => {
+    const name = mkName();
+    writeLock(name, `${liveChild.pid}\n{"start":"2004-01-01T00:00:00.0000000Z","createdAt":1}\n`);
+    const release = acquireIdentityLock(name);
     assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
     release();
   });
