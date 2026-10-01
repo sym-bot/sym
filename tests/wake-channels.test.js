@@ -159,3 +159,48 @@ describe('relay peer list', () => {
     });
   });
 });
+
+describe('0.13.15 review F2/F3', () => {
+  it('a channel kept by 0.13.14 (no source) is not repointed by gossip, and the relay or the phone still can', () => {
+    withNode((node) => {
+      const wm = node._wakeManager;
+      fs.mkdirSync(require('path').dirname(wm._wakeChannelsFile), { recursive: true });
+      fs.writeFileSync(wm._wakeChannelsFile, JSON.stringify({ 'phone-1': apns('phones-own') }));
+      wm.loadWakeChannels();
+      node._frameHandler.handle('peer-x', 'peer-x', { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('ATTACKER'), lastSeen: Date.now() }] });
+      assert.strictEqual(wm._peerWakeChannels.get('phone-1').token, 'phones-own', 'gossip cannot repoint it');
+      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('re-registered'), { source: 'relay' }), 'updated', 'the relay can');
+      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('again'), { source: 'direct' }), 'updated', 'the phone can');
+    });
+  });
+
+  it('fabricated gossip is bounded: one frame reads at most 256 entries, and the map holds at most its cap', () => {
+    withNode((node, io) => {
+      const wm = node._wakeManager;
+      wm._maxChannels = 300;
+      wm.learnWakeChannel('real-phone', apns('own'), { source: 'direct' });
+      const now = Date.now();
+      const flood = (from) => ({ type: 'peer-info', peers: Array.from({ length: 2000 }, (_, i) => ({ nodeId: `fake-${from}-${i}`, wakeChannel: apns(`f${i}`), lastSeen: now })) });
+      node._frameHandler.handle('peer-x', 'peer-x', flood('a'));
+      assert.strictEqual(wm._peerWakeChannels.size, 1 + 256, 'the first 256 entries of one frame');
+      assert.ok(io.lines.some((l) => /2000 entries, reading the first 256/.test(l)));
+      node._frameHandler.handle('peer-x', 'peer-x', flood('b'));
+      assert.strictEqual(wm._peerWakeChannels.size, 300, 'never past the cap');
+      assert.strictEqual(wm._peerWakeChannels.get('real-phone').token, 'own', 'gossip only displaces gossip');
+    });
+  });
+
+  it('a full map of first-hand channels is not displaced by gossip, and a new first-hand one displaces the oldest weakest', () => {
+    withNode(() => {
+      const { WakeManager } = require('../lib/core/wake');
+      let t = 1_000_000;
+      const wm = new WakeManager({ wakeChannelsFile: require('path').join(require('os').tmpdir(), `wc-${process.pid}-${Date.now()}.json`), peerWakeChannels: new Map(), peerLastWake: new Map(), pendingFrames: new Map(), maxWakeChannels: 3, now: () => t, log: () => {} });
+      wm.learnWakeChannel('p1', apns('1'), { source: 'direct' }); t += 1000;
+      wm.learnWakeChannel('p2', apns('2'), { source: 'relay' }); t += 1000;
+      wm.learnWakeChannel('p3', apns('3'), { source: 'direct' }); t += 1000;
+      assert.strictEqual(wm.learnWakeChannel('g1', apns('g'), { source: 'gossip', lastSeen: t }), 'ignored');
+      assert.strictEqual(wm.learnWakeChannel('p4', apns('4'), { source: 'direct' }), 'added');
+      assert.deepStrictEqual([...wm._peerWakeChannels.keys()].sort(), ['p1', 'p3', 'p4'], 'the relay-sourced one went: the weakest');
+    });
+  });
+});
