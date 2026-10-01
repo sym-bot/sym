@@ -108,9 +108,9 @@ describe('§15.8 tether is reproducible by any holder of the root and the record
         for (const t of memory) node.remember(cat7(t));
         const stored = await admit(node, remixFrame(INCOMING, root.key));
         assert.ok(stored, `${label}: the remix admits`);
-        assert.ok(stored.cmb.tether, `${label}: the integrator signed a tether`);
-        assert.strictEqual(stored.cmb.tether.anchor, root.key, `${label}: anchored on the shared root`);
-        seen.push({ label, att: stored.cmb.tether, record: stored.cmb, root: root.cmb, node });
+        assert.ok(stored.tether, `${label}: the integrator signed a tether`);
+        assert.strictEqual(stored.tether.anchor, root.key, `${label}: anchored on the shared root`);
+        seen.push({ label, att: stored.tether, record: stored.cmb, root: root.cmb, node });
       });
     }
     const [a, b] = seen;
@@ -210,9 +210,9 @@ describe('§15.8 cold-start admissions carry a tether like warm ones (B-L6)', ()
         const peerRoot = createCMB({ categories: cat7(ROOT), createdBy: 'peerA' });
         const stored = await admit(node, { type: 'cmb', timestamp: Date.now(), content: ROOT, cmb: peerRoot });
         assert.ok(stored, `${warm ? 'warm' : 'cold'}: the root admits`);
-        assert.strictEqual(stored.cmb.tether?.anchor, peerRoot.metadata.key, `${warm ? 'warm' : 'cold'}: a root is its own anchor`);
-        assert.strictEqual(stored.cmb.tether.verdict, 'tethered');
-        assert.strictEqual(stored.cmb.provenance?.tether?.severed, false);
+        assert.strictEqual(stored.tether?.anchor, peerRoot.metadata.key, `${warm ? 'warm' : 'cold'}: a root is its own anchor`);
+        assert.strictEqual(stored.tether.verdict, 'tethered');
+        assert.strictEqual(stored.provenance?.tether?.severed, false);
       });
     }
   });

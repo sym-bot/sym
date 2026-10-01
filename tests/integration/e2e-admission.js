@@ -7,7 +7,7 @@ require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never 
  * remix it stores (MMP admission-attestation layer, Phase C).
  *
  * Two wired in-process nodes; A sends a directed CMB to B; B gates it (heuristic
- * forced) and ADMITS it; the stored remix's cmb.admission must be a valid signed
+ * forced) and ADMITS it; the stored remix's entry.admission must be a valid signed
  * attestation bound to A's CMB, attributed to B, signed by B's identity key.
  *
  * Run with: npm run test:integration (heuristic path loads the encoder).
@@ -59,8 +59,9 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
       const admitted = await (async () => { for (let i = 0; i < 100 && !received; i++) await sleep(50); return !!received; })();
       assert.ok(admitted, 'B must process and admit the directed CMB');
 
-      const att = received.entry?.cmb?.admission;
-      assert.ok(att, 'stored remix carries an admission attestation');
+      // On the store entry, beside the record (§8.8.1: the record is exactly its two sections).
+      const att = received.entry?.admission;
+      assert.ok(att, 'stored remix\'s entry carries an admission attestation');
       assert.strictEqual(att.of, entry.key, 'attestation is bound to A\'s gated CMB');
       assert.strictEqual(att.by, B.nodeId, 'attested by the gating node B');
       assert.strictEqual(att.roster, 'sym-bot-team', 'scoped to B\'s roster');

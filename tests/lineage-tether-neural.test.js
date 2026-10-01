@@ -88,7 +88,7 @@ async function admitThrough(path, rootText, frameOf) {
     else await node._frameHandler._processHeuristicSVAF(frame, 'peerA', 'peerA', now, now, 0);
     const stored = node._store.get(frame.cmb.metadata.key);
     assert.ok(stored, `${path}: the remix is stored`);
-    const att = stored.cmb.tether;
+    const att = stored.tether;
     return {
       root, stored, att,
       attValid: att ? verifyTetherAttestation(att, node._identity.publicKey).valid : null,
@@ -112,9 +112,9 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
       assert.ok(stored, 'the neural evaluator admitted the remix');
       assert.strictEqual(stored.svaf?.method, 'neural', 'precondition: the neural path stored it');
       assert.strictEqual(stored.cmb.metadata.lineage, null, 'the laundered lineage is severed');
-      assert.strictEqual(stored.cmb.provenance?.tether?.severed, true);
-      assert.strictEqual(stored.cmb.provenance.tether.departedFrom, root.metadata.key);
-      const att = stored.cmb.tether;
+      assert.strictEqual(stored.provenance?.tether?.severed, true);
+      assert.strictEqual(stored.provenance.tether.departedFrom, root.metadata.key);
+      const att = stored.tether;
       assert.ok(att, 'a tether attestation is attached');
       assert.strictEqual(att.verdict, 'severed');
       assert.strictEqual(att.anchor, root.metadata.key);
@@ -139,7 +139,7 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
       assert.strictEqual(neural.att.kernelId, heuristic.att.kernelId, 'one kernel, so the drifts are comparable');
       assert.strictEqual(neural.att.drift.toFixed(6), heuristic.att.drift.toFixed(6), 'same drift: one computation');
       const withoutDrift = ({ drift, ...rest }) => rest; // drift is compared above, to the precision it is signed at
-      assert.deepStrictEqual(withoutDrift(neural.stored.cmb.provenance.tether), withoutDrift(heuristic.stored.cmb.provenance.tether), 'same provenance');
+      assert.deepStrictEqual(withoutDrift(neural.stored.provenance.tether), withoutDrift(heuristic.stored.provenance.tether), 'same provenance');
       assert.deepStrictEqual(neural.stored.cmb.metadata.lineage, heuristic.stored.cmb.metadata.lineage, 'same lineage outcome');
       assert.strictEqual(neural.att.verdict, rootText === TOPIC_A ? 'severed' : 'tethered');
     });
@@ -152,7 +152,7 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
     for (const path of ['neural', 'heuristic']) {
       const r = await admitThrough(path, TOPIC_B_ROOT, frameOf);
       assert.strictEqual(r.att, undefined, `${path}: no tether attestation is stored`);
-      assert.strictEqual(r.stored.cmb.provenance?.tether, undefined, `${path}: the tether is unverified, not evaluated`);
+      assert.strictEqual(r.stored.provenance?.tether, undefined, `${path}: the tether is unverified, not evaluated`);
       assert.deepStrictEqual(r.stored.cmb.metadata.lineage.parents, ['cmb-' + 'e'.repeat(64)], `${path}: lineage is kept`);
     }
   });

@@ -4,10 +4,10 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 
 /**
  * Phase C — the node builds + signs an Admission Attestation when it gates a CMB,
- * and the store persists it on the remix.
+ * and the store persists it on the remix's entry.
  *
  * Deterministic (no encoder / no SVAF run): exercises node._buildAdmissionAttestation
- * directly and the memory-store preservation of cmb.admission. The full receive-path
+ * directly and the memory-store preservation of entry.admission. The full receive-path
  * wiring (frame-handler attaches it on admit) is covered by the integration test
  * tests/integration/e2e-admission.js.
  */
@@ -19,7 +19,7 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { verifyAttestation, verifyAttestationRole, signAttestation } = require('../lib/core');
+const { verifyAttestation, verifyAttestationRole, signAttestation, createCMB } = require('../lib/core');
 
 // Construct (no start) — the builder needs only identity / room / role / chain state.
 function withNode(baseName, opts, fn) {
@@ -69,19 +69,29 @@ describe('node._buildAdmissionAttestation', () => {
   });
 });
 
-describe('memory-store persists cmb.admission on the remix', () => {
+describe('memory-store persists the admission attestation on the remix\'s entry', () => {
+  // The attestation is this node's record ABOUT the remix, so it lives on the entry beside the
+  // record; a two-section record has exactly `categories` and `metadata` (§8.8.1).
+  const record = () => createCMB({ categories: { focus: 'f', issue: 'i', intent: 'n', motivation: 'm', commitment: 'c', perspective: 'p', mood: 'neutral' }, createdBy: 'peer' });
+
   it('preserves a signed admission attestation through receiveFromPeer', () => {
     withNode('att-store', { lifecycleRole: 'participant', room: 'g' }, (node) => {
       const att = node._buildAdmissionAttestation('cmb-of', 'aligned', verdicts, 'heuristic');
-      const entry = {
-        source: `${node.name}+peer`, content: 'x',
-        cmb: { key: 'remix-1', categories: { focus: { text: 'f' } }, admission: att },
-        storedAt: Date.now(),
-      };
+      const entry = { source: `${node.name}+peer`, content: 'x', cmb: record(), admission: att, storedAt: Date.now() };
       const stored = node._store.receiveFromPeer('peer-id', entry);
-      assert.ok(stored && stored.cmb && stored.cmb.admission, 'admission preserved on the stored remix');
-      assert.strictEqual(stored.cmb.admission.of, 'cmb-of');
-      assert.deepStrictEqual(verifyAttestation(stored.cmb.admission, node._identity.publicKey), { signed: true, valid: true });
+      assert.ok(stored && stored.admission, 'admission preserved on the stored remix\'s entry');
+      assert.strictEqual(stored.admission.of, 'cmb-of');
+      assert.deepStrictEqual(verifyAttestation(stored.admission, node._identity.publicKey), { signed: true, valid: true });
+      assert.deepStrictEqual(Object.keys(stored.cmb).sort(), ['categories', 'metadata']);
+    });
+  });
+
+  it('a writer that still puts it on the record has it moved onto the entry', () => {
+    withNode('att-store-lift', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      const att = node._buildAdmissionAttestation('cmb-of', 'aligned', verdicts, 'heuristic');
+      const stored = node._store.receiveFromPeer('peer-id', { content: 'x', cmb: { ...record(), admission: att }, storedAt: Date.now() });
+      assert.deepStrictEqual(Object.keys(stored.cmb).sort(), ['categories', 'metadata'], 'the record keeps exactly its two sections');
+      assert.deepStrictEqual(verifyAttestation(stored.admission, node._identity.publicKey), { signed: true, valid: true });
     });
   });
 });

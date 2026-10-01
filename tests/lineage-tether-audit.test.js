@@ -75,9 +75,9 @@ describe('MMP §15.8 retroactive tether audit', () => {
 
       const l1 = node._store.get(laundered.key);
       assert.ok(l1.cmb.metadata.lineage && (l1.cmb.metadata.lineage.parents || []).length === 1, 'lineage kept in annotate-only mode');
-      assert.strictEqual(l1.cmb.provenance.tether.audited, true);
-      assert.ok(l1.cmb.provenance.tether.drift > 0.5);
-      const att = l1.cmb.tether;
+      assert.strictEqual(l1.provenance.tether.audited, true);
+      assert.ok(l1.provenance.tether.drift > 0.5);
+      const att = l1.tether;
       assert.strictEqual(att.verdict, 'severed', 'attestation records the evaluation outcome');
       assert.strictEqual(verifyTetherAttestation(att, node._identity.publicKey).valid, true);
 
@@ -86,13 +86,13 @@ describe('MMP §15.8 retroactive tether audit', () => {
       assert.strictEqual(r2.severed, 1);
       const l2 = node._store.get(laundered.key);
       assert.ok(!l2.cmb.metadata.lineage || (l2.cmb.metadata.lineage.parents || []).length === 0, 'laundered chain severed');
-      assert.strictEqual(l2.cmb.provenance.tether.departedFrom, rootA.key);
+      assert.strictEqual(l2.provenance.tether.departedFrom, rootA.key);
       assert.ok(![...node._store._index.byAncestor.get(rootA.key) ?? []].includes(laundered.key),
         'ancestor index no longer lists the severed remix');
 
       const f2 = node._store.get(faithful.key);
       assert.ok(f2.cmb.metadata.lineage && f2.cmb.metadata.lineage.ancestors.includes(rootB.key), 'faithful chain untouched');
-      assert.strictEqual(f2.cmb.tether.verdict, 'tethered');
+      assert.strictEqual(f2.tether.verdict, 'tethered');
     } finally {
       await node.stop();
       fs.rmSync(nodeDir(name), { recursive: true, force: true });
@@ -120,8 +120,8 @@ describe('MMP §15.8 retroactive tether audit', () => {
       assert.strictEqual(r.fetched, 0, 'the local unverified copy is not a fetch');
       assert.strictEqual(r.unchecked, 1, 'the tether is unverified');
       const e = node._store.get(remix.key);
-      assert.strictEqual(e.cmb.tether, undefined, 'no tether attestation names the unverified record');
-      assert.strictEqual(e.cmb.provenance?.tether, undefined);
+      assert.strictEqual(e.tether, undefined, 'no tether attestation names the unverified record');
+      assert.strictEqual(e.provenance?.tether, undefined);
     } finally {
       await node.stop();
       fs.rmSync(nodeDir(name), { recursive: true, force: true });

@@ -106,17 +106,18 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
     await withNode('tether-sever', async (node) => {
       const { accepted } = await seedAndReceive(node, TOPIC_A, TOPIC_B_NEW);
       assert.strictEqual(accepted.length, 1, 'incoming admits (aligned with recent topic-B anchors)');
-      const cmb = accepted[0].cmb;
+      const entry = accepted[0];
+      const cmb = entry.cmb;
       assert.ok(isRootShaped(cmb.metadata.lineage), 'lineage severed — stored as a fresh root');
-      assert.ok(cmb.provenance.tether, 'tether recorded in provenance');
-      assert.strictEqual(cmb.provenance.tether.severed, true);
-      assert.ok(cmb.provenance.tether.drift > 0.5, `drift ${cmb.provenance.tether.drift} exceeds the reject floor`);
-      assert.ok(cmb.provenance.tether.departedFrom, 'departed source recorded informally');
+      assert.ok(entry.provenance.tether, 'tether recorded in provenance');
+      assert.strictEqual(entry.provenance.tether.severed, true);
+      assert.ok(entry.provenance.tether.drift > 0.5, `drift ${entry.provenance.tether.drift} exceeds the reject floor`);
+      assert.ok(entry.provenance.tether.departedFrom, 'departed source recorded informally');
 
       // §15.8 tether attestation: the integrator's signed record of this exact
       // evaluation rides the remix, verifiable against the node's identity key,
       // and names the kernel the verdict was made in.
-      const att = cmb.tether;
+      const att = entry.tether;
       assert.ok(att, 'tether attestation attached');
       assert.strictEqual(att.verdict, 'severed');
       assert.strictEqual(att.of, cmb.metadata.key);
@@ -130,12 +131,13 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
     await withNode('tether-keep', async (node) => {
       const { root, accepted } = await seedAndReceive(node, TOPIC_B_ROOT, TOPIC_B_NEW);
       assert.strictEqual(accepted.length, 1, 'incoming admits');
-      const cmb = accepted[0].cmb;
+      const entry = accepted[0];
+      const cmb = entry.cmb;
       assert.ok(!isRootShaped(cmb.metadata.lineage), 'lineage intact');
       assert.ok(cmb.metadata.lineage.ancestors.includes(root.key), 'chain still reaches its root');
-      assert.strictEqual(cmb.provenance.tether.severed, false);
-      assert.ok(cmb.provenance.tether.drift <= 0.5);
-      assert.strictEqual(cmb.tether?.verdict, 'tethered', 'kept chains carry a tethered attestation');
+      assert.strictEqual(entry.provenance.tether.severed, false);
+      assert.ok(entry.provenance.tether.drift <= 0.5);
+      assert.strictEqual(entry.tether?.verdict, 'tethered', 'kept chains carry a tethered attestation');
     });
   });
 
@@ -164,11 +166,11 @@ describe('MMP §15.8 lineage tether — severance through the gate', () => {
         assert.ok(remix, 'the remix admits');
         assert.deepStrictEqual(remix.cmb.metadata.lineage.parents, [parent.metadata.key], 'lineage is kept either way');
         if (verified) {
-          assert.strictEqual(remix.cmb.tether?.anchor, parent.metadata.key, 'a verified parent anchors the tether');
-          assert.strictEqual(remix.cmb.tether.verdict, 'tethered');
+          assert.strictEqual(remix.tether?.anchor, parent.metadata.key, 'a verified parent anchors the tether');
+          assert.strictEqual(remix.tether.verdict, 'tethered');
         } else {
-          assert.strictEqual(remix.cmb.tether, undefined, 'no tether attestation names an unverified record');
-          assert.strictEqual(remix.cmb.provenance?.tether, undefined, 'the tether is unverified, not evaluated');
+          assert.strictEqual(remix.tether, undefined, 'no tether attestation names an unverified record');
+          assert.strictEqual(remix.provenance?.tether, undefined, 'the tether is unverified, not evaluated');
         }
       });
     });
