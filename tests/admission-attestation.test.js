@@ -455,3 +455,34 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     }
   });
 });
+
+// The witness storm (2026-10-01): two signed copies of one witness were relayed back and forth by
+// every node without end. A node relays a witness once, whatever copy arrives, and witnesses a
+// checkpoint once, across restarts.
+describe('a witness is relayed and signed once per statement', () => {
+  const { signCheckpoint, signWitness } = require('../lib/core');
+  const kp = () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+    return { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  };
+  it('a second copy of a witness is not relayed, and a held checkpoint is not witnessed again', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-storm', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      const relayed = [];
+      node._gossipToRoster = (frame) => relayed.push(frame.type);
+      const cp = { type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 };
+      signCheckpoint(cp, ATT.priv);
+      assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness'], 'relayed once and witnessed once');
+      const copy = (at) => { const w = { type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }; signWitness(w, WIT.priv); return w; };
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, true);
+      assert.strictEqual(node._ingestWitness(copy(2), 'node-wit').ok, false, 'a second signing of the same witness is not new');
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, false, 'nor is the first one, again');
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness', 'witness'], 'one relay per witness statement');
+      node._witnessCheckpoint(cp);
+      assert.strictEqual(relayed.length, 3, 'this node does not sign a second copy of its own witness');
+    });
+  });
+});
