@@ -445,3 +445,79 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     }
   });
 });
+
+// The witness storm (2026-10-01): two signed copies of one witness were relayed back and forth by
+// every node without end. A node relays a witness once, whatever copy arrives, and witnesses a
+// checkpoint once, across restarts.
+describe('a witness is relayed and signed once per statement', () => {
+  const { signCheckpoint, signWitness } = require('../lib/core');
+  const kp = () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+    return { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  };
+  it('a second copy of a witness is not relayed, and a held checkpoint is not witnessed again', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-storm', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      const relayed = [];
+      node._gossipToRoster = (frame) => relayed.push(frame.type);
+      const cp = { type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 };
+      signCheckpoint(cp, ATT.priv);
+      assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness'], 'relayed once and witnessed once');
+      const copy = (at) => { const w = { type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }; signWitness(w, WIT.priv); return w; };
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, true);
+      assert.strictEqual(node._ingestWitness(copy(2), 'node-wit').ok, false, 'a second signing of the same witness is not new');
+      assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, false, 'nor is the first one, again');
+      assert.deepStrictEqual(relayed, ['checkpoint', 'witness', 'witness'], 'one relay per witness statement');
+      node._witnessCheckpoint(cp);
+      assert.strictEqual(relayed.length, 3, 'this node does not sign a second copy of its own witness');
+    });
+  });
+});
+
+// Under the storm every repeat still cost a signature check, and a node spent most of its thread
+// verifying copies it already held. Repeats are dropped before verification, and one peer's gossip
+// frames are capped.
+describe('gossip repeats are cheap, and one peer cannot flood a node', () => {
+  const { signCheckpoint, signWitness } = require('../lib/core');
+  const kp = () => {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+    return { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  };
+  it('a repeat is dropped before its signature is checked', () => {
+    const ATT = kp(), WIT = kp();
+    withNode('att-early', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._pinPeerKey('node-att', ATT.pub);
+      node._pinPeerKey('node-wit', WIT.pub);
+      node._gossipToRoster = () => {};
+      const cp = { type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 };
+      signCheckpoint(cp, ATT.priv);
+      assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
+      const forgedCp = { ...cp, sig: 'not-a-signature' };
+      assert.strictEqual(node._ingestCheckpoint(forgedCp, 'node-att').reason, 'duplicate', 'not even verified');
+      const w = { type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 };
+      signWitness(w, WIT.priv);
+      assert.strictEqual(node._ingestWitness(w, 'node-wit').ok, true);
+      assert.strictEqual(node._ingestWitness({ ...w, sig: 'garbage' }, 'node-wit').reason, 'duplicate');
+    });
+  });
+
+  it('one peer past its gossip budget is dropped and counted; another peer is unaffected', () => {
+    withNode('att-rate', { lifecycleRole: 'participant', room: 'g' }, (node) => {
+      node._roomDoor = () => ({ pass: true });
+      let ingested = 0;
+      node._ingestWitness = () => { ingested++; return { ok: false }; };
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      const frame = { type: 'witness', witness: { attester: 'a', upto_seq: 1, root: 'r', by: 'b', sig: 's' } };
+      for (let i = 0; i < 2000; i++) node._frameHandler.handle('flooder', 'flooder', frame);
+      assert.ok(ingested <= 520, `at most the burst (and what refilled meanwhile) was handled: ${ingested}`);
+      assert.ok(metrics.some((m) => m.type === 'gossip-rate-limited' && m.from === 'flooder'));
+      const before = ingested;
+      node._frameHandler.handle('quiet-peer', 'quiet-peer', frame);
+      assert.strictEqual(ingested, before + 1, 'another peer has its own budget');
+    });
+  });
+});
