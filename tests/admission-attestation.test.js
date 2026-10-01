@@ -319,14 +319,30 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
+  it('matches a numeric role claim against the same role resolved as a string', () => {
+    withPair({}, ({ A, B, seen }) => {
+      const base = A._buildAdmissionAttestation('cmb-request-21', 'aligned', verdicts, 'heuristic');
+      const att = { ...base, role: 2 }; // signs as '2'
+      signAttestation(att, A._identity.privateKey);
+      B.resolveRole = () => '2';
+      assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.strictEqual(seen[0].roleClaimed, '2');
+      assert.strictEqual(seen[0].roleResolved, '2');
+      assert.strictEqual(seen[0].roleMatches, true);
+      assert.deepStrictEqual(verifyAttestation(seen[0], A._identity.publicKey), { signed: true, valid: true });
+    });
+  });
+
   it('does no work when nothing listens', () => {
     const { A, B, cleanup } = makePair();
     try {
       const metrics = [];
       B.on('metric', (m) => metrics.push(m));
-      B.resolveRole = () => { throw new Error('must not be called without a listener'); };
+      let called = false;
+      B.resolveRole = () => { called = true; throw new Error('must not be called without a listener'); };
       const att = A._buildAdmissionAttestation('cmb-request-19', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
+      assert.strictEqual(called, false, 'the grant chain is not walked with no listener');
       assert.strictEqual(metrics.filter((m) => m.type === 'attestation-event-dropped').length, 0);
     } finally { cleanup(); }
   });
@@ -358,7 +374,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       const metrics = [];
       B.on('metric', () => { throw new Error('counter rejects an unknown type'); }); // must not starve the next
       B.on('metric', async () => { throw new Error('shipper offline'); });          // must not go unhandled
-      B.on('metric', (m) => metrics.push(m));
+      B.on('metric', (m) => { m.node = 'b'; metrics.push(m); }); // stamps its payload, like the other 22 metrics allow
       B.resolveRole = () => { throw new Error('grant chain unreadable'); };
       const att = A._buildAdmissionAttestation('cmb-request-16', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
