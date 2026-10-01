@@ -150,7 +150,7 @@ describe('MeshAgent', () => {
   });
 });
 
-// 0.13.15 review F8: remember() throws ESIGN when the node cannot sign. The agent says so once and
+// 0.14.0 review F8: remember() throws ESIGN when the node cannot sign. The agent says so once and
 // stops, instead of an error for every admitted record and a model call it could never use.
 describe('MeshAgent when its node cannot sign', () => {
   const { MeshAgent } = require('../lib/mesh-agent');

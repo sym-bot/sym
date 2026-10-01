@@ -160,7 +160,7 @@ describe('relay peer list', () => {
   });
 });
 
-describe('0.13.15 review F2/F3', () => {
+describe('0.14.0 review F2/F3', () => {
   it('a channel kept by 0.13.14 (no source) is not repointed by gossip, and the relay or the phone still can', () => {
     withNode((node) => {
       const wm = node._wakeManager;

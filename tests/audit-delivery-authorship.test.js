@@ -729,7 +729,7 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
   });
 });
 
-// 0.13.15 review F7: a hedged Ed25519 signer (WebKit) signs one assertion differently each time, so
+// 0.14.0 review F7: a hedged Ed25519 signer (WebKit) signs one assertion differently each time, so
 // a mark taken from the signature bytes named one directed assertion twice.
 describe('directed de-duplication marks the assertion, not its signature bytes', () => {
   const { assertionMark } = require('../lib/frame-handler');

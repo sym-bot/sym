@@ -113,7 +113,7 @@ describe('the inbox names a proven author (K5)', () => {
   });
 });
 
-describe('a malformed v2.0 frame is refused, never thrown (0.13.15 review F1)', () => {
+describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', () => {
   // Declares the v2.0 suite but carries no room and no signature: it has no preimage, and building
   // one throws. On the relay path that throw reached the process and ended the daemon.
   function malformed() {

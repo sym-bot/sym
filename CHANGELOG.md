@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (unreleased)
+
+A minor version because one change breaks readers outside sym: the store's annotations moved from
+the stored record to the entry (see Changed). Also carries the 0.13.15 witness-storm fix.
 
 Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
 debt, and the daemon's log flood. Every item has a test that fails without its fix.

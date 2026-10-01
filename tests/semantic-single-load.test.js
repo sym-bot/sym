@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The semantic encoder is loaded once per process (0.13.15). Under load, a second caller asking
+ * The semantic encoder is loaded once per process (0.14.0). Under load, a second caller asking
  * for it while the first load was still running started a second model load, and parallel loads
  * were what made the full suite report "semantic encoder did not become ready".
  *

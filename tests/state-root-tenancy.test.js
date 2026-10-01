@@ -85,7 +85,7 @@ test('and the SAME root still refuses a second holder — the single-writer rule
   } finally { holder.kill(); }
 });
 
-// The CLI's own state follows SYM_STATE_DIR, as its daemon's does (0.13.15 review F5): rooted in
+// The CLI's own state follows SYM_STATE_DIR, as its daemon's does (0.14.0 review F5): rooted in
 // the home, two rooted deployments shared one pid file, so `sym stop` for one stopped the other,
 // and a room or relay set for a rooted daemon was written where that daemon never reads.
 test('the CLI reads its room from SYM_STATE_DIR, not the home (pid and relay.env resolve the same way)', () => {

@@ -36,7 +36,7 @@ describe('inbox limit (K4)', () => {
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  // 0.13.15 review F6: counting only unread items let the reply grow to the whole ring.
+  // 0.14.0 review F6: counting only unread items let the reply grow to the whole ring.
   it('the limit still bounds the reply when most of the ring is acked', () => {
     const name = uniq('inbox-bound');
     const node = mkNode(name);
