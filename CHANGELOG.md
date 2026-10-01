@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.16 (2026-10-02)
+
+Follow-ups to the 0.13.15 witness-storm fix, from its last review.
+
+### Fixed
+
+- **The checkpoint log is read at start up to what its caps hold** (32 checkpoints for each of 1,024
+  attesters, 16 MiB), not 8 MiB.
+- **A waiting witness that signs a second root is a conflict**, surfaced once, as it is for a stored
+  one; it was taken for a duplicate.
+- **This node remembers a witness it signed even while that witness waits** for its checkpoint or is
+  refused, so it signs it once, across restarts.
+- **A conflict on a held position is remembered as long as the position can be held**, so the
+  conflicting copy is appended and reported once, not again after 1,024 other conflicts.
+- **A waiting witness read from the log is not appended to it again** when its checkpoint arrives.
+
 ## 0.13.15 (2026-10-01)
 
 A hotfix for one fault: the witness storm. Every node should take it: a node keeps relaying the
