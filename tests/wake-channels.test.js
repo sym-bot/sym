@@ -167,7 +167,10 @@ describe('0.13.15 review F2/F3', () => {
       fs.mkdirSync(require('path').dirname(wm._wakeChannelsFile), { recursive: true });
       fs.writeFileSync(wm._wakeChannelsFile, JSON.stringify({ 'phone-1': apns('phones-own') }));
       wm.loadWakeChannels();
-      node._frameHandler.handle('peer-x', 'peer-x', { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('ATTACKER'), lastSeen: Date.now() }] });
+      // A minute later, so the gossip is strictly newer than the load (the old ranking let it through).
+      const later = Date.now() + 60_000;
+      wm._now = () => later;
+      node._frameHandler.handle('peer-x', 'peer-x', { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('ATTACKER'), lastSeen: later }] });
       assert.strictEqual(wm._peerWakeChannels.get('phone-1').token, 'phones-own', 'gossip cannot repoint it');
       assert.strictEqual(wm.learnWakeChannel('phone-1', apns('re-registered'), { source: 'relay' }), 'updated', 'the relay can');
       assert.strictEqual(wm.learnWakeChannel('phone-1', apns('again'), { source: 'direct' }), 'updated', 'the phone can');
