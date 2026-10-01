@@ -1,5 +1,130 @@
 # Changelog
 
+## 0.13.12 (2026-10-01)
+
+Fixes from an MMP 2.0 conformance audit of sym-mesh-channel and the SDK it runs, revised after an independent
+review of the first cut. Every bug listed here has a test that fails on 0.13.11.
+
+### Fixed — a directed CMB always reaches the agent it was sent to (MMP §9.2.2)
+
+§9.2.2 says a CMB addressed to this node surfaces regardless of the SVAF verdict. Three paths dropped one anyway:
+
+- A directed reply citing one of the receiver's own CMBs as its parent was skipped as an echo.
+  - A reply its author signed to this node (the signed `metadata.to`) is now processed normally.
+  - A reply only the unsigned frame calls directed is delivered once (`decision: 'echo'`) but never admitted,
+    stored or remixed, so no peer can reopen the §14 ping-pong.
+  - A verified record that signs a different addressee, such as a signed broadcast with a forged frame, is not
+    treated as directed. One that signs no addressee field at all is judged by the frame.
+- Receive-path de-duplication used the content key for seven days, so a new directed send of words this node had
+  already seen (a repeated "please review", or the same text earlier as a broadcast) never surfaced. A directed
+  CMB that verifies is now de-duplicated on its assertion identity, or its signature until records carry
+  `assertionId` (§8.8.2). A replay of the same signed record is still suppressed. A record that does not verify
+  keeps the content key, so no unsigned field can widen the key.
+- A directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere. It now surfaces as
+  delivered-not-stored (`remixed: false`), with `decision: 'redundant'`, or `'not-stored'` when the store's
+  write failed. The rest of the admitted path runs as before, for directed and broadcast CMBs alike.
+
+A rejected directed CMB with a non-neutral mood still delivers its mood on the separate §9.3 channel
+(`mood-delivered`) as well as surfacing.
+
+### Fixed — admission no longer re-authors a peer's record (MMP §8.8.4, §15.2)
+
+When an admitted CMB added nothing new, the receiver stored it at the author's address but with `createdBy`
+set to the receiver, a fresh timestamp and no signature, and served that record to anyone who fetched the
+address. The author's record is now kept as signed, on the heuristic and the neural path:
+
+- its categories: text, each category's signed `meta`, and the mood's valence and arousal (which no signature
+  covers); fields the record format does not define are dropped;
+- its metadata, signature and lineage.
+
+The stored record verifies under the author's key. A pre-boundary record (§7.8) cannot be kept as signed in
+that shape, but its author name is kept.
+
+### Fixed — a directed send reports what happened to it
+
+- A directed send of the same words as the node's latest CMB, or of a record already stored, used to send
+  nothing (returning `{collapsed: true}` or `null`). It now sends the freshly signed record to that peer, a new
+  assertion that the peer surfaces, and carries the same `delivery` result as any other send.
+  - The already-stored case returns an entry built from the caller's record, with `duplicate: true`. When the
+    store's write failed instead, it returns `duplicate: false, persisted: false`.
+  - A caller-supplied `opts.cmb` that collapses cannot be re-signed, so it is not sent. Its `delivery` says
+    `undelivered`, with a reason, and the record is returned unmodified.
+- A node's own records get strictly increasing `createdTimestamp`, so two sends of the same words in one
+  millisecond are still two assertions.
+- A record that collapses onto HEAD is re-signed after its self-edge lineage is cleared, so what is returned or
+  sent still verifies.
+- `delivery.dispatched` counted frames handed to a closed socket or an unopened relay. Transports now return
+  `false` from `send()` when the socket is closed, the relay is not open or the frame exceeds 1 MiB, and only
+  accepted frames are counted.
+
+### Fixed — malformed frames (MMP §4.1, §19.1)
+
+- One malformed frame (a bad length, invalid JSON or `null`) cancelled the 10-second inbound identification
+  deadline, so an unauthenticated connection could stay open indefinitely. Only a handshake or a close clears
+  it now.
+- A zero or oversize length prefix left the parser reading payload bytes as the next length. It now stops
+  parsing and the TCP connection is closed, as §4.1 requires.
+- A relay message `null` threw inside the WebSocket listener and ended the process. Relay messages that are
+  not objects, envelopes whose payload has no string `type`, and payloads over 1 MiB are ignored.
+- Frames that are `null`, not an object or have no string `type` are discarded silently; invalid UTF-8 is
+  rejected instead of being replaced; a handler exception is no longer reported as "Invalid JSON".
+
+### Added — `author` and a shared inbox id on delivered entries
+
+Every `cmb-accepted` entry carries `author: { name, nodeId, via: { name, nodeId } }`:
+
+- `name` is the record's `createdBy` (a display label, not a verified identity).
+- `nodeId` is set only when the record verified under the delivering peer's key and names that peer as its
+  author; otherwise it is `null`.
+- `via` is the peer that delivered it.
+
+The store envelope's `source` (`"<receiver>+<sender>"`) is receiver-local bookkeeping and should not be
+displayed as the sender. A `source` field in an incoming CMB frame is now ignored, so it can no longer name
+the deliverer. Before, a peer could pose as another peer, or as the receiver itself. Inbox items read `from` from the author.
+
+The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-accepted` listeners run.
+`node.inboxAck(id)` marks one item read out of cursor order:
+
+- it stops counting as undrained;
+- `inbox()` still returns it, with `acked: true`;
+- the ack is persisted.
+
+`inboxStatus()` adds `ackedEvicted` (read items evicted before a drain). `neverDrained` clears only when every
+item has been read, and stays set when every item was evicted undrained. `stop()` flushes a pending inbox write, so a drain or an ack in the last second before
+shutdown is kept.
+
+### Fixed — validator and anchor admissions are weighted again (§6.4)
+
+The node's wrapper around the store's `receiveFromPeer` dropped its third argument, so the creator role never
+reached the store and every admission was weighted 1.0. Validator- and anchor-origin CMBs now enter at 2.0, as
+§6.4 and §11.1 specify.
+
+### Changed — relay message bound
+
+The relay WebSocket is opened with `maxPayload` at the frame bound, so `ws` refuses an oversize message before
+buffering it, and relay frames dropped for size are logged.
+
+### Tests
+
+- The two integration tests that failed on 0.13.11 were stale, not broken code. `e2e-admission` put its nodes
+  in different rooms, which 0.13.11 correctly refuses. `e2e-cmb-path` expected a remix record where content
+  addressing collapses onto the author's record.
+- Both integration tests now stop their nodes independently in `finally`, so a failed assertion no longer
+  hangs the run for 30 seconds.
+- `e2e-cmb-path` now requires an admission, not just a liveness bump, and asserts the collapse directly.
+
+Known limits, tracked for a later release:
+
+- Identical arrivals handled concurrently can each pass de-duplication before SVAF finishes the first. This is
+  pre-existing and affects broadcasts too.
+- A directed CMB surfaced as `not-stored` is not stored on a retry of the same record. It was delivered, and
+  the de-duplication mark suppresses the retry.
+- Directed assertion marks share the broadcast de-duplication map and its 10,000-entry cap.
+- Acked inbox items still count toward `inbox()`'s `limit`.
+- The inbox `from` field is the author's unauthenticated label. Authorize on `author.via`.
+- The `createdTimestamp` ratchet is per process and unbounded: after a backward clock step, a node's
+  timestamps run ahead of its clock until the clock catches up.
+
 ## 0.13.11 (2026-09-28)
 
 ### Fixed — a dropped network no longer takes the daemon down

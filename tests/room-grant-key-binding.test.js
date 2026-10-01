@@ -23,7 +23,7 @@
  */
 const crypto = require('node:crypto');
 const path = require('node:path');
-const SYM = process.env.SYM_DIR || path.join(process.env.HOME, 'code/sym');
+const SYM = process.env.SYM_DIR || path.join(__dirname, '..');
 const { signRoomGrant, verifyRoomGrant } = require(path.join(SYM, 'lib/core/room-grant.js'));
 
 const EXPECT_VULNERABLE = false;   // FIXED 2026-09-16: the verifier requires a PROVEN key and fails closed without one
