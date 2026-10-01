@@ -331,6 +331,33 @@ describe('acquireIdentityLock', () => {
     release();
   });
 
+  it('reclaims a pid-only lock written this boot when its PID now belongs to a later process', () => {
+    // Windows locks written by 0.13.12 and earlier carry no start time. The writer was alive when it
+    // wrote the file, so a process that started after the file was written cannot be the writer.
+    const name = mkName();
+    writeLock(name, String(liveChild.pid)); // alive, no start metadata
+    const before = new Date(Math.max(Date.now() - 60_000, Date.now() - os.uptime() * 1000 + 10_000));
+    fs.utimesSync(lockPathOf(name), before, before); // after boot, before liveChild started
+    const release = acquireIdentityLock(name); // must NOT throw
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
+  it('on Windows, a process start time is read and is stable', { skip: process.platform !== 'win32' }, () => {
+    const a = processStartTime(process.pid);
+    assert.match(String(a), /^\d{4}-\d{2}-\d{2}T/, 'ISO-8601 from PowerShell');
+    assert.strictEqual(processStartTime(process.pid), a, 'same process, same string');
+    assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
+  });
+
+  it('on Windows, a lock recorded with a recycled PID\'s old start time is reclaimed', { skip: process.platform !== 'win32' }, () => {
+    const name = mkName();
+    writeLock(name, `${liveChild.pid}\n{"start":"2004-01-01T00:00:00.0000000Z","createdAt":1}\n`);
+    const release = acquireIdentityLock(name);
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid);
+    release();
+  });
+
   it('reclaims an aged-out corrupt lockfile but respects a fresh one', () => {
     const name = mkName();
     writeLock(name, 'garbage');

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.13 (unreleased)
+
+### Fixed — a crashed Windows session no longer locks its node name until reboot
+
+The identity lock records its holder's process start time, so a later start can tell a live holder from an
+unrelated process that reused the holder's PID. On Windows the start time came from `ps`, which does not
+exist there, so no start time was recorded. After a crash or a hard-killed terminal, once Windows reused the
+PID, the name stayed locked (`EIDENTITYLOCK`) for the rest of the boot.
+
+- Windows now reads the start time through PowerShell (UTC ISO-8601), for both the lock writer and a later
+  reader.
+- A lock with no start time (written by 0.13.12 or earlier) whose PID now belongs to a process that started
+  after the lock was written is reclaimed. The writer was running when it wrote the file, so a later process
+  cannot be it.
+
 ## 0.13.12 (2026-10-01)
 
 Fixes from an MMP 2.0 conformance audit of sym-mesh-channel and the SDK it runs, revised after an independent
