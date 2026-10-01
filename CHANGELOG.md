@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.13.12 (2026-10-01)
+
+Fixes from an MMP 2.0 conformance audit of sym-mesh-channel and the SDK it runs. Every bug listed here has a
+test that fails on 0.13.11.
+
+### Fixed — a directed CMB always reaches the agent it was sent to (MMP §9.2.2)
+
+§9.2.2 says a CMB addressed to this node surfaces regardless of the SVAF verdict. Four paths dropped one anyway:
+
+- A directed reply citing one of the receiver's own CMBs as its parent was skipped as an echo. Echo
+  suppression now applies to broadcasts only.
+- Receive-path de-duplication used the content key for seven days, so a directed send of words this node had
+  already seen (a repeated "please review", or the same text earlier as a broadcast) never surfaced. Directed
+  CMBs are now de-duplicated on content key plus signature, so a replay of the same signed record is still
+  suppressed. This is interim until records carry an assertion identity (§8.8.2).
+- A directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere, and its key was then
+  marked delivered, so every re-send was dropped too. It now surfaces as delivered-not-stored
+  (`remixed: false`, `decision: 'redundant'`).
+- A directed CMB SVAF rejected surfaced twice when it carried a non-neutral mood. It now surfaces once.
+
+### Fixed — admission no longer re-authors a peer's record (MMP §8.8.4, §15.2)
+
+When an admitted CMB added nothing new, the receiver stored it at the author's address but with `createdBy`
+set to the receiver, a fresh timestamp and no signature, and served that record to anyone who fetched the
+address. The author's record, signature and lineage are now kept as signed, on the heuristic and the neural
+path.
+
+### Fixed — a directed send reports what happened to it
+
+- A directed send of the same words as the node's latest CMB, or of a record already stored, used to send
+  nothing (returning `{collapsed: true}` or `null`). It now delivers the stored record to that peer and
+  carries the same `delivery` result as any other send.
+- `delivery.dispatched` counted frames handed to a closed socket or an unopened relay. Transports now return
+  `false` from `send()` when the socket is closed, the relay is not open or the frame exceeds 1 MiB, and only
+  accepted frames are counted.
+
+### Fixed — malformed frames (MMP §4.1, §19.1)
+
+- One malformed frame (a bad length, invalid JSON or `null`) cancelled the 10-second inbound identification
+  deadline, so an unauthenticated connection could stay open indefinitely. Only a handshake or a close clears
+  it now.
+- A zero or oversize length prefix left the parser reading payload bytes as the next length. It now stops
+  parsing and the TCP connection is closed, as §4.1 requires.
+- A relay message `null` threw inside the WebSocket listener and ended the process. Relay messages that are
+  not objects, and envelopes whose payload has no string `type`, are ignored.
+- Frames that are `null`, not an object or have no string `type` are discarded silently; invalid UTF-8 is
+  rejected instead of being replaced; a handler exception is no longer reported as "Invalid JSON".
+
+### Added — `author` and a shared inbox id on delivered entries
+
+Every `cmb-accepted` entry carries `author: { name, nodeId, via: { name, nodeId } }`: the record's `createdBy`
+(a display label, not a verified identity), its `createdByNodeId` when present, and the peer that delivered
+it. The store envelope's `source` (`"<receiver>+<sender>"`) is receiver-local bookkeeping and should not be
+displayed as the sender. Inbox items read `from` from the author.
+
+The inbox listener sets `entry.inboxId` and `entry.inboxSeq` before other `cmb-accepted` listeners run, and
+`node.inboxAck(id)` marks one item read out of cursor order: it stops counting as undrained, `inbox()` still
+returns it with `acked: true`, and the ack is persisted.
+
 ## 0.13.11 (2026-09-28)
 
 ### Fixed — a dropped network no longer takes the daemon down
