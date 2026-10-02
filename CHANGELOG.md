@@ -114,10 +114,13 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 
 ### Changed — read these before upgrading
 
-- **A stored record is exactly what its author signed.** The store used to add members to a
-  two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an expanded
-  top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and those
-  annotations live on the store **entry**. Stored files from earlier releases are read as before and
+- **A stored record is what its author sent, and nothing this node computed.** The store used to add
+  members to a two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an
+  expanded top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and
+  those annotations live on the store **entry**. The one other member it can carry is the `payload`
+  its author sent beside the two sections (as the author's own stored record does): no signature or
+  address covers it, so a record that verifies says nothing about its payload, and `cmb-fetch`
+  serves the two sections without it. Stored files from earlier releases are read as before and
   moved on first touch. **Code outside sym that reads `entry.cmb.admission`, `.tether`,
   `.provenance` or `.collapsed`, from stored entries or from `cmb-accepted` / `memory-received`
   events, must read them from the entry.** xmesh 0.10.11 reads both places.

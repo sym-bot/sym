@@ -10,6 +10,11 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * §15.8 attestation), `provenance` (fusion evidence and the tether annotation) and `collapsed`. None
  * is the author's, none is signed, and each made the stored record a shape no reader of the record
  * format expects. They are entry members now, and files written before keep reading.
+ *
+ * The one member a stored record may carry beyond its two sections is the `payload` its author sent
+ * beside them (0.14.0 review C-F6). It is the author's, not this node's, and no signature or address
+ * covers it: the signed sections are stored exactly as signed, and what cmb-fetch serves, the two
+ * sections, re-verifies.
  */
 
 const { describe, it } = require('node:test');
@@ -22,7 +27,7 @@ const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { tmpdir } = require('./_tmpdir');
 const { MemoryStore } = require('../lib/memory-store');
-const { createCMB, signCMB, verifyCMB, verifyAttestation, verifyTetherAttestation } = require('../lib/core');
+const { createCMB, signCMB, verifyCMB, verifyAttestation, verifyTetherAttestation, recordAsSigned } = require('../lib/core');
 
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { focus: 1 } };
 
@@ -120,4 +125,36 @@ describe('admission annotations live on the store entry', () => {
         `${label}: every annotation is still there, on the entry`);
     }
   });
+
+  for (const path_ of ['heuristic', 'neural']) {
+    it(`${path_} path: a payload the author sent is stored beside the signed sections, which stay as signed`, async () => {
+      const opts = path_ === 'neural' ? { svafEvaluator: { evaluate: async () => ALIGNED } } : {};
+      await withNode(opts, async (node) => {
+        node._pinPeerKey('peerA', AUTHOR.pub);
+        const record = createCMB({ categories: cat7(`an llm-request admitted through the ${path_} path`), createdBy: 'peerA' });
+        signCMB(record, AUTHOR.priv);
+        const payload = { kind: 'llm-request', request_id: `r-${path_}`, prompt: 'say hello' };
+        const sent = JSON.parse(JSON.stringify({ ...record, payload }));
+        await node._frameHandler._handleMemoryShare('peerA', 'peerA', { type: 'cmb', timestamp: Date.now(), cmb: sent });
+
+        const entry = node._store.get(record.metadata.key);
+        assert.ok(entry, 'admitted and stored');
+        assert.deepStrictEqual(Object.keys(entry.cmb).sort(), ['categories', 'metadata', 'payload'], 'the two sections and the author\'s payload, nothing this node computed');
+        assert.deepStrictEqual(entry.cmb.payload, payload, 'the payload as sent');
+        const { payload: _p, ...sections } = entry.cmb;
+        assert.deepStrictEqual(sections, recordAsSigned(record), 'the signed sections exactly as signed');
+        assert.strictEqual(verifyCMB(entry.cmb, AUTHOR.pub).valid, true, 'and they verify');
+        assert.deepStrictEqual(node.inboxGet(entry.inboxId)?.payload, payload, 'the inbox delivers it');
+
+        // What another node fetching this key gets, and re-verifies: the two sections.
+        const served = [];
+        const transport = { send: (f) => served.push(f), close: () => {} };
+        node._peers.set('peer-fetch', { peerId: 'peer-fetch', name: 'fetcher', transport, transports: new Map([['bonjour', transport]]), source: 'bonjour', lastSeen: Date.now() });
+        node._frameHandler._handleCmbFetch('peer-fetch', 'fetcher', { type: 'cmb-fetch', key: record.metadata.key, reqId: 'q1' });
+        const got = served.find((f) => f.type === 'cmb-fetch-result')?.cmb;
+        assert.deepStrictEqual(Object.keys(got).sort(), ['categories', 'metadata']);
+        assert.strictEqual(verifyCMB(got, AUTHOR.pub).valid, true, 'the served copy re-verifies');
+      });
+    });
+  }
 });
