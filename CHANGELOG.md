@@ -78,7 +78,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **The root walk trusted unverified records (B-L4).** It walks only through records whose address
   recomputes and that this node wrote or admitted as verified. A remix with no verified ancestor in
   reach resolves to no anchor, instead of being anchored to itself, and the result says whether the
-  walk was `complete`.
+  walk was `complete`. The walk is bounded in work as well as in records: at most 64 hops, 4,096
+  stored records and 16,384 parent keys queued, and it stops at a bound instead of draining its
+  queue. A record can name about 14,700 parents within one frame, and before this the queue grew
+  with every long parent list the walk stepped onto.
 - **A tether could not be reproduced by another node (B-L5).** It is measured on the stored record's
   text, encoded in one kernel, instead of on vectors blended with local memory.
 - **Cold-start admissions had no tether (B-L6).**
