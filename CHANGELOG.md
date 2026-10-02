@@ -26,16 +26,38 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   A signed addressee could only veto directed treatment. When the author signed one, it now alone
   decides.
 - **Unauthenticated gossip could repoint a phone's wake token.** Any room peer's `peer-info` could
-  overwrite a wake channel the phone had given this node itself. A channel learned from a weaker
-  source (gossip < relay < the peer itself) now never replaces a stronger one's token. A channel kept
-  by an earlier release, which recorded no source, ranks with the relay: gossip cannot repoint it.
-  At most 1024 channels are kept (gossip only ever displaces gossip), and one `peer-info` frame is
-  read for at most 256 entries, so fabricated node ids cannot grow the map, its file or the gossip
-  this node sends.
+  overwrite a wake channel the phone had given this node itself. A channel now ranks by how the node
+  id it names was proven, and a weaker source never replaces a stronger one's token. At the top is the
+  peer's own `wake-channel` frame over a session that proved it holds that node id's key. Next comes
+  the relay's peer list, which is the peer's own registration over its relay-auth session, ranked with
+  a channel kept by an earlier release (which recorded no source). At the bottom are a `wake-channel`
+  frame over a session that proved nothing, which is just whoever claimed that node id at handshake,
+  and gossip. **No handshake in this runtime proves a key yet**, so a peer's own frame ranks with
+  gossip, and nothing unproven can repoint a channel the relay or a proven session gave.
+- **A peer can turn its wake channel off.** `platform: 'none'` removes the channel when it comes from
+  the peer's own frame, or from the relay's registration, ranked at least as high as the channel
+  held. Gossip cannot remove anyone's.
+- **The wake-channel store and everything it feeds are bounded, at load as at run time.**
+  - At most 1,024 channels are kept, including what is loaded from a file an earlier release wrote.
+    Gossip only ever displaces gossip, and room is made in O(1), dropping the channel of the weakest
+    rank set least recently, never by scanning the map.
+  - A `peer-info` frame carries and is read for at most 256 entries, the most recently seen. The
+    relay's peer list is read for 256 too. An over-long frame from an older sender is said once a
+    minute per peer.
+  - At most 64 frames wait for one sleeping peer, and they go with its channel.
+  - A node id, platform, token and environment are short strings, and a token is one path segment
+    (it is put in the push provider's request path).
+- **A peer could claim to have proven its key.** `provenPublicKey`, which only this node's own
+  proving handshake may set, was read from the peer's own handshake frame. A gated room's admission
+  compares it with the key printed in the room grant presented, so anyone holding a copy of a grant
+  could enter as its grantee by writing that key into the frame. A handshake's `provenPublicKey` is
+  now dropped on arrival, on both the LAN and the relay path.
 - **A frame whose handling threw ended a relay-connected daemon.** The LAN path caught a throw from
   frame handling, but the relay path had nothing above it, so the exception reached the process. A
   frame that throws is now dropped with a log line and a `frame-handler-error` metric. A record that
-  declares the v2.0 suite but has no buildable preimage is rejected as a signature mismatch.
+  declares the v2.0 suite but has no buildable preimage is rejected as a signature mismatch. A relay
+  connection built without a wake manager no longer throws in its WebSocket handler on a peer list
+  that carries a wake channel.
 - **A record with no room was admitted in every room it was replayed into (B-R10).** A record that
   names no room is now in the literal room `default` (§7). `createCMB` names `default` instead of
   null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
@@ -237,7 +259,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   `stdout.log` reached 1 GB of `learned wake channel for unknown`. A repeat now changes nothing and
   logs nothing; a frame that does teach something logs one line. Channels carry the time of the last
   first-hand sighting (gossip forwards it instead of the time of sending) and expire after 30 days
-  unseen. A channel saved before this release gets one 30-day grace period, once.
+  unseen. A channel saved before this release gets one 30-day grace period, once: the stamp is
+  written back the first time it is loaded, so a restart does not renew it.
 - **A daemon rooted with `SYM_STATE_DIR` kept its room, tasks and relay.env in `~/.sym`.** It uses
   the state root now, and so does the `sym` CLI: its pid file, room, relay.env and node directory.
   Two rooted deployments sharing a home shared one pid file, so `sym stop` for one stopped the other.
