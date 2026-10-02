@@ -207,6 +207,8 @@ describe('the relay limit with 30 sessions (D4)', () => {
       const recipients = Array.from({ length: 30 }, () => identity('r').nodeId);
       for (let i = 0; i < 20; i++) for (const to of recipients) assert.strictEqual(conn.sendTo(to, { type: 'control-encrypted', i }).ok, true);
       await until(() => conn.state().queued === 0, 15000);
+      // The relay reads them a turn or more later: wait until it has them all (or refused one).
+      await until(() => relay.stats.framesIn >= 600 || relay.stats.rateLimited > 0, 5000);
       assert.strictEqual(relay.stats.rateLimited, 0, 'never over the relay\'s limit');
       assert.strictEqual(conn.state().phase, 'connected');
       assert.ok(conn.state().sentFrames >= 600);

@@ -183,11 +183,13 @@ describe('the Core Secure listener and discovery (D2)', () => {
     try {
       await node.start();
       const larger = `ffffffff-ffff-7fff-bfff-${crypto.randomBytes(6).toString('hex')}`;
+      const legacy = `fffffffe-ffff-7fff-bfff-${crypto.randomBytes(6).toString('hex')}`;
       const smaller = `00000000-0000-7000-8000-${crypto.randomBytes(6).toString('hex')}`;
-      disco.emit('peer-found', '127.0.0.1', 1, larger, 'legacy', { mmp: null, room: 'default' });
+      disco.emit('peer-found', '127.0.0.1', 1, legacy, 'legacy', { mmp: null, room: 'default' });
+      disco.emit('peer-found', '127.0.0.1', 4, legacy, 'legacy-old-txt', { mmp: '1.0', room: 'default' });
       disco.emit('peer-found', '127.0.0.1', 2, larger, 'v2', { mmp: '2.0', room: 'default' });
       disco.emit('peer-found', '127.0.0.1', 3, smaller, 'v2-smaller', { mmp: '2.0', room: 'default' });
-      assert.deepStrictEqual(dialled, [larger], 'the legacy record is not dialled; the larger v2 one is; the smaller one dials us');
+      assert.deepStrictEqual(dialled, [larger], 'a record without mmp=2.0 is not dialled; the larger v2 one is; the smaller one dials us');
     } finally { await stopAll(node); }
   });
 

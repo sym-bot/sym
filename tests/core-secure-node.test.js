@@ -195,13 +195,32 @@ describe('the key registry at the session (D3)', () => {
       // A squatter proves the honest node's id under a key of its own.
       const squat = identity('squatter');
       const [ts, tb] = memoryPipe();
+      // What b's session hands the squatter, before sealing.
+      const toSquatter = [];
+      const attach = b._attachTransport.bind(b);
+      b._attachTransport = (...args) => {
+        const sess = attach(...args);
+        const send = sess.trySend.bind(sess);
+        sess.trySend = (f) => { toSquatter.push(f && f.type); return send(f); };
+        return sess;
+      };
       b.connectTransport(tb, { role: 'server' });
+      b._attachTransport = attach;
       const s = new PeerSession({ role: 'client', transport: ts, kind: 'bonjour', room: 'cs-room', extensions: ['cmb-encrypted-v2'], implementation: { name: 'x', version: '1' },
         local: { nodeId: honestId.nodeId, name: honestName, publicKey: squat.publicKey, privateKey: squat.privateKey } });
       ts.on('message', (f) => s.receiveWire(f));
+      // b holds a room-join grant of its own: it is presented only to a session that passed the key
+      // check, never to one that proved a key in conflict with the registry.
+      b._roomGrant = { type: 'room-join', room: 'cs-room', grantee: b.nodeId, sig: 'x' };
+      const joined = [];
+      b.on('peer-joined', (p) => joined.push(p));
       s.start();
       await until(() => b._roster.conflicts().length > 0, 3000);
+      await new Promise((r) => setTimeout(r, 50));
       assert.strictEqual(b._peers.has(honestId.nodeId), false, 'the squatter is not a peer');
+      assert.ok(!toSquatter.includes('mesh-room-join'), 'nothing was presented to the squatter');
+      assert.deepStrictEqual(joined, [], 'and no peer-joined was raised');
+      b._roomGrant = null;
       assert.strictEqual(b._roster.source(honestId.nodeId), 'legacy-claim', 'the claim is not taken over');
       assert.deepStrictEqual(b._roster.conflicts().map((c) => [c.nodeId, c.got, c.gotSource]), [[honestId.nodeId, squat.publicKey, 'proven']]);
       const honest = new SymNode({ name: honestName, silent: true, discovery: new NullDiscovery(), room: 'cs-room' });
