@@ -127,6 +127,7 @@ describe('AttestationStore — checkpoints + witnesses', () => {
 
   it('records witnesses keyed by (attester, upto_seq, witness) and filters by root', () => {
     const st = new AttestationStore();
+    st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' }); // a witness is kept for a held checkpoint
     st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig: 'w1' });
     st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W2', sig: 'w2' });
     assert.deepStrictEqual(st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig: 'w1' }), { stored: false, reason: 'duplicate' });
@@ -182,73 +183,189 @@ describe('AttestationStore — durable persistence (append-only, reload on const
 // second copy of the same statement. The store kept only the latest copy per witness, so the two
 // copies were new to each other forever, and every node stored and relayed each one again whenever
 // the other arrived: 625,079 witness lines, 257 MB, re-read on every start.
-describe('AttestationStore — one record per statement, bounded, archived', () => {
+describe('AttestationStore — one record per statement, bounded', () => {
   const w = (sig, extra = {}) => ({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W1', sig, ...extra });
 
-  it('a second copy of a held witness is a duplicate, never stored or relayed again', () => {
+  it('a second copy of a held witness is a duplicate, and the first copy is not new again', () => {
     const st = new AttestationStore();
+    st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' });
     assert.strictEqual(st.recordWitness(w('copy-1')).stored, true);
-    assert.deepStrictEqual(st.recordWitness(w('copy-2', { at: 2 })), { stored: false, reason: 'duplicate' });
-    assert.deepStrictEqual(st.recordWitness(w('copy-1')), { stored: false, reason: 'duplicate' }, 'and the first copy is not new again');
-    assert.deepStrictEqual(st.recordWitness(w('other-root', { root: 'r-other' })), { stored: false, reason: 'conflict' });
+    assert.strictEqual(st.recordWitness(w('copy-2', { at: 2 })).reason, 'duplicate');
+    assert.strictEqual(st.recordWitness(w('copy-1')).reason, 'duplicate');
+    assert.strictEqual(st.recordWitness(w('other-root', { root: 'r-other' })).reason, 'conflict');
     assert.strictEqual(st.witnessesFor('A', 8).length, 1);
     assert.strictEqual(st.hasWitnessed('A', 8, 'W1'), true);
   });
 
-  it('a second copy of a held checkpoint is a duplicate; another root for the same position is a conflict', () => {
+  it('a second copy of a held checkpoint is a duplicate; another root is a conflict, remembered once', () => {
     const st = new AttestationStore();
     assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' }).stored, true);
-    assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8-resigned' }), { stored: false, reason: 'duplicate' });
-    assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'c8x' }), { stored: false, reason: 'conflict' });
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8-resigned' }).reason, 'duplicate');
+    const c1 = st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'x1' });
+    assert.deepStrictEqual([c1.reason, c1.keptRoot, c1.first], ['conflict', 'r8', true]);
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'x2' }).first, false);
+    assert.strictEqual(st.hasConflict('A', 8), true);
+    assert.strictEqual(st.latestCheckpoint('A').root, 'r8', 'the first copy stays held');
   });
 
-  it('checkpoints are bounded per attester, and a dropped checkpoint takes its witnesses with it', () => {
-    const st = new AttestationStore({ maxCheckpointsPerAttester: 3 });
+  it('a position is an integer: its text spelling is refused, so one signature cannot mint many positions', () => {
+    const st = new AttestationStore();
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: '8', root: 'r', sig: 's' }).reason, 'malformed');
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: -1, root: 'r', sig: 's' }).reason, 'malformed');
+    assert.strictEqual(st.recordWitness({ attester: 'A', upto_seq: '8', root: 'r', by: 'W', sig: 's' }).reason, 'malformed');
+    assert.strictEqual(st.recordWitness({ attester: 'A', upto_seq: 8.5, root: 'r', by: 'W', sig: 's' }).reason, 'malformed');
+  });
+
+  it('checkpoints are bounded per attester (with their witnesses) and in attesters', () => {
+    const st = new AttestationStore({ maxCheckpointsPerAttester: 3, maxAttesters: 2 });
     for (const n of [1, 2, 3]) { st.recordCheckpoint({ by: 'A', upto_seq: n, root: `r${n}`, sig: `c${n}` }); st.recordWitness({ attester: 'A', upto_seq: n, root: `r${n}`, by: 'W', sig: `w${n}` }); }
     st.recordCheckpoint({ by: 'A', upto_seq: 4, root: 'r4', sig: 'c4' });
     assert.deepStrictEqual(st.checkpointsOf('A').map((c) => c.upto_seq), [2, 3, 4]);
-    assert.strictEqual(st.witnessesFor('A', 1).length, 0);
-    assert.deepStrictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r1', sig: 'c1' }), { stored: false, reason: 'stale' });
+    assert.strictEqual(st.witnessesFor('A', 1).length, 0, 'the dropped position takes its witnesses');
+    assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r1', sig: 'c1' }).reason, 'stale');
+    st.recordCheckpoint({ by: 'B', upto_seq: 1, root: 'r', sig: 'b' });
+    st.recordCheckpoint({ by: 'C', upto_seq: 1, root: 'r', sig: 'c' });
+    assert.strictEqual(st.latestCheckpoint('A'), null, 'the attester updated least recently gave up its place');
+    assert.strictEqual(st.witnessesFor('A', 2).length + st.witnessesFor('A', 3).length, 0);
   });
 
-  it('witnesses are bounded in total, oldest first', () => {
-    const st = new AttestationStore({ maxWitnesses: 100 });
-    for (let i = 0; i < 250; i++) st.recordWitness({ attester: 'A', upto_seq: i, root: `r${i}`, by: 'W', sig: `w${i}` });
-    assert.strictEqual(st.witnessesFor('A', 249).length, 1);
-    assert.strictEqual(st.witnessesFor('A', 0).length, 0);
-    let held = 0; for (let i = 0; i < 250; i++) held += st.witnessesFor('A', i).length;
-    assert.strictEqual(held, 100);
-  });
-
-  it('a log past its limit is archived whole and restarted from what is held; a reload sees the same', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-rotate-'));
+  it('a witness waits for its checkpoint, in memory only, then is kept; one for nothing never reaches the log', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-pending-'));
     try {
-      const st = new AttestationStore({ dir, maxWitnesses: 10, maxLiveBytes: 4096 });
-      for (let i = 0; i < 200; i++) st.recordWitness({ attester: 'A', upto_seq: i, root: `r${i}`, by: 'W', sig: `w${i}`.padEnd(64, 'x') });
-      const archived = fs.readdirSync(path.join(dir, 'archive'));
-      assert.ok(archived.length >= 1 && archived.every((f) => /^witnesses\..+\.jsonl$/.test(f)), archived.join(','));
-      const archivedLines = archived.map((f) => fs.readFileSync(path.join(dir, 'archive', f), 'utf8').trim().split('\n').length).reduce((a, b) => a + b, 0);
-      const liveLines = fs.readFileSync(path.join(dir, 'witnesses.jsonl'), 'utf8').trim().split('\n').length;
-      assert.ok(fs.statSync(path.join(dir, 'witnesses.jsonl')).size <= 4096 * 2, 'the live log stays bounded');
-      assert.ok(archivedLines + liveLines >= 200, 'every line appended is still on disk');
-      const again = new AttestationStore({ dir, maxWitnesses: 10, maxLiveBytes: 4096 });
-      assert.strictEqual(again.witnessesFor('A', 199).length, 1, 'the newest is reloaded');
-      assert.strictEqual(again.witnessesFor('A', 0).length, 0);
+      const st = new AttestationStore({ dir, maxPending: 3 });
+      assert.strictEqual(st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W', sig: 'w' }).reason, 'pending');
+      for (let i = 0; i < 100; i++) st.recordWitness({ attester: `fake-${i}`, upto_seq: i, root: 'r', by: 'flooder', sig: `f${i}` });
+      assert.ok(!fs.existsSync(path.join(dir, 'witnesses.jsonl')), 'nothing for an uncommitted position is written');
+      assert.strictEqual(st._pending.size, 3, 'and the waiting set is bounded');
+      const st2 = new AttestationStore({ dir, maxPending: 3 });
+      st2.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W', sig: 'w' });
+      st2.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' });
+      assert.strictEqual(st2.witnessesFor('A', 8).length, 1, 'the waiting witness is kept once its checkpoint arrives');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('an oversized log from an earlier release is read from its tail only, then archived', () => {
+  it('witnesses are bounded per position, and in all by dropping the oldest positions first', () => {
+    const st = new AttestationStore({ maxWitnessesPerPosition: 3, maxWitnesses: 10 });
+    st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r', sig: 'c1' });
+    for (let i = 0; i < 5; i++) st.recordWitness({ attester: 'A', upto_seq: 1, root: 'r', by: `W${i}`, sig: `w${i}` });
+    assert.strictEqual(st.witnessesFor('A', 1).length, 3, 'a position holds at most its cap');
+    for (let n = 2; n <= 5; n++) {
+      st.recordCheckpoint({ by: 'A', upto_seq: n, root: 'r', sig: `c${n}` });
+      for (let i = 0; i < 3; i++) st.recordWitness({ attester: 'A', upto_seq: n, root: 'r', by: `W${i}`, sig: `w${n}-${i}` });
+    }
+    assert.strictEqual(st.witnessesFor('A', 1).length, 0, 'the oldest position went first');
+    assert.strictEqual(st.witnessesFor('A', 5).length, 3, 'the newest keeps all of its witnesses');
+    assert.ok(st._witnessCount <= 10);
+  });
+
+  it('ids with any characters index cleanly (no delimited keys)', () => {
+    const st = new AttestationStore({ maxWitnessesPerPosition: 2 });
+    st.recordCheckpoint({ by: 'a|b', upto_seq: 1, root: 'r', sig: 'c' });
+    for (let i = 0; i < 6; i++) st.recordWitness({ attester: 'a|b', upto_seq: 1, root: 'r', by: `w|${i}`, sig: `s${i}` });
+    assert.strictEqual(st.witnessesFor('a|b', 1).length, 2);
+    assert.strictEqual(st._witnessCount, 2);
+  });
+
+  it('a node remembers the checkpoints it witnessed itself, even after its index drops the witness', () => {
+    const st = new AttestationStore({ selfId: 'me', maxWitnesses: 1 });
+    st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r', sig: 'c1' });
+    st.recordWitness({ attester: 'A', upto_seq: 1, root: 'r', by: 'me', sig: 'mine' });
+    st.recordCheckpoint({ by: 'A', upto_seq: 2, root: 'r2', sig: 'c2' });
+    st.recordWitness({ attester: 'A', upto_seq: 2, root: 'r2', by: 'other', sig: 'theirs' });
+    assert.strictEqual(st.witnessAt('A', 1, 'me'), null, 'dropped from the index under the cap');
+    assert.strictEqual(st.hasWitnessed('A', 1, 'me'), true, 'still known as witnessed by this node');
+  });
+
+  it('a conflict is re-derived after a restart', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-conflict-'));
+    try {
+      const st = new AttestationStore({ dir });
+      st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' });
+      st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'x' });
+      st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r-forked', sig: 'x2' });
+      const lines = fs.readFileSync(path.join(dir, 'checkpoints.jsonl'), 'utf8').trim().split('\n').length;
+      assert.strictEqual(lines, 2, 'the conflicting copy is appended once');
+      const again = new AttestationStore({ dir });
+      assert.strictEqual(again.hasConflict('A', 8), true);
+      assert.strictEqual(again.latestCheckpoint('A').root, 'r8', 'and the first copy stays the one held');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('an oversized log is read from its newest part only, and is never rewritten', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-legacy-'));
     try {
       const lines = [];
-      for (let i = 0; i < 2000; i++) lines.push(JSON.stringify({ attester: 'A', upto_seq: i, root: `r${i}`, by: 'W', sig: `w${i}` }));
-      fs.writeFileSync(path.join(dir, 'witnesses.jsonl'), lines.join('\n') + '\n');
-      const size = fs.statSync(path.join(dir, 'witnesses.jsonl')).size;
-      const st = new AttestationStore({ dir, maxLiveBytes: 8192 });
-      assert.strictEqual(st.witnessesFor('A', 1999).length, 1, 'the newest records are read');
-      assert.strictEqual(st.witnessesFor('A', 0).length, 0, 'the head of the oversized log is not');
-      const archived = fs.readdirSync(path.join(dir, 'archive'));
-      assert.strictEqual(fs.statSync(path.join(dir, 'archive', archived[0])).size, size, 'the original is archived unchanged');
+      for (let i = 0; i < 2000; i++) lines.push(JSON.stringify({ by: 'A', upto_seq: i, root: `r${i}`, sig: `c${i}` }));
+      const text = lines.join('\n') + '\n';
+      fs.writeFileSync(path.join(dir, 'checkpoints.jsonl'), text);
+      const st = new AttestationStore({ dir, maxReadBytes: 8192, maxCheckpointsPerAttester: 5000 });
+      assert.ok(st.checkpointAt('A', 1999), 'the newest records are read');
+      assert.strictEqual(st.checkpointAt('A', 0), null, 'the head of the oversized log is not');
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'checkpoints.jsonl'), 'utf8'), text, 'the log is unchanged');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('AttestationStore — start-up reads cover what the caps hold (0.13.15 review F1)', () => {
+  it('a log of 50,000 attestations is read whole, so this node\'s chain survives a restart', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-50k-'));
+    try {
+      const pad = 'x'.repeat(400);
+      const lines = [];
+      let prev = 'genesis';
+      for (let seq = 1; seq <= 50000; seq++) { const sig = `s${seq}`; lines.push(JSON.stringify({ of: `c${seq}`, by: 'me', seq, prev, sig, note: pad })); prev = chainHash(sig); }
+      fs.writeFileSync(path.join(dir, 'attestations.jsonl'), lines.join('\n') + '\n');
+      const st = new AttestationStore({ dir });
+      assert.strictEqual(st.chainOf('me').length, 50000, 'the whole chain is reloaded');
+      assert.deepStrictEqual(st.verifyChain('me'), { ok: true, gaps: [], breaks: [] });
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+// 0.13.16: the 0.13.15 hotfix review's last round (F1-F5).
+describe('AttestationStore — 0.13.15 review follow-ups', () => {
+  it('the checkpoint read budget covers what its caps hold (F1)', () => {
+    const st = new AttestationStore({ maxCheckpointsPerAttester: 32, maxAttesters: 1024 });
+    assert.ok(st._readBudget['checkpoints.jsonl'] >= 32 * 1024 * 400, String(st._readBudget['checkpoints.jsonl']));
+  });
+
+  it('a waiting witness that signs a second root is a conflict, surfaced once (F2)', () => {
+    const st = new AttestationStore();
+    st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W', sig: 'w1' });
+    const c = st.recordWitness({ attester: 'A', upto_seq: 8, root: 'other', by: 'W', sig: 'w2' });
+    assert.deepStrictEqual([c.reason, c.keptRoot, c.first], ['conflict', 'r8', true]);
+    assert.strictEqual(st.recordWitness({ attester: 'A', upto_seq: 8, root: 'other', by: 'W', sig: 'w3' }).first, false);
+  });
+
+  it('this node remembers its own witness even while it waits for its checkpoint (F3)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-own-'));
+    try {
+      const st = new AttestationStore({ selfId: 'me', maxPending: 1 });
+      st.recordWitness({ attester: 'A', upto_seq: 8, root: 'r8', by: 'me', sig: 'mine' });
+      st.recordWitness({ attester: 'B', upto_seq: 1, root: 'r', by: 'other', sig: 'x' }); // pushes mine out of the waiting set
+      assert.strictEqual(st.hasWitnessed('A', 8, 'me'), true);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a conflict on a held position is not forgotten while the position can be held (F4)', () => {
+    const st = new AttestationStore({ maxCheckpointsPerAttester: 1, maxAttesters: 1200 });
+    for (let a = 0; a < 1100; a++) {
+      st.recordCheckpoint({ by: `A${a}`, upto_seq: 1, root: 'r', sig: `c${a}` });
+      st.recordCheckpoint({ by: `A${a}`, upto_seq: 1, root: 'other', sig: `x${a}` });
+    }
+    assert.strictEqual(st.hasConflict('A0', 1), true, 'the first conflict is still known after 1,100 more');
+    assert.strictEqual(st.recordCheckpoint({ by: 'A0', upto_seq: 1, root: 'other', sig: 'again' }).first, false);
+  });
+
+  it('a waiting witness read from the log is not appended again when its checkpoint arrives (F5)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'att-promote-'));
+    try {
+      const line = JSON.stringify({ attester: 'A', upto_seq: 8, root: 'r8', by: 'W', sig: 'w' }) + '\n';
+      fs.writeFileSync(path.join(dir, 'witnesses.jsonl'), line);
+      const st = new AttestationStore({ dir });
+      st.recordCheckpoint({ by: 'A', upto_seq: 8, root: 'r8', sig: 'c8' });
+      assert.strictEqual(st.witnessesFor('A', 8).length, 1, 'promoted');
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'witnesses.jsonl'), 'utf8'), line, 'and not written twice');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

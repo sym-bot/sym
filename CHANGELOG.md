@@ -3,7 +3,8 @@
 ## 0.14.0 (unreleased)
 
 A minor version because one change breaks readers outside sym: the store's annotations moved from
-the stored record to the entry (see Changed). Also carries the 0.13.15 witness-storm fix.
+the stored record to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and
+its follow-ups).
 
 Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
 debt, and the daemon's log flood. Every item has a test that fails without its fix.
@@ -41,26 +42,6 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
   before anything is stored or dispatched (§18.3.1). A `MeshAgent` whose node cannot sign says so
   once and stops remixing and observing.
-
-### Fixed — the witness storm
-
-- **Two signed copies of one witness were relayed by every node without end.** A node that
-  witnessed a checkpoint again after a restart signed a second copy of the same statement. The store
-  kept only the latest copy per witness, so each copy was new whenever the other arrived, and every
-  node stored and relayed it again. On one host this grew one node's `witnesses.jsonl` to 625,079
-  lines (257 MB) of two witnesses, and kept every node in the room busy relaying them. A checkpoint
-  is now held once per (attester, position) and a witness once per (attester, position, witness):
-  a later copy is a duplicate and is not relayed, and one asserting a different root is a conflict,
-  kept out. A node witnesses a checkpoint once, across restarts.
-- **The attestation logs are bounded.** At most 32 checkpoints per attester (with their witnesses)
-  and 20,000 witnesses are kept, the oldest dropped first. A log past 8 MiB is moved, unchanged, into
-  `attestations/archive/` and restarted from the records held, so nothing appended is lost. A node
-  reads only the live logs at start, and of an oversized log from an earlier release only its last
-  8 MiB; reading the whole of one held a node's thread for minutes.
-- **A repeat cost a signature check, and one peer could flood a node.** An attestation, checkpoint or
-  witness already held is dropped before its signature is verified. One peer's gossip frames
-  (attestation, checkpoint, witness) are capped at a burst of 500 and 100 a second; the excess is
-  dropped and counted (`gossip-rate-limited`).
 
 ### Fixed — delivery and records
 
@@ -189,6 +170,71 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   reached the start-time check before, on any OS. The relay-only test uses the platform's IPC endpoint.
 - Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
 - Tests wait on what they test instead of fixed sleeps: in-flight frames, and the encoder's own load.
+
+## 0.13.16 (2026-10-02)
+
+Follow-ups to the 0.13.15 witness-storm fix, from its last review.
+
+### Fixed
+
+- **The checkpoint log is read at start up to what its caps hold** (32 checkpoints for each of 1,024
+  attesters, 16 MiB), not 8 MiB.
+- **A waiting witness that signs a second root is a conflict**, surfaced once, as it is for a stored
+  one; it was taken for a duplicate.
+- **This node remembers a witness it signed even while that witness waits** for its checkpoint or is
+  refused. One its position is too full to hold is still written to the log, so after a restart the
+  node knows it signed it and does not sign it again.
+- **A conflict on a held position is remembered as long as the position is held**, so the conflicting
+  copy is appended and reported once; a position that is dropped takes its mark with it.
+- **A waiting witness read from the log is not appended to it again** when its checkpoint arrives.
+- **Peer-info gossip no longer floods the log.** Every peer re-sends its whole list on every connect,
+  and each frame logged one line per entry and rewrote the wake-channel file, so a daemon's log
+  reached 1 GB. Only a channel that changed is set and saved, with one line per frame, and a frame is
+  read for its first 256 entries (a longer one is said). The relay's peer list, sent on every connect,
+  is handled the same way. (Which source may replace a phone's token is fixed in 0.14.0.)
+
+## 0.13.15 (2026-10-01)
+
+A hotfix for one fault: the witness storm. Every node should take it: a node keeps relaying the
+storm until it runs this release.
+
+### Fixed
+
+- **Two signed copies of one witness were relayed by every node without end.** A node that
+  witnessed a checkpoint again after a restart signed a second copy of the same statement. The store
+  kept only the latest copy per witness, so each copy was new whenever the other arrived, and every
+  node stored and relayed it again. On one host this grew one node's `witnesses.jsonl` to 625,079
+  lines (257 MB) of two witnesses, and kept every node in the room busy relaying them. A checkpoint
+  is now held once per (attester, position) and a witness once per (attester, position, witness): a
+  later copy is a duplicate and is not relayed. A node witnesses a checkpoint once, across restarts.
+- **A second root for a held position is a conflict.** It is not stored or relayed; the first copy
+  stays held. The first time a checkpoint position conflicts, the conflicting copy is appended once
+  (so a restart re-derives the conflict), an `attestation-conflict` metric names both roots, and
+  `reconcileChain` reports `conflicted: true`, so an attester that signed two roots (by
+  equivocating, or by restarting its chain after losing its log) is told apart from tampering. A
+  witness that signs a second root raises the same metric (`kind: 'witness'`).
+- **A position is an integer.** The signed payload spells a position as text, so `8` and `"8"`
+  verified alike and a replayed checkpoint could be stored under many positions; a position that is
+  not a non-negative integer is refused, before any signature check.
+- **Repeats are cheap.** An attestation, checkpoint or witness already held is dropped before its
+  signature is checked.
+- **A witness is kept only for a checkpoint this node holds.** One that arrives first waits in memory
+  (at most 2,048) until its checkpoint does, so no peer can grow the witness log with positions
+  nobody committed. A node also remembers the checkpoints it witnessed itself, so it signs a witness
+  once even after its witness index has dropped it.
+- **Checkpoints and witnesses are bounded.** At most 32 checkpoints per attester (dropping the oldest
+  with its witnesses), for at most 1,024 attesters, and 256 witnesses per checkpoint (50,000 in all,
+  the oldest checkpoints' witnesses dropped first).
+- **An oversized attestation log is read from its newest part only.** Each log is read at start up
+  to a budget that covers what its cap holds (attestations 64 MiB, witnesses 32 MiB, checkpoints
+  8 MiB); reading the whole of one grown by the storm held a node's thread for minutes. The logs are
+  append-only and are not rewritten: one grown by the storm keeps its size on disk, and stops growing.
+
+### Not in this release
+
+The logs are still not rotated, and gossiped attestations still have no per-peer budget beyond the
+existing per-(CMB, attester) limit (whose table now drops closed windows); both are planned for
+0.14.0.
 
 ## 0.13.14 (2026-10-01)
 
