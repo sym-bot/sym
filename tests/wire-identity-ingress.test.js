@@ -138,6 +138,8 @@ describe('LAN: the handshake that opens a connection', () => {
     const s = dial(node._port, { type: 'handshake', nodeId: 'k'.repeat(64), name: 'k', publicKey: BAD, e2ePublicKey: BAD });
     try {
       await until(() => node._peers.size === 1);
+      assert.strictEqual(node._peers.size, 1, 'the peer is taken, as one that sent no keys');
+      assert.strictEqual(node.metrics().framesRefused, 0);
       assert.strictEqual(node._roster.has('k'.repeat(64)), false);
       assert.strictEqual(node._peerSharedSecrets.has('k'.repeat(64)), false);
     } finally { s.destroy(); await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
