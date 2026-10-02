@@ -141,10 +141,11 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
       node._roomDoor = () => ({ pass: true });
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
-      assert.doesNotThrow(() => node._frameHandler.handle('node-alice', 'alice', { type: 'cmb', cmb: malformed() }));
+      // Through the node's one guarded dispatch (0.13.17), which every transport calls.
+      assert.doesNotThrow(() => node._receiveFrame('node-alice', 'alice', { type: 'cmb', cmb: malformed() }, 'relay'));
       const original = node._frameHandler._handleMemoryShare;
       node._frameHandler._handleMemoryShare = () => { throw new Error('boom'); };
-      assert.doesNotThrow(() => node._frameHandler.handle('node-alice', 'alice', { type: 'cmb', cmb: malformed() }));
+      assert.doesNotThrow(() => node._receiveFrame('node-alice', 'alice', { type: 'cmb', cmb: malformed() }, 'relay'));
       node._frameHandler._handleMemoryShare = original;
       assert.ok(metrics.some((m) => m.type === 'frame-handler-error' && /boom/.test(m.error)));
     });

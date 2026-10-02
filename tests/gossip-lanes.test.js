@@ -100,11 +100,17 @@ describe('role grants are gossip under the budget (F1)', () => {
   });
 
   it("new grants spend the lane's budget before their signatures are checked, and only a grant kept is relayed", () => {
-    withNode({}, ({ node, sent }) => {
+    const A = kp('anchor-A');
+    withNode({ anchor: { nodeId: A.id, publicKey: A.pub } }, ({ node, sent }) => {
       const P = kp('grantor-P');
       const Q = kp('grantor-Q');
       node._pinPeerKey(P.id, P.pub);
       node._pinPeerKey(Q.id, Q.pub);
+      // Since 0.13.17 only a record rooted at the anchor is kept, or checked at all: P and Q are
+      // validators by the anchor's grant, so their grants are rooted and reach the signature check.
+      for (const G of [P, Q]) {
+        assert.strictEqual(node._roleGrants.record(signGrant({ type: 'role-grant', grantee: G.id, granteeKey: G.pub, role: 'validator', grantedBy: A.id, grantedAt: 0 }, A.priv)).stored, true);
+      }
       const reasons = {};
       for (let i = 0; i < 300; i++) {
         const r = node._ingestRoleGrant(forgedGrant(P.id, `x-${i}`), 'p', 'tcp:1');
@@ -135,7 +141,8 @@ describe('role grants are gossip under the budget (F1)', () => {
       const P = kp('P');
       const Q = kp('Q');
       const keys = new Map([[P.id, P.pub], [Q.id, Q.pub]]);
-      const opts = { anchor: { nodeId: A.id, publicKey: A.pub }, keys, dir, maxPerGrantor: 3, maxPerPair: 2, maxGrants: 5 };
+      // maxGrants counts the anchor's two grants that root P and Q (0.13.17: only a rooted record is kept).
+      const opts = { anchor: { nodeId: A.id, publicKey: A.pub }, keys, dir, maxPerGrantor: 3, maxPerPair: 2, maxGrants: 7 };
       const st = new RoleGrantStore(opts);
       const grant = (by, grantee, at) => signGrant({ type: 'role-grant', grantee, role: 'validator', grantedBy: by.id, grantedAt: at }, by.priv);
       const g = grant(A, 'V', 1);
@@ -144,17 +151,18 @@ describe('role grants are gossip under the budget (F1)', () => {
       for (const sig of [g.sig, ...respell(g.sig)]) assert.strictEqual(st.record({ ...g, sig }).reason, 'duplicate');
       assert.strictEqual(st.has(` ${g.sig}`), true);
       assert.strictEqual(st.size(), 1);
+      for (const G of [P, Q]) assert.strictEqual(st.record(grant(A, G.id, 0)).stored, true);
 
       const r = (by, grantee, at) => st.record(grant(by, grantee, at)).reason ?? 'stored';
       assert.deepStrictEqual([r(P, 'X', 1), r(P, 'X', 2), r(P, 'X', 3)], ['stored', 'stored', 'pair-full']);
       assert.deepStrictEqual([r(P, 'Y', 4), r(P, 'Z', 5)], ['stored', 'grantor-full']);
       assert.strictEqual(st.record(forgedGrant(P.id, 'W')).reason, 'grantor-full', 'refused before its signature is checked');
       assert.deepStrictEqual([r(Q, 'X', 6), r(Q, 'Y', 7)], ['stored', 'store-full']);
-      assert.strictEqual(st.size(), 5);
+      assert.strictEqual(st.size(), 7);
       assert.deepStrictEqual([r(A, 'X', 8), r(A, 'Z', 9)], ['stored', 'stored'], "the anchor's own are never refused");
       assert.deepStrictEqual(st.grantsFor('X').map((x) => x.grantedAt), [1, 2, 6, 8], 'nothing kept was evicted');
       const again = new RoleGrantStore(opts);
-      assert.strictEqual(again.size(), 7, 'and a restart reads back what was kept');
+      assert.strictEqual(again.size(), 9, 'and a restart reads back what was kept');
       assert.strictEqual(again.resolveRole('X', 100), 'validator');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });

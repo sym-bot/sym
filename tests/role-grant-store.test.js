@@ -206,10 +206,10 @@ describe('RoleGrantStore — relayed key learning (grant vouches for grantee key
     assert.strictEqual(reg.source(V.nodeId), 'grant');
 
     // X (a participant) grants Y, vouching Y's key — X's key is in the registry (say via
-    // some handshake) so the grant verifies, but X is unrooted so it confers nothing AND
-    // vouches for no key.
+    // some handshake) so the grant verifies, but X is unrooted so it confers nothing, is
+    // not kept (0.13.17: an unrooted record is not stored or relayed) AND vouches for no key.
     reg.pin(X.nodeId, X.pub, 'handshake');
-    assert.strictEqual(store.record(grantWithKey(Y, 'validator', X, T)).stored, true);
+    assert.deepStrictEqual(store.record(grantWithKey(Y, 'validator', X, T)), { stored: false, reason: 'unrooted' });
     assert.strictEqual(reg.has(Y.nodeId), false, 'unrooted grantor vouches for no key');
   });
 
