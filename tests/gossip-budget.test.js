@@ -314,8 +314,9 @@ describe('signature spelling', () => {
       const a1 = signed({ of: 'cmb-s1', by: A.id, at: 1, roster: ROOM, method: 'heuristic', verdict: 'aligned', categories: {}, role: 'participant', seq: 1, prev: 'genesis' }, A.priv, signAttestation);
       const a2 = signed({ of: 'cmb-s2', by: A.id, at: 2, roster: ROOM, method: 'heuristic', verdict: 'aligned', categories: {}, role: 'participant', seq: 2, prev: chainHash(a1.sig) }, A.priv, signAttestation);
       const s = a1.sig;
-      const respelled = [`${s}=`, `${s}==`, ` ${s}`, `${s.slice(0, 40)}\n${s.slice(40)}`, s.replace(/-/g, '+').replace(/_/g, '/'), `${s}!`];
-      assert.ok(respelled.every((x) => x !== s && Buffer.from(x, 'base64url').equals(Buffer.from(s, 'base64url'))), 'every one is the same signature');
+      // The +/ swap changes nothing for a signature without - or _ (about 1 in 15): it is left out then.
+      const respelled = [`${s}=`, `${s}==`, ` ${s}`, `${s.slice(0, 40)}\n${s.slice(40)}`, s.replace(/-/g, '+').replace(/_/g, '/'), `${s}!`].filter((x) => x !== s);
+      assert.ok(respelled.every((x) => Buffer.from(x, 'base64url').equals(Buffer.from(s, 'base64url'))), 'every one is the same signature');
       for (const sig of respelled) {
         assert.strictEqual(node._ingestAttestation({ ...a1, sig }, 'm', 'm').reason, 'non-canonical-signature');
       }
