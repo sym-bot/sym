@@ -174,7 +174,7 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   position (up to 32,768) for its own; the positions are now indexed by key, and the witness cap takes
   the oldest from the head.
 
-### Fixed — one peer's attestation gossip has a budget
+### Fixed — attestation gossip is budgeted, per peer and per attester
 
 - **A peer's new statements are budgeted (0.13.15's other known limit).** The attestations,
   checkpoints and witnesses one peer delivers may make this node check at most 2,000 new statements a
@@ -201,6 +201,17 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   drop is counted (`gossipOverBudget` in `metrics()` keeps the total). A gap it leaves is told apart
   from an omission by the attester. Budgets are kept for at most 4,096 peers, the least recently active
   evicted in O(1), without scanning.
+- **One attester's checkpoints cannot make the room sign witnesses without end.** Each checkpoint a
+  node takes costs every node in the room a witness signed, gossiped and verified. The per-peer budget
+  bounds what one peer delivers, not what one attester signs: an attester sending new checkpoints
+  through every peer at once had every node witness each one. A node now takes one attester's new
+  checkpoints at most at 4 a second, after a burst of 128, whichever peer brings them. The rate is
+  spent after the signature is checked, so only that attester spends it. Past it a checkpoint is not
+  stored, witnessed or relayed; it is counted (`checkpointsOverRate` in `metrics()`) and said once per
+  10 s (`checkpoint-over-rate`, naming the attester and the peers that brought it). An attester commits
+  a checkpoint every 8 attestations: 0.5 a second in the busy room above. 4 a second is 8× that, and
+  the burst holds 1,024 attestations gated back to back. A second root for a position already held is
+  still recorded as a conflict. `checkpointRate: { perSecond, burst }` changes it.
 - **Only the spelling a signer writes is stored.** Base64url decoding ignores padding, whitespace and
   stray characters, so one signature could be spelled any number of ways that all verify. Each spelling
   was stored and relayed as a new attestation. The chain hash and the Merkle root are computed over the
