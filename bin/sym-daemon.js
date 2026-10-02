@@ -616,7 +616,7 @@ function forwardEventsToVirtualNodes() {
     broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
     broadcastToListeners({ type: 'event', event: 'message', data: { from, content, timestamp: Date.now() } });
 
-    // Feed messages (including Telegram) into xMesh
+    // Feed messages (including Telegram) into XMesh
     node._xmesh.ingestSignal({ type: 'message', from, content });
 
     // Wake sleeping peers that might need this message.
@@ -630,7 +630,7 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('mood-delivered', (data) => {
-    // xMesh ingestion happens via cmb → SVAF path, not here.
+    // XMesh ingestion happens via cmb → SVAF path, not here.
     // Wake sleeping local peers so they can receive the mood.
     node._wakeManager?.wakeSleepingPeers('mood', {
       type: 'mood', from: node._identity.nodeId, fromName: node.name,
@@ -643,7 +643,7 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('memory-received', ({ from, entry, decision }) => {
-    // xMesh ingestion already happens in frame-handler after SVAF evaluation.
+    // XMesh ingestion already happens in frame-handler after SVAF evaluation.
     broadcastToVirtualNodes({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
   });
 }
