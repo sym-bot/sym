@@ -120,6 +120,16 @@ ever overrides a different key**; the old code's "strictly stronger source overr
 | the configured anchor | always its configured key. It is read from configuration at every start and **never persisted to or replayed from** `roster-keys.jsonl`, so re-pinning a fresh anchor out of band (§6.6) takes effect |
 | a `legacy-claim` entry (every pre-0.14 `handshake` entry, relabelled on first load) | the **expected** key. A proven session presenting it binds `proven`. A proven session presenting a different key is a conflict, not a fresh binding. Identity files do not change on upgrade, so an honest peer always matches, and a squatter racing the upgrade cannot win |
 
+**Binding lifetime (added after the 0.13.17 re-review).** A first-contact `proven` binding
+expires when two things hold: it has verified nothing (no record, grant or session since it was
+bound), and it has not been seen for 30 days. A binding that ever verified something never
+expires, and neither does one that is pinned, grant-vouched or the anchor.
+- This bounds the registry under identity churn: new keypairs are cheap, and any fixed cap can be
+  filled from the LAN in seconds.
+- It never forgets a binding that protects history.
+- "Last verified" and "last seen" persist with the binding.
+- Test: a flood of 20,000 one-shot identities ages out, and an honest long-lived peer survives.
+
 **Authority follows the key.**
 - `resolveRole(nodeId, key, at)`: a grant confers its role only when its `granteeKey` equals the
   grantee's bound key.
@@ -128,6 +138,13 @@ ever overrides a different key**; the old code's "strictly stronger source overr
   holds for the grantor.
 - `grantRole` refuses to emit a grant without a known proven key for the grantee. Every grant
   carries `granteeKey`.
+- **A grant or revoke that arrives before its root (added after the 0.13.17 re-review).** The
+  node asks the delivering session for the missing chain, with a directed `role-chain-fetch`
+  naming the grantor grants it lacks.
+  - The record is held only for that fetch, at most 64 per session, with a timeout.
+  - The answer is ordinary signed grants, verified top-down.
+  - This replaces 0.13.17's pending set, which any connected peer can flood.
+  - The frame needs spec text (§10, item 10).
 
 ### D4. Ephemeral E2E and the encrypted envelope
 
@@ -379,3 +396,4 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
 7. §7.1/§18.2.1: sealed control frames (`mood`) and signed control frames.
 8. §16: register `sym-attest-v1` (attestation, checkpoint, witness, node-stats).
 9. §14.12: a member is a node, and a session is a trail within it.
+10. §6.6/§7.1: `role-chain-fetch`, a directed request for the grant chain that roots a record.
