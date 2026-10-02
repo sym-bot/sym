@@ -159,8 +159,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   hold, 28 MiB for checkpoints and 47.7 MiB for witnesses. 0.13.16 read only the newest 16 and 32 MiB,
   which could miss a quiet attester's checkpoints. Attestations are evicted oldest first, so the ones
   held are always the newest in their log, and 34.3 MiB (50,000 at 720 bytes; measured ~520) reads them
-  all. That is 110 MiB at most in all, against 0.13.16's 112 MiB. On logs over every budget, a start
-  took 0.5–0.6 s here, against 1.0–1.1 s for 0.13.16.
+  all. That is 110 MiB at most in all, against 0.13.16's 112 MiB. On logs over every budget, reading
+  them took 0.5–0.6 s here and a first start that also rotates all three 0.7–0.8 s, against
+  1.0–1.1 s for 0.13.16 reading them; the next start took 0.2 s.
 - **A conflict on a held position is remembered as long as the position is held.** 0.13.16's
   32,768-entry list also counted positions already dropped, so another attester's conflicts could push
   out the mark of a position still held.
@@ -181,11 +182,11 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   first copy of a statement is new, so a peer spends the budget only for what it delivers first:
   about what it signs itself (~20 a second there), and at most all 640 when it is this node's only
   path to the room. 2,000 is three times that. `gossipBudget: { perSecond, burst }` changes it.
-- **Forged frames cannot starve genuine ones.** The budget is the delivering peer's, never the claimed
-  signer's, so a forged frame spends only its sender's budget. An honest peer relays only what it has
-  verified, so its budget is never spent on forgeries. A dropped frame is not marked seen, so the same
-  statement from another peer is taken. The budget refills, so a peer that stops flooding is heard
-  again.
+- **A forged frame spends only its sender's budget.** The budget is the delivering peer's, never the
+  claimed signer's. A peer that floods forgeries loses its own frames while it floods, and no one
+  else's. An honest peer relays only what it has verified, so its budget is never spent on forgeries.
+  A dropped frame is not marked seen, so the same statement from another peer is taken. The budget
+  refills, so a peer that stops flooding is heard again.
 - **A drop is attributable.** A `gossip-over-budget` metric (`fromPeerId`, `from`, `dropped`,
   `frames` by type, and up to 16 `authors` whose statements were dropped) and one log line name the
   peer, at most once per 10 s per peer: the first drop at once, the rest when the 10 s close, so every
