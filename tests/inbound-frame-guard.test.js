@@ -20,6 +20,9 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
@@ -135,5 +138,50 @@ describe('a mood frame on a stock node (G2)', () => {
     mesh.addPeer('some-peer-id', [1, 0, 0, 0], [0, 1, 0, 0], 0.8);
     assert.doesNotThrow(() => mesh.coupledState());
     assert.strictEqual(mesh.metricsCount, 1);
+  });
+});
+
+describe('the daemon survives a peer\'s mood and message frames over the relay (G2, C3)', () => {
+  it('stays up, handles both, and answers an insight-engine request it cannot serve instead of throwing', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-daemon-guard-'));
+    const sock = path.join(home, 'd.sock');
+    const wss = new WebSocketServer({ port: 0 });
+    wss.on('connection', (ws) => ws.on('message', (m) => {
+      if (JSON.parse(String(m)).type !== 'relay-auth') return;
+      const send = (payload) => ws.send(JSON.stringify({ from: 'e'.repeat(64), fromName: 'evil', payload }));
+      send({ type: 'mood', mood: 'exhausted after a long debugging session', fromName: 'evil' });
+      send({ type: 'message', content: 'hello daemon', fromName: 'evil' });
+    }));
+    const daemon = spawn(process.execPath, [path.join(__dirname, '..', 'bin', 'sym-daemon.js')], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: path.join(home, '.sym'), SYM_SOCKET: sock,
+        SYM_NODE_NAME: 'daemon-guard-test', SYM_ROOM: 'daemon-guard-room', SYM_RELAY_ONLY: '1',
+        SYM_RELAY_URL: `ws://127.0.0.1:${wss.address().port}`, SYM_RELAY_TOKEN: 'x'.repeat(32) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    daemon.stdout.on('data', (b) => { out += b; });
+    daemon.stderr.on('data', (b) => { out += b; });
+    try {
+      await until(() => /Message from evil: hello daemon/.test(out) && /sym-daemon ready/.test(out) || daemon.exitCode !== null, 15000);
+      await new Promise((r) => setTimeout(r, 500));
+      assert.strictEqual(daemon.exitCode, null, `the daemon is still running; log:\n${out.slice(-1500)}`);
+      assert.doesNotMatch(out, /FATAL/);
+      assert.match(out, /Mood from evil: .*(ACCEPTED|IGNORED)/);
+      const reply = await new Promise((resolve, reject) => {
+        const c = net.createConnection(sock, () => c.write(JSON.stringify({ type: 'xmesh-context' }) + '\n'));
+        let buf = '';
+        c.on('data', (d) => { buf += d; const i = buf.indexOf('\n'); if (i >= 0) { c.end(); resolve(JSON.parse(buf.slice(0, i))); } });
+        c.on('error', reject);
+        setTimeout(() => { c.destroy(); reject(new Error('no IPC reply')); }, 5000);
+      });
+      assert.strictEqual(reply.action, 'xmesh-context');
+      assert.match(String(reply.error), /insight engine/);
+      assert.strictEqual(daemon.exitCode, null);
+    } finally {
+      daemon.kill('SIGTERM');
+      await new Promise((r) => (daemon.exitCode !== null ? r() : daemon.once('exit', r)));
+      await new Promise((r) => wss.close(() => r()));
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

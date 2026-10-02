@@ -228,10 +228,13 @@ function startIPCServer() {
         const line = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 1);
         if (line.trim()) {
+          let msg;
+          try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
           try {
-            handleIPCMessage(socketId, socket, JSON.parse(line));
+            handleIPCMessage(socketId, socket, msg);
           } catch (err) {
-            log(`IPC parse error: ${err.message}`);
+            log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
+            if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
           }
         }
       }
@@ -269,6 +272,8 @@ function startIPCServer() {
 
   return server;
 }
+
+const NO_INSIGHT_ENGINE = 'this node runs no insight engine';
 
 /**
  * Handle a single IPC message from a virtual node.
@@ -517,20 +522,18 @@ function handleIPCMessage(socketId, socket, msg) {
       });
       break;
 
+    // The insight engine is a capability a node may not have (a stock daemon has none): checked,
+    // answered either way, never assumed — unchecked, this threw and the client waited out its timeout.
     case 'xmesh-context':
-      sendIPC(socket, {
-        type: 'result',
-        action: 'xmesh-context',
-        context: node._xmesh.getContext({ timeWindow: msg.timeWindow }),
-      });
+      sendIPC(socket, node._xmesh
+        ? { type: 'result', action: 'xmesh-context', context: node._xmesh.getContext({ timeWindow: msg.timeWindow }) }
+        : { type: 'result', action: 'xmesh-context', error: NO_INSIGHT_ENGINE });
       break;
 
     case 'xmesh-search':
-      sendIPC(socket, {
-        type: 'result',
-        action: 'xmesh-search',
-        insights: node._xmesh.getInsights(msg.query),
-      });
+      sendIPC(socket, node._xmesh
+        ? { type: 'result', action: 'xmesh-search', insights: node._xmesh.getInsights(msg.query) }
+        : { type: 'result', action: 'xmesh-search', error: NO_INSIGHT_ENGINE });
       break;
 
     case 'catchup':
@@ -616,8 +619,11 @@ function forwardEventsToVirtualNodes() {
     broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
     broadcastToListeners({ type: 'event', event: 'message', data: { from, content, timestamp: Date.now() } });
 
-    // Feed messages (including Telegram) into xMesh
-    node._xmesh.ingestSignal({ type: 'message', from, content });
+    // Feed messages (including Telegram) into the insight engine, if this node has one. A stock
+    // daemon has none (`node._xmesh` is null: the engine is injected, never assumed); calling it
+    // unchecked threw inside the frame dispatch, so any peer's `message` frame over the relay
+    // took the daemon down in 0.13.16.
+    if (node._xmesh) node._xmesh.ingestSignal({ type: 'message', from, content });
 
     // Wake sleeping peers that might need this message.
     // The daemon acts as wake proxy — it has APNs keys and gossiped wake channels.
