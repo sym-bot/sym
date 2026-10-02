@@ -141,6 +141,27 @@ describe('a mood frame on a stock node (G2)', () => {
   });
 });
 
+describe('the asynchronous half of a frame (SVAF) is refused by the same guard', () => {
+  it('a rejection is counted, and a peer name that cannot be printed cannot make the containment throw', async () => {
+    const name = uniq('guard-async');
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    const rejections = [];
+    const onRejection = (r) => rejections.push(r);
+    process.on('unhandledRejection', onRejection);
+    try {
+      node._frameHandler._processHeuristicSVAF = async () => { throw new Error('engine failed'); };
+      node._frameHandler._runHeuristicSVAFContained({ type: 'cmb', cmb: {} }, { toString: 1 }, 'id-a', 0, Date.now(), 1);
+      await new Promise((r) => setTimeout(r, 50));
+      assert.deepStrictEqual(rejections, [], 'nothing reached unhandledRejection (0.13.16: the catch threw printing the name)');
+      assert.strictEqual(node.metrics().framesRefusedByType.cmb, 1);
+    } finally {
+      process.removeListener('unhandledRejection', onRejection);
+      node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
+});
+
 describe('the daemon survives a peer\'s mood and message frames over the relay (G2, C3)', () => {
   it('stays up, handles both, and answers an insight-engine request it cannot serve instead of throwing', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-daemon-guard-'));

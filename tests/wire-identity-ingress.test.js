@@ -17,7 +17,7 @@ const fs = require('fs');
 const net = require('net');
 const { WebSocketServer } = require('ws');
 const { SymNode } = require('../lib/node');
-const { BonjourDiscovery } = require('../lib/discovery');
+const { BonjourDiscovery, NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { sendFrame } = require('../lib/frame-parser');
 const { wireNodeId, wireName } = require('../lib/wire-identity');
@@ -122,6 +122,17 @@ describe('LAN: the handshake that opens a connection', () => {
     } finally { s.destroy(); t.destroy(); await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
+  it('a handshake whose room claim cannot be printed is refused and its connection closed', async () => {
+    const { node, name } = await lanNode('wire-lan-room');
+    const s = dial(node._port, { type: 'handshake', nodeId: 'r'.repeat(64), name: 'r', room: BAD });
+    try {
+      await until(() => s.gone, 3000);
+      assert.strictEqual(s.gone, true);
+      assert.strictEqual(node._peers.size, 0);
+      assert.strictEqual(node.metrics().framesRefusedByType.handshake, 1);
+    } finally { s.destroy(); await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
   it('a handshake whose keys are not text pins nothing', async () => {
     const { node, name } = await lanNode('wire-lan-keys');
     const s = dial(node._port, { type: 'handshake', nodeId: 'k'.repeat(64), name: 'k', publicKey: BAD, e2ePublicKey: BAD });
@@ -130,5 +141,28 @@ describe('LAN: the handshake that opens a connection', () => {
       assert.strictEqual(node._roster.has('k'.repeat(64)), false);
       assert.strictEqual(node._peerSharedSecrets.has('k'.repeat(64)), false);
     } finally { s.destroy(); await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+});
+
+describe('wake channels are taken as text before they are kept', () => {
+  it('a wake-channel frame or peer-info entry that is not text is not stored, written or passed on', () => {
+    const name = uniq('wire-wake');
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    let writes = 0;
+    node._wakeManager.saveWakeChannels = () => { writes++; };
+    try {
+      assert.doesNotThrow(() => node._frameHandler.handle('p1', 'p1', { type: 'wake-channel', platform: BAD, token: 't' }));
+      assert.doesNotThrow(() => node._frameHandler.handle('p1', 'p1', { type: 'wake-channel', platform: 'apns', token: { t: 1 } }));
+      assert.strictEqual(node._peerWakeChannels.has('p1'), false, 'not kept');
+      assert.strictEqual(writes, 0, 'and not written (0.13.16 wrote it, then threw printing it)');
+      node._frameHandler.handle('p2', 'p2', { type: 'peer-info', peers: [
+        null, 7, { nodeId: BAD, wakeChannel: { platform: 'apns', token: 't' } },
+        { nodeId: 'a', wakeChannel: { platform: 'apns', token: BAD } },
+        { nodeId: 'b', wakeChannel: { platform: 'apns', token: 't', environment: 'sandbox', extra: 'x'.repeat(10000) } },
+      ] });
+      assert.deepStrictEqual([...node._peerWakeChannels.keys()], ['b']);
+      assert.deepStrictEqual(node._peerWakeChannels.get('b'), { platform: 'apns', token: 't', environment: 'sandbox' }, 'only what a wake uses is kept');
+      assert.strictEqual(writes, 1);
+    } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
