@@ -27,7 +27,9 @@ const lineOf = (o) => JSON.stringify(o) + '\n';
 const read = (dir, file) => { try { return fs.readFileSync(path.join(dir, file), 'utf8'); } catch { return ''; } };
 const archives = (dir) => { try { return fs.readdirSync(path.join(dir, 'archive')).sort(); } catch { return []; } };
 const archiveBytes = (dir) => archives(dir).reduce((s, n) => s + fs.statSync(path.join(dir, 'archive', n)).size, 0);
-const leftovers = (dir) => fs.readdirSync(dir).filter((n) => n.endsWith('.rotating'));
+const leftovers = (dir) => fs.readdirSync(dir).filter((n) => n.endsWith('.rotating') || n.endsWith('.archiving'));
+/** The pid of a process that has exited: what a crashed rotation's leftovers are named with. */
+const deadPid = () => require('node:child_process').spawnSync(process.execPath, ['-e', '0']).pid;
 
 /** Spy on a store's rotations: the bytes it had appended (in all) at each one. */
 function spyRotations(st, appended) {
@@ -150,9 +152,10 @@ describe('attestation log rotation — at start', () => {
     for (let i = 1; i <= 5; i++) st.record(att(i));
     const before = read(dir, ATT);
     // What a crash between the link and the rename leaves: an archive name on the live inode, and the temp file.
+    const pid = deadPid();
     fs.mkdirSync(path.join(dir, 'archive'));
-    fs.linkSync(path.join(dir, ATT), path.join(dir, 'archive', 'attestations.000000000001.20261002T000000000Z.1.jsonl'));
-    fs.writeFileSync(path.join(dir, `${ATT}.1.1.rotating`), 'partial');
+    fs.linkSync(path.join(dir, ATT), path.join(dir, 'archive', `attestations.000000000001.20261002T000000000Z.${pid}.jsonl`));
+    fs.writeFileSync(path.join(dir, `${ATT}.${pid}.1.rotating`), 'partial');
     const again = new AttestationStore({ dir, log: () => {} });
     assert.deepStrictEqual(archives(dir), [], 'the archive name on the live log is removed');
     assert.deepStrictEqual(leftovers(dir), [], 'and so is the temp file');
@@ -345,19 +348,28 @@ describe('attestation log rotation — nothing held is lost', () => {
     for (const f of [ATT, CP, WIT]) assert.strictEqual(again._rotations[f], 0, `${f} not rotated again at start`);
   });
 
-  it('a waiting witness read from the log is appended when promoted after its log was rotated', () => {
+  it('a waiting witness read from the log is kept through a rotation and a restart, then promoted once (0.14.0 review A1-F4)', () => {
     const dir = tmpdir('att-rot-wait-');
     const opts = { dir, maxCheckpointsPerAttester: 2, rotateBytes: 1024, log: () => {} };
-    fs.writeFileSync(path.join(dir, WIT), lineOf({ attester: 'Z', upto_seq: 3, root: 'rz', by: 'W', sig: 'wz' }));
+    const waiting = lineOf({ attester: 'Z', upto_seq: 3, root: 'rz', by: 'W', sig: 'wz' });
+    fs.writeFileSync(path.join(dir, WIT), waiting);
     const st = new AttestationStore(opts);   // the witness waits for Z's checkpoint
+    st.recordWitness({ attester: 'Y', upto_seq: 1, root: 'ry', by: 'W', sig: 'wy' });   // heard on the network: memory only
     st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'r1', sig: 'c1' });
     for (let n = 1; st._rotations[WIT] === 0; n++) {
       st.recordCheckpoint({ by: 'A', upto_seq: n, root: `r${n}`, sig: `c${n}` });
       st.recordWitness({ attester: 'A', upto_seq: n, root: `r${n}`, by: 'W', sig: `w${n}` });
     }
-    assert.ok(!read(dir, WIT).includes('"wz"'), 'the waiting witness is not in the rotated log');
-    st.recordCheckpoint({ by: 'Z', upto_seq: 3, root: 'rz', sig: 'cz' });
-    assert.ok(read(dir, WIT).includes('"wz"'), 'promoted, it is appended');
+    assert.ok(read(dir, WIT).includes('"wz"'), 'the waiting witness read from the log is in the rotated log');
+    assert.ok(!read(dir, WIT).includes('"wy"'), 'one heard on the network still never reaches it');
+    const again = new AttestationStore(opts);   // a restart before Z's checkpoint arrives
+    assert.strictEqual(again._rotations[WIT], 0, 'and the next start does not rotate');
+    const size = () => fs.statSync(path.join(dir, WIT)).size;
+    assert.strictEqual(again._held[WIT], size(), 'the rotated log is all held, the waiting witness included: no waste');
+    again.recordCheckpoint({ by: 'Z', upto_seq: 3, root: 'rz', sig: 'cz' });
+    assert.strictEqual(again._held[WIT], size(), 'and promoting it counts it once');
+    assert.strictEqual(again.witnessesFor('Z', 3).length, 1, 'it was still waiting, and is promoted');
+    assert.strictEqual(read(dir, WIT).split('"wz"').length - 1, 1, 'without being written twice');
     assert.strictEqual(new AttestationStore(opts).witnessesFor('Z', 3).length, 1);
   });
 });
@@ -375,5 +387,193 @@ describe('conflicts are held with their positions', () => {
     assert.strictEqual(st.recordCheckpoint({ by: 'A', upto_seq: 1, root: 'fork', sig: 'again' }).first, false, 'not reported again');
     assert.strictEqual(st.hasConflict('B', 1), false, 'a dropped position took its conflict with it');
     assert.strictEqual([...st._conflicted.values()].reduce((n, m) => n + m.size, 0), 3, 'only held positions are counted');
+  });
+});
+
+// 0.14.0 release review, part A1 (lib/attestation-store.js).
+describe('0.14.0 release review A1', () => {
+  const sig64 = () => require('crypto').randomBytes(64).toString('base64url');
+  const { chainHash } = require('../lib/attestation-store');
+
+  it('a log that cannot be read at start is never rotated or rewritten, only appended to, and that is said once (F1)', () => {
+    const dir = tmpdir('att-a1-unread-');
+    const opts = { dir, max: 100, rotateBytes: 2048 };
+    const seed = new AttestationStore({ ...opts, log: () => {} });
+    for (let i = 1; i <= 100; i++) seed.record(att(i));   // ~12 KB, well over the budget
+    const before = read(dir, ATT);
+    const said = [];
+    const real = fs.readFileSync;
+    fs.readFileSync = (p, ...a) => (String(p).endsWith(ATT) ? (() => { throw Object.assign(new Error('out of memory'), { code: 'ENOMEM' }); })() : real(p, ...a));
+    let st;
+    try { st = new AttestationStore({ ...opts, log: (m) => said.push(m) }); } finally { fs.readFileSync = real; }
+    assert.strictEqual(st._rotations[ATT], 0, 'not rotated');
+    assert.strictEqual(read(dir, ATT), before, 'the log is as it was');
+    assert.deepStrictEqual(archives(dir), [], 'and nothing was archived (or pruned)');
+    assert.strictEqual(said.filter((m) => /could not be read at start \(ENOMEM\)/.test(m)).length, 1, said.join('\n'));
+    // Far more than it holds is appended (and dropped) after the start: a log it read would rotate.
+    const added = [];
+    for (let i = 101; i <= 500; i++) { const a = att(i); st.record(a); added.push(lineOf(a)); }
+    assert.strictEqual(st._rotations[ATT], 0, 'and not later either, however much is appended');
+    assert.strictEqual(read(dir, ATT), before + added.join(''), 'it is only appended to');
+    const again = new AttestationStore({ ...opts, log: () => {} });
+    assert.deepStrictEqual([again.size(), again.chainOf('A').at(-1).seq], [100, 500], 'a start that reads it has the newest records');
+  });
+
+  it('a read that returns short is completed, and one that cannot be completed leaves the log alone (F8)', () => {
+    const dir = tmpdir('att-a1-short-');
+    const seed = new AttestationStore({ dir, max: 100, rotateBytes: 2048, log: () => {} });
+    for (let i = 1; i <= 300; i++) seed.record(att(i));
+    const before = read(dir, ATT);
+    const opts = { dir, max: 100, rotateBytes: 2048, maxReadBytes: 16384, log: () => {} };   // the tail branch
+    const real = fs.readSync;
+    fs.readSync = (fd, buf, off, len, pos) => real(fd, buf, off, Math.min(len, 1000), pos);   // short reads
+    let st;
+    try { st = new AttestationStore(opts); } finally { fs.readSync = real; }
+    assert.deepStrictEqual(st.chainOf('A').map((a) => a.seq).slice(-3), [298, 299, 300], 'the newest records are read');
+    assert.strictEqual(st.size(), 100);
+    // A read that stops early (the file changed under it) is not taken as read.
+    fs.readSync = (fd, buf, off, len, pos) => (off > 0 ? 0 : real(fd, buf, off, Math.min(len, 1000), pos));
+    let partial;
+    try { partial = new AttestationStore({ ...opts, dir: (() => { const d = tmpdir('att-a1-short2-'); fs.writeFileSync(path.join(d, ATT), before); return d; })() }); } finally { fs.readSync = real; }
+    assert.strictEqual(partial._rotations[ATT], 0);
+    assert.strictEqual(partial._unread.has(ATT), true);
+  });
+
+  it('a re-spelled signature in a log written before 0.14.0 is read as the canonical one: no false break, counted once (F2)', () => {
+    const dir = tmpdir('att-a1-spell-');
+    const sigs = Array.from({ length: 8 }, sig64);
+    const lines = [];
+    let prev = 'genesis';
+    sigs.forEach((sig, i) => {
+      const a = { of: `cmb-${i + 1}`, by: 'A', seq: i + 1, prev, sig };
+      // 0.13.16 kept a relay's re-spelling of seq 5, which arrived before the canonical copy.
+      if (i === 4) lines.push(lineOf({ ...a, sig: `${sig}=` }));
+      lines.push(lineOf(a));
+      prev = chainHash(sig);
+    });
+    fs.writeFileSync(path.join(dir, ATT), lines.join(''));
+    const said = [];
+    const st = new AttestationStore({ dir, log: (m) => said.push(m) });
+    assert.deepStrictEqual(st.verifyChain('A'), { ok: true, gaps: [], breaks: [] }, 'no false break');
+    assert.deepStrictEqual(st.chainOf('A').map((a) => a.sig), sigs, 'every signature as its signer wrote it');
+    assert.strictEqual(st.size(), 8, 'the canonical copy is the same attestation');
+    assert.strictEqual(said.filter((m) => /1 attestation\(s\) in attestations.jsonl carried a signature not spelled/.test(m)).length, 1, said.join('\n'));
+    assert.strictEqual(st.has(`${sigs[4]}==`), true, 'any spelling of it is known as held');
+  });
+
+  it('a log of witnesses waiting for their checkpoints is held, so a start does not rotate it (F4)', () => {
+    const dir = tmpdir('att-a1-waiting-');
+    fs.writeFileSync(path.join(dir, WIT), Array.from({ length: 50 }, (_, i) => lineOf({ attester: `Z${i}`, upto_seq: 1, root: 'r', by: 'W', sig: `w${i}` })).join(''));
+    const before = read(dir, WIT);
+    const st = new AttestationStore({ dir, rotateBytes: 1024, log: () => {} });
+    assert.strictEqual(st._rotations[WIT], 0);
+    assert.strictEqual(read(dir, WIT), before);
+  });
+
+  it('the checkpoint log is read whole even when every held position also holds a conflicting copy (F3)', () => {
+    const st = new AttestationStore();
+    assert.ok(st._readBudget[CP] >= 4 * 32 * 1024 * 315, `checkpoints ${st._readBudget[CP]}`);
+    // Functionally, with checkpoint lines near the budget's allowance (448 bytes).
+    const dir = tmpdir('att-a1-conflicts-');
+    const opts = { dir, maxCheckpointsPerAttester: 2, maxAttesters: 4, rotateBytes: 512, log: () => {} };
+    const pad = 'p'.repeat(360);
+    const cp = (by, n, root) => ({ by, upto_seq: n, root, sig: `${by}${n}${root}`, pad });
+    const s1 = new AttestationStore(opts);
+    for (const by of ['B', 'C', 'D', 'A']) for (const n of [1, 2]) { s1.recordCheckpoint(cp(by, n, 'r')); s1.recordCheckpoint(cp(by, n, 'fork')); }
+    // A churns: its positions (and their conflicts) are dropped, B-D's stay held at the head of the log.
+    // Each step adds two lines of waste (~900 bytes); stop while one more would reach a rotation.
+    const waste = () => fs.statSync(path.join(dir, CP)).size - s1._held[CP];
+    for (let n = 3; waste() + 2000 < Math.max(512, s1._held[CP]); n++) {
+      s1.recordCheckpoint(cp('A', n, 'r'));
+      s1.recordCheckpoint(cp('A', n, 'fork'));
+    }
+    assert.strictEqual(s1._rotations[CP], 0);
+    assert.ok(fs.statSync(path.join(dir, CP)).size > 14336 * 0.7, `the live log is near its most: ${fs.statSync(path.join(dir, CP)).size}`);
+    const again = new AttestationStore(opts);
+    for (const by of ['B', 'C', 'D']) for (const n of [1, 2]) assert.strictEqual(again.hasConflict(by, n), true, `${by}@${n} is still known as conflicted`);
+  });
+
+  it("this node's own witness at a full position is written once, and what is written is reclaimed by a rotation (F5)", () => {
+    const dir = tmpdir('att-a1-own-');
+    const st = new AttestationStore({ dir, selfId: 'me', maxWitnessesPerPosition: 2, maxCheckpointsPerAttester: 1000, rotateBytes: 4096, log: () => {} });
+    const fill = (n) => {
+      st.recordCheckpoint({ by: 'A', upto_seq: n, root: 'r', sig: `c${n}` });
+      st.recordWitness({ attester: 'A', upto_seq: n, root: 'r', by: 'W1', sig: `w1-${n}` });
+      st.recordWitness({ attester: 'A', upto_seq: n, root: 'r', by: 'W2', sig: `w2-${n}` });
+    };
+    fill(1);
+    for (let i = 0; i < 100; i++) assert.strictEqual(st.recordWitness({ attester: 'A', upto_seq: 1, root: 'r', by: 'me', sig: `mine-1-${i}` }).reason, 'position-full');
+    assert.strictEqual(read(dir, WIT).split('"by":"me"').length - 1, 1, 'one line, however many copies arrive');
+    assert.strictEqual(st.hasWitnessed('A', 1, 'me'), true);
+    // Then nothing but this node's own witnesses for full positions: their lines alone reach a rotation.
+    for (let n = 2; n <= 20; n++) fill(n);
+    const rotations = st._rotations[WIT];
+    const pad = 'x'.repeat(2000);
+    for (let n = 2; n <= 20; n++) st.recordWitness({ attester: 'A', upto_seq: n, root: 'r', by: 'me', sig: `mine-${n}`, pad });
+    assert.ok(st._rotations[WIT] > rotations, 'the own-witness lines count toward a rotation like any waste');
+  });
+
+  it("the start-up tidy leaves a rotation another live process has in flight (F6)", () => {
+    const dir = tmpdir('att-a1-tidy-');
+    const st = new AttestationStore({ dir, log: () => {} });
+    for (let i = 1; i <= 5; i++) st.record(att(i));
+    const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+    try {
+      // Mid-rotation in that process: its temp file written, the old log just linked into archive/.
+      fs.mkdirSync(path.join(dir, 'archive'));
+      const name = `attestations.000000000001.20261002T000000000Z.${child.pid}.jsonl`;
+      fs.linkSync(path.join(dir, ATT), path.join(dir, 'archive', name));
+      fs.writeFileSync(path.join(dir, `${ATT}.${child.pid}.1.rotating`), 'in flight');
+      new AttestationStore({ dir, log: () => {} });
+      assert.deepStrictEqual(archives(dir), [name], 'its archive is left to it');
+      assert.deepStrictEqual(leftovers(dir), [`${ATT}.${child.pid}.1.rotating`], 'and so is its temp file');
+    } finally { child.kill(); }
+  });
+
+  it('a copy-fallback rotation that crashed before the rename leaves no duplicate of the live log in archive/ (F7)', () => {
+    const dir = tmpdir('att-a1-copy-');
+    const st = new AttestationStore({ dir, log: () => {} });
+    for (let i = 1; i <= 5; i++) st.record(att(i));
+    const pid = deadPid();
+    fs.mkdirSync(path.join(dir, 'archive'));
+    // A crash after copying the live log (no hard links) and before replacing it.
+    const dup = `attestations.000000000002.20261002T000000000Z.${pid}.jsonl`;
+    fs.copyFileSync(path.join(dir, ATT), path.join(dir, 'archive', dup));
+    fs.writeFileSync(path.join(dir, `${ATT}.${pid}.7.archiving`), dup);
+    // And an older one whose rotation did replace the live log before the crash: a real archive.
+    const real = `attestations.000000000001.20261002T000000000Z.${pid}.jsonl`;
+    fs.writeFileSync(path.join(dir, 'archive', real), 'the old log\n');
+    fs.writeFileSync(path.join(dir, `${ATT}.${pid}.6.archiving`), real);
+    new AttestationStore({ dir, log: () => {} });
+    assert.deepStrictEqual(archives(dir), [real], 'the copy of the live log is gone, the real archive kept');
+    assert.deepStrictEqual(leftovers(dir), [], 'and the markers are cleared');
+  });
+
+  it('while a copied archive waits for the live log to be replaced, a marker names it (F7)', () => {
+    const dir = tmpdir('att-a1-copy-mark-');
+    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, log: () => {} });
+    const realLink = fs.linkSync;
+    const realRename = fs.renameSync;
+    let seen = null;
+    fs.linkSync = () => { throw Object.assign(new Error('no links'), { code: 'EPERM' }); };
+    fs.renameSync = (from, to) => {
+      // The moment a crash would leave a copy of the live log in archive/.
+      const marker = fs.readdirSync(dir).find((n) => n.endsWith('.archiving'));
+      seen = marker && { names: fs.readFileSync(path.join(dir, marker), 'utf8'), archives: archives(dir) };
+      return realRename(from, to);
+    };
+    try { for (let i = 1; st._rotations[ATT] === 0; i++) st.record(att(i)); } finally { fs.linkSync = realLink; fs.renameSync = realRename; }
+    assert.ok(seen, 'a marker existed before the rename');
+    assert.deepStrictEqual(seen.archives, [seen.names], 'naming the copy');
+  });
+
+  it('a copy-fallback rotation that succeeds leaves no marker', () => {
+    const dir = tmpdir('att-a1-copy-ok-');
+    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, log: () => {} });
+    const realLink = fs.linkSync;
+    fs.linkSync = () => { throw Object.assign(new Error('no links'), { code: 'EPERM' }); };
+    try { for (let i = 1; st._rotations[ATT] === 0; i++) st.record(att(i)); } finally { fs.linkSync = realLink; }
+    assert.strictEqual(archives(dir).length, 1);
+    assert.deepStrictEqual(leftovers(dir), []);
   });
 });

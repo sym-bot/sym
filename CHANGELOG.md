@@ -175,19 +175,34 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   the filesystem has no hard links. Only then does it rename the temp file over the live log, so the
   live path holds a complete log at every instant. A failure at any step removes what the rotation
   made (no archive name is left on the live log), leaves the live log as it was, is logged once per
-  distinct error, and is retried after another budget. A start removes what a crashed rotation left
-  behind. Archives are pruned in sequence order, not by file time.
+  distinct error, and is retried after another budget. A start removes what a rotation that crashed
+  left behind: its temp file, an archive name still on the live log, and a copy of the live log made
+  where there are no hard links (a marker names that copy until the live log is replaced). It leaves
+  alone a rotation another running process has in flight on the same directory. Archives are pruned
+  in sequence order, not by file time.
+- **A log that cannot be read at start is left as it is.** A start that could not read a log (too
+  large for memory, an I/O error, a read that ended early) counted none of it as held. The rotation
+  that followed then replaced the log with an empty one, and pruned the archive of it. Such a log is
+  now only appended to, and not rotated until a start reads it; that is said once. A read that
+  returns short is completed.
 - **A rotation keeps everything held:** every attestation, checkpoint and witness the store holds;
   each conflicting checkpoint copy for a held position, so a restart still reports the conflict; and
   this node's memory of the checkpoints it witnessed itself (one line per attester), so it still signs
-  a witness once across restarts. A witness waiting for its checkpoint stays in memory only, as before.
+  a witness once across restarts. A witness read from the log that still waits for its checkpoint is
+  written back, so a restart finds it again, as when the log was never rewritten. One heard only on
+  the network waits in memory only, as before. This node's own witness for a position too full to
+  hold it is written once, not once per copy received.
 - **A start reads all of each log.** A record can stay held at the head of its log while newer ones
   churn past it: a quiet attester's attestations or checkpoints, a quiet position's witnesses. So each
-  log is read whole, up to twice what its caps hold: 68.7 MiB for attestations (50,000 at 720 bytes;
-  measured ~520), 28 MiB for checkpoints and 47.7 MiB for witnesses, 144 MiB in all. 0.13.16 read at
-  most 112 MiB but only the newest part of each log, which could miss a quiet attester. On logs over
-  every budget, reading them took 0.8–0.9 s here against 1.0–1.4 s for 0.13.16. A first start that
-  also rotates all three took 1.0–1.3 s, once; the next start took 0.25 s.
+  log is read whole, up to twice what its caps hold:
+  - 68.7 MiB for attestations (50,000 at 720 bytes; measured ~520);
+  - 56 MiB for checkpoints (32,768 at 448 bytes, and a conflicting copy beside each);
+  - 47.7 MiB for witnesses;
+  - 172 MiB in all.
+
+  0.13.16 read at most 112 MiB, but only the newest part of each log, which could miss a quiet
+  attester. On logs over every budget, reading them took 0.80–0.85 s here against 0.96 s for 0.13.16.
+  A first start that also rotates all three took about 1.0 s, once; the next start took 0.23 s.
 - **One attester cannot flush another's chain.** The 50,000-attestation cap was one queue across all
   attesters, so one attester signing many attestations pushed every other attester's chain out, and
   the omission evidence with it. Now, when the store is full, the attester holding the most loses its
@@ -247,7 +262,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   now refused before anything is spent on it. It is counted (`signaturesNotCanonical` in `metrics()`)
   and said like a budget drop (`signature-not-canonical`). A re-spelling of an attestation already
   held is a repeat. Every signer sym knows writes the canonical spelling, and this node checks its own
-  before recording one.
+  before recording one. A log written before 0.14.0 can hold another spelling. Such a line is read as
+  the canonical spelling, which is counted and said once, so it can no longer make an honest chain
+  look broken; a rotation then writes the canonical one.
 - **A dropped attestation is logged once a minute per peer and reason, with a count.** It was logged
   once per frame, and one naming a signer whose key is not held is dropped before any budget.
 
