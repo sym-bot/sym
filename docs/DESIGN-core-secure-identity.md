@@ -5,6 +5,7 @@ it is reviewed and the user has ruled on the decisions at the end.
 **Target:** sym 0.14.0. It blocks that release: the 0.14.0 candidate (f775581) is not a Core Secure
 participant (conformance audit 2026-10-02, findings S-A1…S-A12, S-B1…S-B3, S-D3, S-D4, S-F1).
 **Spec:** MMP v2.0 as published at meshcognition.org/spec/mmp (last updated 14 Sep 2026).
+**RULED 2026-10-02 (the user): every decision in §8 follows my recommendation.** Code starts once the review's findings are folded in.
 
 ## 1. The root cause
 
@@ -213,7 +214,7 @@ the consumers of `register-agent` across the estate get listed and each one move
 ### D9. Cognitive nodes: one verified identity, reused
 
 **The concept (the user, 2026-10-02).** A cognitive node is a reusable, verified agent. Instead of
-making a new agent for each job, a verified one is kept and used again. XMesh already has the
+making a new agent for each job, a verified one is kept and used again. xmesh already has the
 workflow: in Station, a validator turns a proven mission worker into a "cognition node"
 (`POST /api/v1/_/workers/:name/preserve`). That node is roster-persisted, restored on boot,
 re-embodied with its learned α profile, and volunteers for matching work:
@@ -270,7 +271,7 @@ says the uuid "identifies a process instance, not an agent" and is "never writte
 The measurement behind it holds: 292 node directories for 5 agents, because every run minted a
 fresh uuid. But MMP v2.0, published later (14 Sep 2026), signs every record over
 `createdByNodeId` (§8.8.4) and forbids names as identity (§3.1.2). The two fit together once
-identities stop being minted per run (Q1): the uuid then identifies the agent. `<agent>@<xMesh
+identities stop being minted per run (Q1): the uuid then identifies the agent. `<agent>@<xmesh
 name>` stays as the agent's name, and its licensed-mesh qualifier can be carried and checked as
 a signed claim. It does not replace the nodeId. The xmesh side (preserve, reuse, aliases) is
 changed in the xmesh runtime's own design, which this one feeds.
@@ -333,7 +334,7 @@ changed in the xmesh runtime's own design, which this one feeds.
    route, until 0.15.0 (recommended). The alternative, Legacy Import on by default, is what §17.3
    forbids for network admission once the window closes, and it keeps the partition invisible.
 3. **Cognitive-node identity (D9).** Confirm that the nodeId, minted once per agent, is the
-   agent's identity, with `<agent>@<xMesh name>` as its name. This supersedes the 2026-08-02
+   agent's identity, with `<agent>@<xmesh name>` as its name. This supersedes the 2026-08-02
    sentence "never written to a CMB field", which MMP v2.0 contradicts. Also confirm that
    preserving means exporting the signed bundle of the same identity, made visible by a
    validator's signed act.
