@@ -48,6 +48,10 @@ const signed = (fields, priv, sign) => { const o = { ...fields }; sign(o, priv);
 const forgedSig = () => crypto.randomBytes(64).toString('base64url');
 let n = 0;
 const forged = (k) => ({ of: `cmb-${++n}`, by: k.id, at: 1, roster: ROOM, verdict: 'aligned', categories: {}, seq: n, prev: 'p', sig: forgedSig(), sigAlg: 'ed25519' });
+// The wire form (sym-attest-v1): every field what the extension says, only the signature forged.
+const hex = () => crypto.randomBytes(32).toString('hex');
+const CATS7 = { focus: 'admit', issue: 'admit', intent: 'guard', motivation: 'admit', commitment: 'silent', perspective: 'admit', mood: 'admit' };
+const wireForged = (k, extra = {}) => ({ of: `cmb-${hex()}`, assertionId: `asrt-${hex()}`, by: k.id, at: 1, room: ROOM, method: 'heuristic', verdict: 'aligned', categories: CATS7, role: 'participant', seq: ++n + 1, prev: hex(), sigAlg: 'ed25519', sig: forgedSig(), ...extra });
 // Since 0.14 every role-grant names the key it confers authority on (design D3).
 const SOME_KEY = Buffer.alloc(32, 9).toString('base64url');
 const forgedGrant = (by, grantee) => ({ type: 'role-grant', grantee, granteeKey: SOME_KEY, role: 'validator', grantedBy: by, grantedAt: ++n, sig: forgedSig(), sigAlg: 'ed25519' });
@@ -201,10 +205,10 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
       node._roster.bind(A.id, A.pub, 'proven');
       const lan = admitAs(node, { nodeId: 'peer-two-paths' });
       const relay = { ...lan, kind: 'relay', sessionId: 'f'.repeat(32), has: lan.has };
-      for (let i = 0; i < 60; i++) node._frameHandler.handle(i % 2 ? lan : relay, { type: 'attestation', attestation: forged(A) });
+      for (let i = 0; i < 60; i++) node._frameHandler.handle(i % 2 ? lan : relay, { type: 'sym-attest-attestation', attestation: wireForged(A) });
       for (let i = 0; i < 10; i++) {
-        node._frameHandler.handle(lan, { type: 'checkpoint', checkpoint: { type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: i + 1, root: `r${i}`, at: 1, sig: forgedSig() } });
-        node._frameHandler.handle(relay, { type: 'witness', witness: { type: 'witness', attester: A.id, roster: ROOM, upto_seq: i + 1, root: 'r', by: A.id, role: 'participant', at: 1, sig: forgedSig() } });
+        node._frameHandler.handle(lan, { type: 'sym-attest-checkpoint', checkpoint: { by: A.id, room: ROOM, uptoSeq: i + 1, root: hex(), at: 1, sigAlg: 'ed25519', sig: forgedSig() } });
+        node._frameHandler.handle(relay, { type: 'sym-attest-witness', witness: { attester: A.id, room: ROOM, uptoSeq: i + 1, root: hex(), by: A.id, role: 'participant', at: 1, sigAlg: 'ed25519', sig: forgedSig() } });
         node._frameHandler.handle(lan, { type: 'role-grant', grant: forgedGrant(A.id, `x-${i}`) });
       }
       assert.deepStrictEqual([...node._gossipBuckets.keys()], ['peer-two-paths']);
@@ -248,8 +252,8 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
       const logs = [];
       node._log = (m) => logs.push(m);
       const p = admitAs(node, { nodeId: 'peer-flooding' });
-      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'attestation', attestation: forged(A) });
-      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'attestation', attestation: { ...forged(A), by: `nobody-${i}` } });
+      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'sym-attest-attestation', attestation: wireForged(A) });
+      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'sym-attest-attestation', attestation: wireForged(A, { by: `nobody-${i}` }) });
       assert.strictEqual(logs.filter((l) => /Attestation from .* dropped \(bad-signature\)/.test(l)).length, 1);
       assert.strictEqual(logs.filter((l) => /dropped \(unknown-attester-key\)/.test(l)).length, 1);
     });

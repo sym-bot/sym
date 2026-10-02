@@ -44,23 +44,28 @@ describe('node-stats — self-reported store tally', () => {
       node._store.stats = () => ({ total: 7, local: 4, peer: 3, hot: 7, cold: 0 });
       node._emitNodeStats();
       assert.strictEqual(frames.length, 1);
-      assert.strictEqual(frames[0].type, 'node-stats');
+      assert.strictEqual(frames[0].type, 'sym-attest-node-stats');
       assert.deepStrictEqual(
         { e: frames[0].stats.emitted, a: frames[0].stats.admitted, m: frames[0].stats.memory },
         { e: 4, a: 3, m: 7 },
       );
+      assert.deepStrictEqual(Object.keys(frames[0].stats).sort(), ['admitted', 'at', 'emitted', 'memory'], 'no self-asserted name or nodeId (sym-attest-v1 §5.4)');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  it('_ingestNodeStats emits a node-stats event for a peer, ignores self + malformed', () => {
+  it('a sym-attest-node-stats frame is attributed to the session\'s proven peer; a malformed one is refused', () => {
     const { node, name } = makeNode('ns-ingest');
+    const { admitAs, identity, deliver } = require('./_core-secure');
     try {
       const seen = [];
       node.on('node-stats', s => seen.push(s));
-      node._ingestNodeStats({ name: 'research', nodeId: 'peer-1', emitted: 7, admitted: 65, memory: 158 }, 'peer-1');
-      node._ingestNodeStats({ name: node.name, nodeId: node.nodeId, emitted: 1, admitted: 1, memory: 2 }, 'self'); // our own echo
-      node._ingestNodeStats(null, 'peer-1'); // malformed
-      assert.strictEqual(seen.length, 1, 'only the peer stats surfaced');
+      const peer = admitAs(node, identity('research'));
+      // A self-asserted name and nodeId in the frame are not read: the session says who it is.
+      deliver(node, peer, { type: 'sym-attest-node-stats', stats: { name: 'liar', nodeId: 'someone-else', emitted: 7, admitted: 65, memory: 158, at: 1 } });
+      deliver(node, peer, { type: 'sym-attest-node-stats', stats: { emitted: -1, admitted: 1, memory: 2, at: 1 } }); // malformed
+      deliver(node, peer, { type: 'sym-attest-node-stats', stats: null });
+      assert.strictEqual(seen.length, 1, 'only the well-formed stats surfaced');
+      assert.strictEqual(seen[0].nodeId, peer.nodeId);
       assert.strictEqual(seen[0].name, 'research');
       assert.strictEqual(seen[0].admitted, 65);
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }

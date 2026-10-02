@@ -78,6 +78,23 @@ describe('relay sessions (D2)', () => {
     } finally { await stopAll(a, b); await relay.close(); }
   });
 
+  it('an error 1009 IDENTITY_CONFLICT from the peer ends the session, is said, and is not retried (draft spec PR #21)', async () => {
+    const relay = fakeRelay();
+    const a = relayNode('rs-a3', relay); const b = relayNode('rs-b3', relay);
+    try {
+      await a.start(); await b.start();
+      await until(() => paired(a, b), 8000);
+      const [lo, hi] = [a, b].sort((x, y) => (x.nodeId < y.nodeId ? -1 : 1));
+      const metrics = [];
+      lo.on('metric', (m) => metrics.push(m));
+      relay.inject(hi.nodeId, lo.nodeId, { type: 'error', code: 1009, message: 'IDENTITY_CONFLICT', detail: `session:${relaySession(lo, hi).sessionId}` });
+      await until(() => !lo._peers.has(hi.nodeId), 3000);
+      await new Promise((r) => setTimeout(r, 1500)); // past the first retry backoff
+      assert.strictEqual(lo._peers.has(hi.nodeId), false, 'no re-handshake after an identity conflict');
+      assert.ok(metrics.some((m) => m.type === 'identity-conflict-refused-by-peer'));
+    } finally { await stopAll(a, b); await relay.close(); }
+  });
+
   it('frame loss leads to a re-handshake, and records flow again', async () => {
     let dropOne = false;
     const relay = fakeRelay({ tap: (e) => { if (dropOne && e.payload.type === 'control-encrypted') { dropOne = false; return false; } return undefined; } });

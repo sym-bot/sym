@@ -153,7 +153,7 @@ describe('admission annotations live on the store entry', () => {
         const fetcher = admitAs(node, identity('fetcher'));
         node._frameHandler._handleCmbFetch(fetcher.nodeId, 'fetcher', { type: 'cmb-fetch', key: record.metadata.key, reqId: 'q1' }, fetcher);
         const header = fetcher.sent.find((f) => f.type === 'cmb-fetch-result');
-        assert.deepStrictEqual([header.found, header.notFound, 'cmb' in header], [[record.metadata.key], [], false], 'the result carries no record');
+        assert.deepStrictEqual([header.returned, header.missing, 'cmb' in header], [[record.metadata.key], [], false], 'the result carries no record');
         const got = fetcher.sent.find((f) => f.type === 'cmb')?.cmb;
         assert.deepStrictEqual(Object.keys(got).sort(), ['categories', 'metadata']);
         assert.strictEqual(verifyCMB(got, PEER.publicKey).valid, true, 'the served copy re-verifies');

@@ -214,12 +214,17 @@ describe('the key registry at the session (D3)', () => {
       b._roomGrant = { type: 'room-join', room: 'cs-room', grantee: b.nodeId, sig: 'x' };
       const joined = [];
       b.on('peer-joined', (p) => joined.push(p));
+      const ended = [];
+      s.on('closed', (c) => ended.push(c.reason));
       s.start();
       await until(() => b._roster.conflicts().length > 0, 3000);
       await new Promise((r) => setTimeout(r, 50));
       assert.strictEqual(b._peers.has(honestId.nodeId), false, 'the squatter is not a peer');
       assert.ok(!toSquatter.includes('mesh-room-join'), 'nothing was presented to the squatter');
       assert.deepStrictEqual(joined, [], 'and no peer-joined was raised');
+      await until(() => ended.length > 0, 2000);
+      assert.deepStrictEqual(ended, ['identity-conflict'], 'the squatter is told 1009 IDENTITY_CONFLICT (draft spec PR #21)');
+      assert.ok(toSquatter.some((t) => t === 'error'), 'an error frame went out');
       b._roomGrant = null;
       assert.strictEqual(b._roster.source(honestId.nodeId), 'legacy-claim', 'the claim is not taken over');
       assert.deepStrictEqual(b._roster.conflicts().map((c) => [c.nodeId, c.got, c.gotSource]), [[honestId.nodeId, squat.publicKey, 'proven']]);
@@ -293,13 +298,25 @@ describe('extension gating (D1)', () => {
       const session = b._peers.get(a.nodeId).transport;
       assert.strictEqual(session.has('sym-attest-v1'), false);
       const before = wire.length;
-      b._gossipToRoster({ type: 'attestation', attestation: { of: 'x' } });
+      b._gossipToRoster({ type: 'sym-attest-attestation', attestation: { of: 'x' } });
       assert.strictEqual(wire.length, before, 'not sent to a session without the extension');
       const refused = [];
       b.on('metric', (m) => { if (m.type === 'session-frame-refused') refused.push(m); });
-      a._peers.get(b.nodeId).transport.send({ type: 'checkpoint', checkpoint: { by: a.nodeId } });
+      a._peers.get(b.nodeId).transport.send({ type: 'sym-attest-checkpoint', checkpoint: { by: a.nodeId } });
       await until(() => refused.length > 0);
       assert.match(refused[0].reason, /sym-attest-v1 not selected/);
+      // sym 0.13's bare names are never taken on a Core Secure session, selected or not (sym-attest-v1 §9).
+      const c = mk('cs-c');
+      await c.start();
+      await connectNodes(c, b);
+      const sc = b._peers.get(c.nodeId).transport;
+      assert.strictEqual(sc.has('sym-attest-v1'), true);
+      const legacy = [];
+      b.on('metric', (m) => { if (m.type === 'session-frame-refused' && m.reason === 'legacy-attest-frame') legacy.push(m.frameType); });
+      for (const t of ['attestation', 'checkpoint', 'witness', 'node-stats']) c._peers.get(b.nodeId).transport.send({ type: t });
+      await until(() => legacy.length === 4);
+      assert.deepStrictEqual(legacy.sort(), ['attestation', 'checkpoint', 'node-stats', 'witness']);
+      await stopAll(c);
     } finally { await stopAll(a, b); }
   });
 });

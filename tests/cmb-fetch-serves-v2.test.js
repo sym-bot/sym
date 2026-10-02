@@ -23,7 +23,7 @@ const { createCMB, signCMB, verifyCMB, assertionIdV2_0 } = require('../lib/core'
 const { admitAs, identity } = require('./_core-secure');
 
 // Core Secure (design D1): a fetched record goes out as its own `cmb` frame (sealed cmb-encrypted),
-// then a `cmb-fetch-result` with the correlation id and the found / not-found key lists.
+// then a `cmb-fetch-result` with the correlation id and the returned / missing key lists.
 function serve(node, key, reqId) {
   const requester = admitAs(node, identity('requester'));
   node._frameHandler.handle(requester, { type: 'cmb-fetch', key, reqId });
@@ -48,7 +48,7 @@ describe('cmb-fetch serving', () => {
       assert.deepStrictEqual(verifyCMB(cmb, pub).valid, true, 'precondition: the stored record verifies');
       node._store.get = (k) => (k === cmb.metadata.key ? { key: k, cmb } : null);
       const { res, record, recordFirst } = serve(node, cmb.metadata.key, 'r1');
-      assert.deepStrictEqual(res, { type: 'cmb-fetch-result', reqId: 'r1', found: [cmb.metadata.key], notFound: [], timestamp: res.timestamp }, 'the result carries only the id and the key lists');
+      assert.deepStrictEqual(res, { type: 'cmb-fetch-result', reqId: 'r1', returned: [cmb.metadata.key], missing: [], timestamp: res.timestamp }, 'the result carries only the id and the key lists');
       assert.ok(recordFirst, 'the record goes first, in its own frame');
       for (const k of ['signatureSuite', 'addressScheme', 'createdByNodeId', 'application', 'assertionId']) {
         assert.ok(k in record.metadata, `${k} is served`);
@@ -88,14 +88,14 @@ describe('cmb-fetch serving', () => {
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  it('a pre-v2.0 record is not served over Core Secure: listed notFound, no record frame', () => {
+  it('a pre-v2.0 record is not served over Core Secure: listed missing, no record frame', () => {
     const name = `fetchold-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     try {
       const old = createCMB({ categories: { focus: 'an old record' }, createdBy: 'alice' });
       node._store.get = (k) => (k === old.metadata.key ? { key: k, cmb: old } : null);
       const { res, record } = serve(node, old.metadata.key, 'r3');
-      assert.deepStrictEqual([res.found, res.notFound], [[], [old.metadata.key]]);
+      assert.deepStrictEqual([res.returned, res.missing], [[], [old.metadata.key]]);
       assert.strictEqual(record, undefined);
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });

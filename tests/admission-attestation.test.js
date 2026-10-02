@@ -53,7 +53,7 @@ describe('node._buildAdmissionAttestation', () => {
       assert.strictEqual(a1.seq, 1);
       assert.strictEqual(a1.prev, 'genesis');
       assert.strictEqual(a2.seq, 2);
-      assert.strictEqual(a2.prev, crypto.createHash('sha256').update(a1.sig).digest('hex'), 'a2.prev links a1');
+      assert.strictEqual(a2.prev, crypto.createHash('sha256').update(Buffer.from(a1.sig, 'base64url')).digest('hex'), 'a2.prev links a1');
       assert.notStrictEqual(a1.sig, a2.sig);
     });
   });
@@ -118,7 +118,7 @@ describe('attestation persistence — the audit trail survives a restart', () =>
       // not a reset to seq 1 (which would read as a gap / false omission).
       const a3 = n2._buildAdmissionAttestation('cmb-3', 'aligned', verdicts, 'heuristic');
       assert.strictEqual(a3.seq, 3, 'seq continues across restart');
-      assert.strictEqual(a3.prev, crypto.createHash('sha256').update(a2.sig).digest('hex'), 'prev links the pre-restart attestation');
+      assert.strictEqual(a3.prev, crypto.createHash('sha256').update(Buffer.from(a2.sig, 'base64url')).digest('hex'), 'prev links the pre-restart attestation');
       assert.deepStrictEqual(n2.verifyAttestationChain(), { ok: true, gaps: [], breaks: [] }, 'no gap/break across the restart boundary');
     } finally {
       fs.rmSync(nodeDir(name), { recursive: true, force: true });
@@ -179,10 +179,11 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       assert.strictEqual(e.by, A.nodeId);
       assert.strictEqual(e.verdict, 'guarded');
       assert.deepStrictEqual({ ...e.categories }, verdicts);
-      assert.strictEqual(e.methodUnsigned, 'neural');
+      assert.strictEqual(e.method, 'neural', 'signed since sym-attest-v1');
+      assert.strictEqual(e.room, 'hotel');
       assert.strictEqual(e.roster, 'hotel');
       assert.strictEqual(e.seq, 2);
-      assert.strictEqual(e.prev, crypto.createHash('sha256').update(first.sig).digest('hex'));
+      assert.strictEqual(e.prev, crypto.createHash('sha256').update(Buffer.from(first.sig, 'base64url')).digest('hex'));
       assert.strictEqual(e.sig, att.sig);
       assert.strictEqual(e.sigAlg, 'ed25519');
       assert.strictEqual(e.verified, true);
@@ -231,19 +232,23 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
-  it('passes on only what the signature covers: CAT7 categories as signed strings, nothing a relay added', () => {
+  it('passes on only what the signature covers: the seven categories as signed, nothing a relay added; method and assertionId are signed', () => {
     withPair({}, ({ A, B, seen }) => {
-      // A signs a nested object as a category value: the signature covers its string form only.
-      const att = A._buildAdmissionAttestation('cmb-request-6', 'aligned', { ...verdicts, focus: { verdict: 'admit' } }, 'heuristic');
-      // A relay adds a category key and rewrites the method; neither is in the signed bytes.
-      const tampered = { ...att, method: 'neural', categories: { ...att.categories, recommendation: 'escalate' } };
-      assert.strictEqual(B._ingestAttestation(tampered, 'relay-node-id', 'housekeeping').ok, true, 'still verifies');
+      // A signs a nested object as a category value: sym-attest-v1 signs a non-text field as empty.
+      const att = A._buildAdmissionAttestation('cmb-request-6', 'aligned', { ...verdicts, focus: { verdict: 'admit' } }, 'heuristic', 'asrt-' + 'a'.repeat(64));
+      // A relay adds a category key: it is not in the signed bytes, and not passed on.
+      const padded = { ...att, categories: { ...att.categories, recommendation: 'escalate' } };
+      assert.strictEqual(B._ingestAttestation(padded, 'relay-node-id', 'housekeeping').ok, true, 'still verifies');
       const e = seen[0];
       assert.deepStrictEqual(Object.keys(e.categories), ['focus', 'issue', 'intent', 'motivation', 'commitment', 'perspective', 'mood']);
-      assert.strictEqual(e.categories.focus, '[object Object]', 'the signed form, not the object');
-      assert.strictEqual('method' in e, false, 'an unsigned method is never presented as signed');
-      assert.strictEqual(e.methodUnsigned, 'neural');
+      assert.strictEqual(e.categories.focus, null, 'the signed form (empty), not the object');
+      assert.strictEqual(e.method, 'heuristic');
+      assert.strictEqual(e.assertionId, 'asrt-' + 'a'.repeat(64));
       assert.deepStrictEqual(verifyAttestation(e, A._identity.publicKey), { signed: true, valid: true });
+      // 0.13 left `method` outside the signature; sym-attest-v1 signs it, and assertionId: rewriting either breaks it.
+      const next = A._buildAdmissionAttestation('cmb-request-6b', 'aligned', verdicts, 'heuristic', 'asrt-' + 'b'.repeat(64));
+      assert.strictEqual(B._ingestAttestation({ ...next, method: 'neural' }, 'relay-node-id', 'housekeeping').reason, 'bad-signature');
+      assert.strictEqual(verifyAttestation({ ...next, assertionId: 'asrt-' + 'c'.repeat(64) }, A._identity.publicKey).valid, false);
     });
   });
 
@@ -291,7 +296,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       signAttestation(att, A._identity.privateKey);
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
       const e = seen[0];
-      assert.strictEqual(e.prev, 'abc', 'a string, so no listener can change it under the next one');
+      assert.strictEqual(e.prev, null, 'a non-text field signs as empty and is shown as null');
       assert.strictEqual(e.role, null, 'no role was signed');
       assert.strictEqual(e.roleClaimed, 'participant', 'the claim roleMatches is computed against');
       assert.strictEqual(e.roleMatches, true);
@@ -302,16 +307,16 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
-  it("coerces an object-valued role claim, so it neither aliases the record nor fails to match", () => {
+  it("an object-valued role claim signs as no claim, so it neither aliases the record nor claims a rank", () => {
     withPair({ aOpts: { lifecycleRole: 'participant' } }, ({ A, B, seen }) => {
       const base = A._buildAdmissionAttestation('cmb-request-18', 'aligned', verdicts, 'heuristic');
-      const att = { ...base, role: ['participant'] }; // signs exactly as 'participant' does
+      const att = { ...base, role: ['anchor'] }; // sym-attest-v1 signs a non-text role as empty
       signAttestation(att, A._identity.privateKey);
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
       const e = seen[0];
-      assert.strictEqual(e.role, 'participant');
-      assert.strictEqual(e.roleClaimed, 'participant');
-      assert.strictEqual(e.roleMatches, true, 'a byte-identical claim matches');
+      assert.strictEqual(e.role, null, 'no text role was signed');
+      assert.strictEqual(e.roleClaimed, 'participant', 'so it claims nothing above participant');
+      assert.strictEqual(e.roleMatches, true);
       for (const [k, v] of Object.entries(e)) {
         if (k !== 'categories') assert.ok(v === null || typeof v !== 'object', `${k} is a primitive`);
       }
@@ -319,16 +324,17 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     });
   });
 
-  it('matches a numeric role claim against the same role resolved as a string', () => {
+  it('a numeric role claim signs as no claim (sym-attest-v1 signs text), and is shown as none', () => {
     withPair({}, ({ A, B, seen }) => {
       const base = A._buildAdmissionAttestation('cmb-request-21', 'aligned', verdicts, 'heuristic');
-      const att = { ...base, role: 2 }; // signs as '2'
+      const att = { ...base, role: 2 }; // sym-attest-v1: a non-text role signs as empty (0.13 signed '2')
       signAttestation(att, A._identity.privateKey);
       B.resolveRole = () => '2';
       assert.strictEqual(B._ingestAttestation(att, A.nodeId, 'concierge').ok, true);
-      assert.strictEqual(seen[0].roleClaimed, '2');
+      assert.strictEqual(seen[0].role, null);
+      assert.strictEqual(seen[0].roleClaimed, 'participant');
       assert.strictEqual(seen[0].roleResolved, '2');
-      assert.strictEqual(seen[0].roleMatches, true);
+      assert.strictEqual(seen[0].roleMatches, false);
       assert.deepStrictEqual(verifyAttestation(seen[0], A._identity.publicKey), { signed: true, valid: true });
     });
   });
@@ -466,12 +472,12 @@ describe('the witness storm', () => {
       node._gossipToRoster = (frame) => relayed.push(frame.type);
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
-      assert.deepStrictEqual(relayed, ['checkpoint', 'witness'], 'relayed once and witnessed once');
+      assert.deepStrictEqual(relayed, ['sym-attest-checkpoint', 'sym-attest-witness'], 'relayed once and witnessed once');
       const copy = (at) => signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }, WIT.priv, signWitness);
       assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, true);
       assert.strictEqual(node._ingestWitness(copy(2), 'node-wit').ok, false, 'a second signing of the same witness is not new');
       assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, false, 'nor is the first one, again');
-      assert.deepStrictEqual(relayed, ['checkpoint', 'witness', 'witness'], 'one relay per witness statement');
+      assert.deepStrictEqual(relayed, ['sym-attest-checkpoint', 'sym-attest-witness', 'sym-attest-witness'], 'one relay per witness statement');
       node._witnessCheckpoint(cp);
       assert.strictEqual(relayed.length, 3, 'this node does not sign a second copy of its own witness');
     });

@@ -51,19 +51,34 @@ in-memory pending set for grants that arrive before their root (which could be f
 - **The frame table.** `cmb` (plaintext) is refused (Legacy Import sessions only);
   `cmb-fetch` may name one `key` or up to 32 `keys`; each record found goes out as its own
   sealed `cmb-encrypted` frame, then one sealed `cmb-fetch-result` that carries only the
-  correlation id and the key lists, `{ reqId, found: [...], notFound: [...] }` (it carried the
-  record in the clear); `role-grant`/`role-revoke` are verified against
+  correlation id and the key lists, `{ reqId, returned: [...], missing: [...] }` (draft spec PR
+  #26; each key requested in exactly one list; it carried the record in the clear); `role-grant`/`role-revoke` are verified against
   the grant chain, never the delivering session; `peer-info` and `wake-channel` are learned only
   for the session's own nodeId (gossip about other nodes and the relay's peer list are hints,
   never stored); `message` is retired: `send()` sends a directed CMB whose signed application
   section marks it a message, and the receiver raises its `message` event from it;
-  `attestation`, `checkpoint`, `witness`, `node-stats` go only to sessions that selected
-  `sym-attest-v1`, `xmesh-insight` only with `xmesh-insight-v1`; `state-sync` is refused. Records
+  `xmesh-insight` goes only with `xmesh-insight-v1`; `state-sync` is refused. Records
   replayed as context on connect are announced in a sealed `cmb-anchors` frame (the `_anchor`
-  frame flag could not ride a sealed record).
+  frame flag could not ride a sealed record). The new wire elements that still need spec text
+  (`cmb-anchors`, `mesh-room-join`, `role-chain-fetch` / `role-chain`, relay error 4404) are
+  written out in `docs/WIRE-0.14.0.md`.
+- **Admission attestations are the `sym-attest-v1` extension** (draft spec PR
+  meshcognition-website#27). The frames are `sym-attest-attestation`, `sym-attest-checkpoint`,
+  `sym-attest-witness` and `sym-attest-node-stats`, sent only to sessions that selected the
+  extension; 0.13's bare `attestation` / `checkpoint` / `witness` / `node-stats` are refused on a
+  Core Secure session. The signed constructions are the extension's: each `lp`-encoded under its
+  own domain tag (`mmp-attest-v1`, `mmp-attest-checkpoint-v1`, `mmp-attest-witness-v1`), with
+  `method` and the record's `assertionId` signed; `room` and `uptoSeq` on the wire; `prev` the
+  SHA-256 of the previous signature's bytes; the checkpoint root a promote-odd Merkle tree with
+  leaf and node tags; node statistics carry no self-asserted name or nodeId and are attributed to
+  the session's peer. Every received frame is checked field by field before anything is spent.
+  **Breaking for readers of the `attestation-received` event:** `methodUnsigned` is now `method`
+  (signed), with `assertionId` and `room` added; a non-text field is shown as `null`. A chain kept
+  from 0.13 continues (its old links and checkpoints still reconcile).
 - **One key registry, an explicit conflict matrix.** No source ever overrides a different key
   (the 0.13 "strictly stronger source overrides" rule is gone). A different key for a bound
-  nodeId, from any source, is a conflict: refused, recorded (`roster-conflicts.jsonl`), shown in
+  nodeId, from any source, is a conflict: refused (a session that proves another key for a bound
+  nodeId is closed with error 1009 `IDENTITY_CONFLICT`, draft spec PR #21), recorded (`roster-conflicts.jsonl`), shown in
   `status().coreSecure.keyConflicts` and `sym status`; the operator resolves it
   (`sym keys <name> resolve <nodeId> <key>`). The configured anchor is read from configuration at
   every start and never persisted, so re-pinning it out of band takes effect. Every 0.13

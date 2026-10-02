@@ -354,8 +354,9 @@ describe('signature spelling', () => {
       const verdicts = { focus: 'admit', issue: 'admit', intent: 'admit', motivation: 'admit', commitment: 'admit', perspective: 'admit', mood: 'admit' };
       for (let i = 0; i < 200; i++) assert.ok(node._buildAdmissionAttestation(`cmb-own-${i}`, 'aligned', verdicts, 'heuristic'));
       node._ingestCheckpoint(signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint), 'p');
-      const own = sent.map((f) => f.attestation || f.checkpoint || f.witness).filter((x) => (x.by === node.nodeId));
-      assert.deepStrictEqual([...new Set(own.map((x) => x.type || 'attestation'))].sort(), ['attestation', 'checkpoint', 'witness']);
+      const ownFrames = sent.filter((f) => (f.attestation || f.checkpoint || f.witness).by === node.nodeId);
+      assert.deepStrictEqual([...new Set(ownFrames.map((f) => f.type))].sort(), ['sym-attest-attestation', 'sym-attest-checkpoint', 'sym-attest-witness']);
+      const own = ownFrames.map((f) => f.attestation || f.checkpoint || f.witness);
       assert.ok(own.every((x) => isCanonicalSig(x.sig)), 'every signature this node made is canonical');
       // A signer that wrote a short signature: refused at home, not only by peers.
       const realSign = crypto.sign;

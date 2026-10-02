@@ -46,8 +46,8 @@ function withNode(n, fn) {
 
 const checkpoint = (k, upto_seq, at = upto_seq) => signed({ type: 'checkpoint', by: k.id, roster: ROOM, upto_seq, root: `root-${k.id}-${upto_seq}`, at }, k.priv);
 function signed(fields, priv) { const o = { ...fields }; signCheckpoint(o, priv); return o; }
-const witnessesBy = (sent, node, attester) => sent.filter((f) => f.type === 'witness' && f.witness.by === node.nodeId && f.witness.attester === attester);
-const relayed = (sent, attester) => sent.filter((f) => f.type === 'checkpoint' && f.checkpoint.by === attester);
+const witnessesBy = (sent, node, attester) => sent.filter((f) => f.type === 'sym-attest-witness' && f.witness.by === node.nodeId && f.witness.attester === attester);
+const relayed = (sent, attester) => sent.filter((f) => f.type === 'sym-attest-checkpoint' && f.checkpoint.by === attester);
 
 describe('checkpoint rate — one attester', () => {
   it("a flooding attester's checkpoints past the bound are not stored, witnessed or relayed, whichever peers bring them", () => {
@@ -111,7 +111,7 @@ describe('checkpoint rate — one attester', () => {
         if (!node._ingestCheckpoint(next(keys[0]), 'hub').ok) refused++;
       }
       assert.strictEqual(refused, 0, 'every checkpoint was taken');
-      const own = sent.filter((f) => f.type === 'witness' && f.witness.by === node.nodeId).length;
+      const own = sent.filter((f) => f.type === 'sym-attest-witness' && f.witness.by === node.nodeId).length;
       assert.strictEqual(own, 1200 + 128 + 30, 'and witnessed');
     });
   });

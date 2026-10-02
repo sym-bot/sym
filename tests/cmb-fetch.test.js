@@ -37,7 +37,7 @@ function cat7(t) {
 
 // A peer as a confirmed session leaves it (Core Secure, 0.14): `sent` is what the node sends it,
 // before sealing. A fetch is answered by each record in its own sealed record frame, then a sealed
-// cmb-fetch-result carrying only the correlation id and the found / not-found key lists (design D1).
+// cmb-fetch-result carrying only the correlation id and the returned / missing key lists (design D1).
 const { admitAs } = require('./_core-secure');
 function fakePeer(node, peerId) {
   return admitAs(node, { nodeId: peerId, name: peerId });
@@ -45,7 +45,7 @@ function fakePeer(node, peerId) {
 /** Deliver a fetch answer on `session` as the server sends it: the record (if any), then the result. */
 function answer(node, session, reqId, key, cmb) {
   if (cmb) node._frameHandler.handle(session, { type: 'cmb', cmb });
-  node._frameHandler.handle(session, { type: 'cmb-fetch-result', reqId, found: cmb ? [key] : [], notFound: cmb ? [] : [key] });
+  node._frameHandler.handle(session, { type: 'cmb-fetch-result', reqId, returned: cmb ? [key] : [], missing: cmb ? [] : [key] });
 }
 
 describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
@@ -56,8 +56,8 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       node._frameHandler.handle(peer, { type: 'cmb-fetch', key: root.key, reqId: 'r1' });
       const res = peer.sent.find((f) => f.type === 'cmb-fetch-result');
       assert.ok(res, 'responds');
-      assert.deepStrictEqual(Object.keys(res).sort(), ['found', 'notFound', 'reqId', 'timestamp', 'type'], 'the id and the key lists, never the record (it was plaintext; §18.2.1)');
-      assert.deepStrictEqual([res.reqId, res.found, res.notFound], ['r1', [root.key], []]);
+      assert.deepStrictEqual(Object.keys(res).sort(), ['missing', 'reqId', 'returned', 'timestamp', 'type'], 'the id and the key lists, never the record (it was plaintext; §18.2.1)');
+      assert.deepStrictEqual([res.reqId, res.returned, res.missing], ['r1', [root.key], []]);
       assert.ok(peer.sent.findIndex((f) => f.type === 'cmb') < peer.sent.indexOf(res), 'the record goes first');
       const rec = peer.sent.find((f) => f.type === 'cmb');
       assert.strictEqual(rec.cmb.metadata.key, root.key);
@@ -67,12 +67,12 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
     });
   });
 
-  it('lists an unknown key as notFound, and sends no record', async () => {
+  it('lists an unknown key as missing, and sends no record', async () => {
     await withNode('cfetch-miss', async (node) => {
       const peer = fakePeer(node, 'peerX');
       node._frameHandler.handle(peer, { type: 'cmb-fetch', key: 'cmb1-doesnotexist', reqId: 'r2' });
       const res = peer.sent.find((f) => f.type === 'cmb-fetch-result');
-      assert.deepStrictEqual([res.found, res.notFound], [[], ['cmb1-doesnotexist']]);
+      assert.deepStrictEqual([res.returned, res.missing], [[], ['cmb1-doesnotexist']]);
       assert.strictEqual(peer.sent.filter((f) => f.type === 'cmb').length, 0);
     });
   });
@@ -166,7 +166,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
     });
   });
 
-  it('serves several keys in one request: each found record in its own frame, then one result', async () => {
+  it('serves several keys in one request: each returned record in its own frame, then one result', async () => {
     await withNode('cfetch-multi', async (node) => {
       const r1 = node.remember(cat7('the first record of a multi-key fetch about avalanche risk'));
       const r2 = node.remember(cat7('the second record of a multi-key fetch about lift closures'));
@@ -174,17 +174,17 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       node._frameHandler.handle(peer, { type: 'cmb-fetch', keys: [r1.key, 'cmb1-missing', r2.key, r1.key], reqId: 'm1' });
       assert.deepStrictEqual(peer.sent.map((f) => f.type), ['cmb', 'cmb', 'cmb-fetch-result']);
       const res = peer.sent[2];
-      assert.deepStrictEqual([res.found, res.notFound], [[r1.key, r2.key], ['cmb1-missing']], 'each key once');
+      assert.deepStrictEqual([res.returned, res.missing], [[r1.key, r2.key], ['cmb1-missing']], 'each key once');
     });
   });
 
-  it('a result that lists the key as found closes the request for that peer when no verifying record came first', async () => {
+  it('a result that lists the key as returned closes the request for that peer when no verifying record came first', async () => {
     await withNode('cfetch-found-nothing', async (node) => {
       const a = fakePeer(node, 'peerA');
       const p = node.fetchCMB('cmb1-claimed', { timeoutMs: 3000 });
       const reqId = [...node._cmbFetchPending.keys()][0];
       const t0 = Date.now();
-      node._frameHandler.handle(a, { type: 'cmb-fetch-result', reqId, found: ['cmb1-claimed'], notFound: [] });
+      node._frameHandler.handle(a, { type: 'cmb-fetch-result', reqId, returned: ['cmb1-claimed'], missing: [] });
       assert.strictEqual(await p, null);
       assert.ok(Date.now() - t0 < 1000, 'closed by the result, not by the timeout');
       assert.strictEqual(a._fetchExpect.size, 0, 'the expectation is let go');

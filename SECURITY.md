@@ -27,7 +27,8 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   order (replay, rollback, gap) closes the session, which re-handshakes.
 - **One key per nodeId.** The key registry binds a nodeId to the first key a proven session, an
   out-of-band pin (invite, Legacy Import route) or an anchor-rooted grant gives it, and never
-  replaces it: a different key from any source is a recorded conflict an operator resolves. The
+  replaces it: a different key from any source is a recorded conflict an operator resolves (a
+  session proving it is closed with error 1009 `IDENTITY_CONFLICT`). The
   one way a binding ends is churn: a first-contact binding that never verified anything expires
   after 30 days unseen (or gives way to a newcomer in a full registry), after which that nodeId is
   first contact again; a binding that ever verified something is kept for good.
@@ -41,6 +42,10 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
 - **Authority follows the key.** A role grant must name `granteeKey`; it confers its role only
   on that key, and a chain is verified top-down with each grant's vouched key. A grantor whose
   nodeId an impostor holds keeps exactly its vouched authority; the impostor gets none.
+- **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
+  signed under their own domain tags with every field covered, verified against the signer's bound
+  key (never the delivering session), and exchanged only with sessions that negotiated the
+  extension. They describe a decision; they never change the receiver's own.
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
   nobody.
@@ -114,5 +119,10 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   authority. A nodeId that has proven itself over Core Secure has its legacy route refused (a
   persisted floor) until an operator resets it. Network Legacy Import is removed in 0.15.0.
 - **Metadata.** The relay operator sees routing envelopes: who, to whom, room, timing, sizes.
+- **Attestations disclose decisions.** With `sym-attest-v1` (offered by default) every peer in the
+  room learns which records a node gated and what it decided; a content address is a confirmation
+  oracle for whoever holds the text. Leave the extension out (`extensions` option) where that
+  disclosure is not acceptable. An attestation proves who decided, not that the decision was
+  honest; the chain and witnesses make a forked history detectable, not impossible.
 - **A room name or relay token is not an enterprise trust boundary.** Anyone holding the token
   is in the channel, and an invite that carries a token is a secret.

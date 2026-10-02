@@ -60,6 +60,8 @@ function memoryPipe({ tap } = {}) {
       if (!other._closed) { other._closed = true; setImmediate(() => other.emit('close')); }
     };
     self.destroy = self.close;
+    // Close after what was sent has been delivered (as a socket's end() does).
+    self.end = () => { setImmediate(() => self.close()); };
   }
   return [a, b];
 }
