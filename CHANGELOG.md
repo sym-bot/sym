@@ -18,6 +18,13 @@ running node or the daemon, with one frame. Every node and every daemon should t
     signed, the rank the record needs, by the chain the node already holds. A record that is not
     rooted has no effect on any role, so it is not stored, not written and not relayed (and costs no
     signature check). A node without an anchor (the daemon, by default) keeps none;
+  - gossip has no order, so a grant or a revoke can arrive before the grant that roots its grantor,
+    and there is no grant sync to ask for it again. Such a record (refused only because its
+    grantor's key or grant has not arrived yet) waits in memory, at most 1,024 of them, the oldest
+    dropped first. It is never written or relayed while it waits and changes no role; when a record
+    that roots it is stored, it is stored, written and relayed too. So a node resolves the roles
+    0.13.16 did, whatever order the records arrive in (an early revoke still takes effect). What
+    waits is not kept across a restart;
   - the store looks grantor keys up through the roster's own lookup, on receipt and on reload alike;
   - reading the file never stops a node from starting. A record that cannot be verified (not JSON,
     malformed, unknown grantor key, bad signature, unrooted) is skipped and counted, and the node says
@@ -52,7 +59,54 @@ running node or the daemon, with one frame. Every node and every daemon should t
   not take left its connection open with no deadline, so a peer could hold sockets without limit. A
   nodeId is now a non-empty string or the announcement or connection is refused, a name is a string
   or `'unknown'`, a key is text or it is not pinned, and a wake channel is kept only as text
-  (`{ platform, token, environment }`), before anything stores, prints or passes them on.
+  (`{ platform, token, environment }`), before anything stores, prints or passes them on. A
+  `message`, `mood` or `xmesh-insight` frame's own `fromName` is taken the same way (it falls back to
+  the name the transport took); it was printed and passed on to listeners as given.
+- **A deeply nested frame crashed a node over the relay.** The relay measured a peer's payload by
+  serialising it again before the frame reached the guard. Serialising recurses once per level, so
+  a payload about 10,000 levels deep (24 KB, under every size bound) threw a RangeError out of the
+  socket callback, and the daemon exits on that. A `relay-error`'s message was printed as given, so
+  one that could not be turned into text threw the same way. Now:
+  - JSON a peer wrote that nests deeper than 128 levels is dropped before it is parsed, as malformed
+    JSON is: a LAN frame, a relay message, and the plaintext of an encrypted CMB. A frame that
+    parses can then always be serialised again, wherever the node keeps, relays, persists or
+    measures it;
+  - a `relay-error` is printed field by field (`kind`, `code`, `message`), each only when it has the
+    right type;
+  - every message off the relay socket goes through the inbound guard, the relay's own join notices
+    and peer list included (they carry what each joiner put in its relay-auth).
+- **The daemon checks each IPC message at the door, like a wire frame.** It must be a JSON object
+  with a string `type`, or it gets an error reply and goes no further, and nothing in it is printed
+  before that. A request that fails is answered with the error instead of only logged. (Naming a
+  failed request by a `type` that cannot be turned into text would make the error path itself throw
+  and stop the daemon.)
+- **A room peer could make a node keep more and more.** Each store a peer feeds now has one bound:
+  - wake channels: at most 1,024 in all, and at most 512 that one peer taught for nodes other than
+    itself. A node's own channel always has room, displacing the oldest gossiped one. Twenty
+    `peer-info` frames kept 5,120 channels before. `wake-channels.json` is written at most once a
+    second (and when the node stops), not once per frame. It is read back as a frame is: typed, and
+    within the same bound;
+  - wakes: the cooldown runs from the last attempt, so a failed wake is not tried again on the next
+    message. Every message and mood the daemon relays wakes every sleeping channel, and a node
+    without APNs keys fails every one, so each message logged a line per channel. At most 16 frames
+    wait for one sleeping peer, the oldest dropped first;
+  - per-peer state (room verdicts, the anchor debounce, E2E secrets and the key each was derived
+    from, identity keys, declared lifecycle roles): what is learned again from each connection's
+    handshake goes when the peer leaves. That is the lifecycle role, the derived-key cache, and an
+    admit verdict; a refusal verdict stays, since over the relay a refused peer can keep speaking.
+    Every such map holds at most 4,096 entries for peers that are not connected, the oldest dropped
+    first. A connected peer's entry is never dropped for room. The derived-key cache is one entry per
+    peer: one link re-sending its handshake with a new key each time had added one per handshake. A
+    lifecycle role is one of the named roles or it is not kept (it was kept as any JSON value);
+  - the roster's list of refused key rebindings: at most 256, each one kept once.
+- **The loopback scan threw on a registry file it could not use.** It runs in a timer and did
+  arithmetic and comparisons on registry file fields as read. Any process of the same user can write
+  that directory. A registration is now typed when it is read, or skipped.
+- **A refused LAN handshake could cost a connected peer its connection.** An inbound connection's
+  dedup ran before its admission was decided, so it could close the existing connection for the same
+  nodeId (as stale, or by the dual-dial tie-break), and only then refuse the new one. Admission is
+  now decided first. Nothing is learned from a refused handshake: no secret is derived, no key is
+  pinned, and nothing is read from its connection.
 
 ## 0.13.16 (2026-10-02)
 
