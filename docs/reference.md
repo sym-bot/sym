@@ -296,6 +296,23 @@ const node = new SymNode({
 });
 ```
 
+### The attestation audit trail: how much history is kept
+
+Every node keeps the admission attestations, checkpoints and witnesses it holds in `attestations/` in
+its node directory. Rotation keeps each live log bounded. When a log is rotated, the old one moves
+whole into `attestations/archive/`, and the archives hold the older history. They are pruned oldest
+first once a log's archives pass a bound: **128 MiB per log** by default, the newest archive included.
+**0 keeps every archive.** If you need the whole audit trail, set 0 and own the disk it takes.
+
+| Setting | Where | Meaning |
+|---------|-------|---------|
+| `SYM_ATTESTATION_ARCHIVE_MAX_BYTES` | environment (the daemon, any node) | bytes of archive kept per log; `0` keeps every archive |
+| `attestationArchiveMaxBytes` | `new SymNode({ ... })` | the same, for one node; wins over the environment |
+
+A value that is not a whole number of bytes ≥ 0 falls back to 128 MiB, and the node says so once in
+its log. One process writes a node's `attestations/` directory: the node's identity lock admits one
+process per node.
+
 ### CAT7 — the 7 universal fields
 
 Every memory block on the mesh is decomposed into 7 immutable fields. Per-agent weights decide which matter most to *your* agent:

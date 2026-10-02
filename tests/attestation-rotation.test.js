@@ -43,7 +43,7 @@ describe('attestation log rotation — when', () => {
   it('does not cascade when the records held exceed the budget', () => {
     const dir = tmpdir('att-rot-cascade-');
     // 200 held attestations are ~24 KB, twelve times the 2 KB budget.
-    const st = new AttestationStore({ dir, max: 200, rotateBytes: 2048, maxArchiveBytes: 1e9, log: () => {} });
+    const st = new AttestationStore({ dir, max: 200, rotateBytes: 2048, archiveMaxBytes: 1e9, log: () => {} });
     let appended = 0;
     const at = spyRotations(st, () => appended);
     for (let i = 1; i <= 3000; i++) { const a = att(i); st.record(a); appended += Buffer.byteLength(lineOf(a)); }
@@ -96,11 +96,11 @@ describe('attestation log rotation — at start', () => {
     const copies = [];
     for (let i = 0; i < 5000; i++) copies.push(lineOf({ type: 'witness', attester: 'A', upto_seq: 8, root: 'r8', by: 'W', sig: `copy-${i % 2}`, at: i % 2 }));
     fs.writeFileSync(path.join(dir, WIT), copies.join(''));
-    const st = new AttestationStore({ dir, rotateBytes: 8192, maxArchiveBytes: 1e9, log: () => {} });
+    const st = new AttestationStore({ dir, rotateBytes: 8192, archiveMaxBytes: 1e9, log: () => {} });
     assert.strictEqual(st._rotations[WIT], 1);
     assert.strictEqual(read(dir, WIT), copies[0], 'the live log holds the one witness held');
     assert.strictEqual(fs.readFileSync(path.join(dir, 'archive', archives(dir)[0]), 'utf8'), copies.join(''), 'the old log is archived whole');
-    const again = new AttestationStore({ dir, rotateBytes: 8192, maxArchiveBytes: 1e9, log: () => {} });
+    const again = new AttestationStore({ dir, rotateBytes: 8192, archiveMaxBytes: 1e9, log: () => {} });
     assert.strictEqual(again._rotations[WIT], 0, 'and the next start leaves it alone');
     assert.strictEqual(again.witnessesFor('A', 8).length, 1);
   });
@@ -169,7 +169,7 @@ describe('attestation log rotation — how', () => {
   function nearRotation(extra = {}) {
     const dir = tmpdir('att-rot-fail-');
     const said = [];
-    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, maxArchiveBytes: 1e9, log: (m) => said.push(m), ...extra });
+    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, archiveMaxBytes: 1e9, log: (m) => said.push(m), ...extra });
     let i = 0;
     st.record(att(++i));
     while (fs.statSync(path.join(dir, ATT)).size - st._held[ATT] + 130 <= Math.max(2048, st._held[ATT])) st.record(att(++i));
@@ -245,7 +245,7 @@ describe('attestation log rotation — how', () => {
       assert.ok(made >= 3, `${made} rotations`);
       assert.strictEqual(archives(dir).length, made, 'one archive per rotation');
       // A second store on the same directory rotating in turn with the first.
-      const other = new AttestationStore({ dir, max: 20, rotateBytes: 2048, maxArchiveBytes: 1e9, log: () => {} });
+      const other = new AttestationStore({ dir, max: 20, rotateBytes: 2048, archiveMaxBytes: 1e9, log: () => {} });
       let j = 100000;
       while (other._rotations[ATT] < 2) other.record(att(++j, 'B'));
       while (st._rotations[ATT] < made + 2) st.record(next());
@@ -280,7 +280,7 @@ describe('attestation log rotation — the archive bound', () => {
   it('holds including the newest archive', () => {
     const dir = tmpdir('att-rot-bound-');
     const bound = 12 * 1024;
-    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, maxArchiveBytes: bound, log: () => {} });
+    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, archiveMaxBytes: bound, log: () => {} });
     const at = spyRotations(st, () => 0);
     for (let i = 1; i <= 3000; i++) {
       st.record(att(i));
@@ -292,7 +292,7 @@ describe('attestation log rotation — the archive bound', () => {
 
   it('an archive that alone exceeds the bound is dropped too', () => {
     const dir = tmpdir('att-rot-bound1-');
-    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, maxArchiveBytes: 1024, log: () => {} });
+    const st = new AttestationStore({ dir, max: 20, rotateBytes: 2048, archiveMaxBytes: 1024, log: () => {} });
     for (let i = 1; i <= 200; i++) st.record(att(i));
     assert.ok(st._rotations[ATT] >= 1);
     assert.deepStrictEqual(archives(dir), [], 'nothing over the bound is kept, the newest included');
@@ -309,7 +309,7 @@ describe('attestation log rotation — the archive bound', () => {
       // Equal times for 9, 10 and 11; the newest made to look the oldest.
       fs.utimesSync(p, t, seq === 11 ? new Date('2026-09-01T00:00:00Z') : t);
     }
-    new AttestationStore({ dir, maxArchiveBytes: 2100, log: () => {} });   // a start holds the bound
+    new AttestationStore({ dir, archiveMaxBytes: 2100, log: () => {} });   // a start holds the bound
     assert.deepStrictEqual(archives(dir), [name(10), name(11)], 'the two newest by sequence are kept');
   });
 });

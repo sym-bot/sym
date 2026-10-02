@@ -144,6 +144,13 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   log already over its budget is rotated at once: the storm's 257 MB `witnesses.jsonl` is archived and,
   being over 128 MiB, deleted.
 
+  **The bound is configurable**, and the trade-off is yours. Rotation keeps the live log bounded
+  either way. The archives hold the older history and are pruned oldest first past the bound, unless
+  it is 0, which keeps every archive. Anyone who needs the whole audit trail sets 0 and owns the disk
+  it takes. Set it with `SYM_ATTESTATION_ARCHIVE_MAX_BYTES` (bytes per log), or with
+  `attestationArchiveMaxBytes` on `SymNode` (`archiveMaxBytes` on the store). A value that is not a
+  number of bytes ≥ 0 falls back to 128 MiB, and that is said once.
+
 ### Fixed — SVAF and the store
 
 - Anchor vectors are measured through a side map and are never written onto stored records, where a
