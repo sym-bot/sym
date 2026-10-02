@@ -69,6 +69,12 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
   metadata whole, as a copy.
 - **A frame written to a destroyed socket counted as sent (B-D6, residual).**
+- **A send that failed for any reason was reported as "not connected".** `sendFrame` and the
+  transports returned one `false` for a frame over the bound, a closed socket and a failed write.
+  `writeFrame` and the transports' `trySend` now say which (`too-large`, `not-connected`,
+  `write-failed`); `sendFrame` and `send` still return a boolean. A directed `remember()` that was not
+  sent carries `delivery.reason`, its log line names the reason, and a frame over the bound is counted
+  (`cmb-frame-too-large`). `shareWithPeers` counts only the peers a frame reached.
 - **Unsigned records are now counted (B-R3, interim).** They are still accepted as unverified for
   interop, but each is counted (`cmb-unsigned-received`) and the sending peer is named once in the
   log, so the emitters a signed-only default would cut off can be found first.
