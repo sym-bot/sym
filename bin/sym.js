@@ -23,7 +23,7 @@ const { recordCreatedBy } = require('../lib/record');
  *                                     #   --to <node>, --parents <keys>
  *   sym recall <query>                # Search mesh memory
  *   sym ask "<question>"              # Ask the whole mesh; get one synthesized answer
- *   sym insight                       # Get xMesh collective intelligence
+ *   sym insight                       # Get XMesh collective intelligence
  *   sym send <message>                # Send message to all peers
  *   sym room                         # Show current mesh room
  *   sym rooms                        # Discover rooms live on the LAN

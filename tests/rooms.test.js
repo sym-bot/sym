@@ -45,7 +45,7 @@ describe('mesh rooms', () => {
     });
   });
 
-  it('tenant-suffixed rooms are valid — the grammar xMesh scopes recipe rooms with (ruling 2026-08-26)', () => {
+  it('tenant-suffixed rooms are valid — the grammar XMesh scopes recipe rooms with (ruling 2026-08-26)', () => {
     for (const g of ['a--b', 'x-review--team-02779b950c3d8d7378fd11d6', 'eng-northbank--team-0123456789abcdef01234567']) {
       assert.strictEqual(isValidRoom(g), true, g);
       assert.strictEqual(serviceTypeToRoom(roomServiceType(g)), g, `string round-trip only (not mDNS registration) ${g}`);

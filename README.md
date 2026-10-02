@@ -102,12 +102,12 @@ Run `sym --help` for the full command surface.
 - **SYM** is the open runtime and CLI. It carries the complete open core in its own tree —
   records, signing, baseline admission, default coupling — with no closed dependency, and the
   admission and coupling engines are injectable.
-- **xMesh** is the agent mesh runtime built on this foundation. The free
+- **XMesh** is the agent mesh runtime built on this foundation. The free
   [Developer Runtime](https://www.npmjs.com/package/@sym-bot/xmesh) runs locally or in any pod,
   and a coding agent drives it through MCP (`xmesh-mcp`): offer a mission, follow the board.
 - **Enterprise:** visit **[xmesh.bot](https://xmesh.bot)**.
 
-The xMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
+The XMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
 mesh-channel are open source.
 
 ## Security, and what the relay can and cannot see
