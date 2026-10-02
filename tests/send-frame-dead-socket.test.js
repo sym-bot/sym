@@ -83,10 +83,13 @@ describe('a send that is not made says why (0.14.0 review B-F6)', () => {
       node.on('metric', (m) => metrics.push(m));
       // A connected peer whose transport refuses the frame as too large (a frame from a record the
       // bounds did not see, or a long relay envelope), and one whose transport only says whether.
-      const tooLarge = { on: () => {}, close: () => {}, send: () => false, trySend: () => ({ ok: false, reason: SEND_FAILURE.TOO_LARGE, bytes: MAX_FRAME_SIZE + 1 }) };
-      const opaque = { on: () => {}, close: () => {}, send: () => false };
-      node._addPeer(node._createPeer(tooLarge, 'peer-LARGE000', 'peer-large', false, 'bonjour'));
-      node._addPeer(node._createPeer(opaque, 'peer-OPAQUE00', 'peer-opaque', false, 'bonjour'));
+      // (Admitted sessions, as a confirmed handshake leaves them; their sends are made to fail.)
+      const { admitAs } = require('./_core-secure');
+      const tooLarge = admitAs(node, { nodeId: 'peer-LARGE000', name: 'peer-large' });
+      tooLarge.trySend = () => ({ ok: false, reason: SEND_FAILURE.TOO_LARGE, bytes: MAX_FRAME_SIZE + 1 });
+      const opaque = admitAs(node, { nodeId: 'peer-OPAQUE00', name: 'peer-opaque' });
+      delete opaque.trySend;
+      opaque.send = () => false;
 
       const a = node.remember({ focus: 'a directed send the transport refuses as too large' }, { to: 'peer-LARGE000' });
       assert.strictEqual(a.delivery.undelivered, true);

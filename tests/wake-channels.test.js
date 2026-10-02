@@ -3,10 +3,10 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * Wake channels: learned from the peer itself, the relay's list, or another peer's `peer-info`
- * gossip, which nothing authenticates. Every peer re-sends its whole list on every connect, so a
- * repeat must change nothing and log nothing; gossip must never repoint a phone's own token; and a
- * channel nobody has seen first-hand ages out however often it is forwarded.
+ * Wake channels (Core Secure, design D1): learned ONLY for a confirmed session's own nodeId — its
+ * `wake-channel` frame, or the entry naming itself in its `peer-info` — and so at 'direct'. What a
+ * peer says about other nodes, and the relay's peer list, are hints, never stored. The WakeManager's
+ * ranking, TTL and bounds (tested below at its own level) still hold for what is stored.
  */
 
 const { describe, it } = require('node:test');
@@ -16,6 +16,7 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { WAKE_CHANNEL_TTL_MS } = require('../lib/core/wake');
+const { admitAs } = require('./_core-secure');
 
 const DAY = 24 * 60 * 60 * 1000;
 const apns = (token) => ({ platform: 'apns', token, environment: 'sandbox' });
@@ -32,29 +33,30 @@ function withNode(fn) {
   try { return fn(node, { lines, writes: () => writes }); } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
 }
 
-describe('peer-info gossip', () => {
-  it('learns new channels with one line per frame, and a repeat of the same list is silent', () => {
+describe('peer-info', () => {
+  it('learns only the entry naming the sender itself; entries about other nodes are hints, never stored', () => {
     withNode((node, io) => {
       const now = Date.now();
+      const sender = admitAs(node, { nodeId: 'phone-1', name: 'melotune' });
       const frame = { type: 'peer-info', peers: [
-        { nodeId: 'phone-1', name: 'unknown', wakeChannel: apns('t1'), lastSeen: now - 1000 },
+        { nodeId: 'phone-1', name: 'melotune', wakeChannel: apns('t1'), lastSeen: now - 1000 },
         { nodeId: 'phone-2', name: 'unknown', wakeChannel: apns('t2'), lastSeen: now - 2000 },
       ] };
-      node._frameHandler._handlePeerInfo('peer-x', 'xmesh', frame);
-      assert.deepStrictEqual(io.lines.filter((l) => /Gossip/.test(l)), ['Gossip from xmesh: learned 2 wake channel(s)']);
+      node._frameHandler.handle(sender, frame);
+      assert.deepStrictEqual([...node._peerWakeChannels.keys()], ['phone-1']);
+      assert.strictEqual(node._peerWakeChannels.get('phone-1').source, 'direct');
       assert.strictEqual(io.writes(), 1);
-      for (let i = 0; i < 50; i++) node._frameHandler._handlePeerInfo('peer-x', 'xmesh', frame);
-      assert.strictEqual(io.lines.filter((l) => /Gossip/.test(l)).length, 1, 'a reconnect storm logs nothing more');
-      assert.strictEqual(io.writes(), 1, 'and writes nothing more');
-      assert.strictEqual(node._peerWakeChannels.get('phone-1').lastSeen, now - 1000, 'lastSeen is the sighting the frame carried');
+      for (let i = 0; i < 50; i++) node._frameHandler.handle(sender, frame);
+      assert.strictEqual(io.writes(), 1, 'a reconnect storm writes nothing more');
     });
   });
 
-  it('never replaces a token the phone gave us itself over a session that proved its key', () => {
+  it('never replaces a token the phone gave us itself, whatever another peer says', () => {
     withNode((node) => {
-      node._peerKeyProven = (id) => id === 'phone-1';
-      node._frameHandler._handleWakeChannel('phone-1', 'melotune', apns('own-token'));
-      node._frameHandler._handlePeerInfo('peer-x', 'mallory', { peers: [{ nodeId: 'phone-1', wakeChannel: apns('attacker'), lastSeen: Date.now() }] });
+      const phone = admitAs(node, { nodeId: 'phone-1', name: 'melotune' });
+      node._frameHandler.handle(phone, { type: 'wake-channel', ...apns('own-token') });
+      const mallory = admitAs(node, { nodeId: 'peer-x', name: 'mallory' });
+      node._frameHandler.handle(mallory, { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('attacker'), lastSeen: Date.now() }] });
       assert.strictEqual(node._peerWakeChannels.get('phone-1').token, 'own-token');
       assert.strictEqual(node._peerWakeChannels.get('phone-1').source, 'direct');
     });
@@ -138,62 +140,45 @@ describe('gossip sent and expiry', () => {
 });
 
 describe('relay peer list', () => {
-  it('learns from the relay with one line per list, silent on a repeat', () => {
+  it('is a hint: the channels it names (other nodes, from the relay) are never stored', () => {
     withNode((node, io) => {
-      const relayLines = [];
-      node._relay._log = (m) => relayLines.push(m);
       node._relay._setPhase = () => {};
-      const list = { type: 'relay-peers', peers: [
+      node._relay._handleRelayPeerJoined = () => {};
+      node._relay._handleRelayPeers({ type: 'relay-peers', peers: [
         { nodeId: 'phone-1', name: 'melotune', wakeChannel: apns('r1'), offline: true },
         { nodeId: 'phone-2', name: 'melomove', wakeChannel: apns('r2'), offline: true },
-      ] };
-      node._relay._handleRelayPeers(list);
-      node._relay._handleRelayPeers(list);
-      assert.deepStrictEqual(relayLines.filter((l) => /wake channel/.test(l)), ['Relay: learned 2 wake channel(s)']);
-      assert.strictEqual(io.writes(), 1, 'one write for the first list, none for the repeat');
-      assert.strictEqual(node._peerWakeChannels.get('phone-1').source, 'relay');
-    });
-  });
-
-  it('a gossiped token cannot repoint a channel the relay holds', () => {
-    withNode((node) => {
-      node._relay._learnWakeChannel('phone-1', apns('relay-token'), { source: 'relay' });
-      node._frameHandler._handlePeerInfo('peer-x', 'mallory', { peers: [{ nodeId: 'phone-1', wakeChannel: apns('attacker'), lastSeen: Date.now() }] });
-      assert.strictEqual(node._peerWakeChannels.get('phone-1').token, 'relay-token');
+      ] });
+      assert.strictEqual(node._peerWakeChannels.size, 0);
+      assert.strictEqual(io.writes(), 0);
     });
   });
 });
 
 describe('0.14.0 review F2/F3', () => {
-  it('a channel kept by 0.13.14 (no source) is not repointed by gossip, and the relay or the phone still can', () => {
+  it('a channel kept by 0.13.14 (no source) is not repointed by another peer\'s word, and the phone itself still can', () => {
     withNode((node) => {
       const wm = node._wakeManager;
       fs.mkdirSync(require('path').dirname(wm._wakeChannelsFile), { recursive: true });
       fs.writeFileSync(wm._wakeChannelsFile, JSON.stringify({ 'phone-1': apns('phones-own') }));
       wm.loadWakeChannels();
-      // A minute later, so the gossip is strictly newer than the load (the old ranking let it through).
       const later = Date.now() + 60_000;
       wm._now = () => later;
-      node._frameHandler.handle('peer-x', 'peer-x', { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('ATTACKER'), lastSeen: later }] });
-      assert.strictEqual(wm._peerWakeChannels.get('phone-1').token, 'phones-own', 'gossip cannot repoint it');
-      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('re-registered'), { source: 'relay' }), 'updated', 'the relay can');
-      assert.strictEqual(wm.learnWakeChannel('phone-1', apns('again'), { source: 'direct' }), 'updated', 'the phone can');
+      node._frameHandler.handle(admitAs(node, { nodeId: 'peer-x' }), { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: apns('ATTACKER'), lastSeen: later }] });
+      assert.strictEqual(wm._peerWakeChannels.get('phone-1').token, 'phones-own', 'another peer cannot repoint it');
+      node._frameHandler.handle(admitAs(node, { nodeId: 'phone-1' }), { type: 'wake-channel', ...apns('again') });
+      assert.strictEqual(wm._peerWakeChannels.get('phone-1').token, 'again', 'the phone can');
     });
   });
 
-  it('fabricated gossip is bounded: one frame reads at most 256 entries, and the map holds at most its cap', () => {
-    withNode((node, io) => {
+  it('fabricated gossip stores nothing at all, however large the frame', () => {
+    withNode((node) => {
       const wm = node._wakeManager;
-      wm._maxChannels = 300;
       wm.learnWakeChannel('real-phone', apns('own'), { source: 'direct' });
       const now = Date.now();
-      const flood = (from) => ({ type: 'peer-info', peers: Array.from({ length: 2000 }, (_, i) => ({ nodeId: `fake-${from}-${i}`, wakeChannel: apns(`f${i}`), lastSeen: now })) });
-      node._frameHandler.handle('peer-x', 'peer-x', flood('a'));
-      assert.strictEqual(wm._peerWakeChannels.size, 1 + 256, 'the first 256 entries of one frame');
-      assert.ok(io.lines.some((l) => /2000 entries, reading the first 256/.test(l)));
-      node._frameHandler.handle('peer-x', 'peer-x', flood('b'));
-      assert.strictEqual(wm._peerWakeChannels.size, 300, 'never past the cap');
-      assert.strictEqual(wm._peerWakeChannels.get('real-phone').token, 'own', 'gossip only displaces gossip');
+      const flood = { type: 'peer-info', peers: Array.from({ length: 2000 }, (_, i) => ({ nodeId: `fake-${i}`, wakeChannel: apns(`f${i}`), lastSeen: now })) };
+      node._frameHandler.handle(admitAs(node, { nodeId: 'peer-x' }), flood);
+      assert.strictEqual(wm._peerWakeChannels.size, 1);
+      assert.strictEqual(wm._peerWakeChannels.get('real-phone').token, 'own');
     });
   });
 
@@ -214,55 +199,33 @@ describe('0.14.0 review F2/F3', () => {
 
 // 0.14.0 release review, part B (F2-F4, F7, F8, F10, F12).
 describe('0.14.0 release review B: who may set a wake channel', () => {
-  it("a wake-channel frame from a session that proved nothing is trusted as gossip, never over the phone's own (F2)", () => {
+  it('a wake-channel frame is the session\'s own: it sets the proven peer\'s channel at the top rank (F2)', () => {
     withNode((node) => {
       const wm = node._wakeManager;
-      // The phone registered its channel through the relay (its own authenticated session).
-      wm.learnWakeChannel('phone-1', apns('phones-own'), { source: 'relay' });
-      // Mallory handshakes claiming the phone's nodeId and sends its own token.
-      node._frameHandler.handle('phone-1', 'mallory', { type: 'wake-channel', platform: 'apns', token: 'MALLORY', environment: 'sandbox' });
-      assert.strictEqual(node._peerWakeChannels.get('phone-1').token, 'phones-own', 'an unproven claim cannot repoint it');
-      // A channel only an unproven frame gave is held at the lowest rank: it repoints nothing above it.
-      node._frameHandler.handle('phone-2', 'phone-2', { type: 'wake-channel', platform: 'apns', token: 'p2', environment: 'sandbox' });
-      assert.strictEqual(node._peerWakeChannels.get('phone-2').source, 'unproven');
-      // A session that proved the key is the peer itself: top rank.
-      node._peerKeyProven = (id) => id === 'phone-1';
-      node._frameHandler.handle('phone-1', 'phone-1', { type: 'wake-channel', platform: 'apns', token: 'rotated', environment: 'sandbox' });
+      wm.learnWakeChannel('phone-1', apns('older'), { source: 'relay' });
+      node._frameHandler.handle(admitAs(node, { nodeId: 'phone-1' }), { type: 'wake-channel', platform: 'apns', token: 'rotated', environment: 'sandbox' });
       assert.deepStrictEqual([node._peerWakeChannels.get('phone-1').token, node._peerWakeChannels.get('phone-1').source], ['rotated', 'direct']);
     });
   });
 
-  it('this runtime proves no peer key at handshake, and a handshake cannot claim it did', () => {
+  it('an admitted Core Secure session has proved its key; nothing else has', () => {
     withNode((node) => {
       assert.strictEqual(node._peerKeyProven('anyone'), false);
-      const msg = { type: 'handshake', nodeId: 'x', name: 'x', publicKey: 'k', provenPublicKey: 'k' };
-      let seen = null;
-      node._roomAdmission = (peerId, m) => { seen = { ...m }; return { admit: true }; };
-      node._frameHandler.handle('x', 'x', msg);
-      assert.ok(seen, 'the admission check ran');
-      assert.strictEqual('provenPublicKey' in seen, false, 'a peer-supplied proof claim never reaches it');
     });
   });
 
-  it("a peer turns its own channel off with platform 'none'; gossip cannot turn off anyone's (F3)", () => {
+  it("a peer turns its own channel off with platform 'none'; another peer cannot turn off anyone's (F3)", () => {
     withNode((node, io) => {
-      const wm = node._wakeManager;
-      node._frameHandler.handle('phone-1', 'phone-1', { type: 'wake-channel', platform: 'apns', token: 't1', environment: 'sandbox' });
-      wm.learnWakeChannel('phone-2', apns('t2'), { source: 'relay' });
+      const phone = admitAs(node, { nodeId: 'phone-1' });
+      node._frameHandler.handle(phone, { type: 'wake-channel', platform: 'apns', token: 't1', environment: 'sandbox' });
       const before = io.writes();
-      node._frameHandler.handle('peer-x', 'mallory', { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: { platform: 'none' }, lastSeen: Date.now() }] });
-      assert.ok(node._peerWakeChannels.has('phone-1'), 'gossip cannot turn it off');
-      node._frameHandler.handle('phone-1', 'phone-1', { type: 'wake-channel', platform: 'none' });
+      node._frameHandler.handle(admitAs(node, { nodeId: 'peer-x', name: 'mallory' }), { type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: { platform: 'none' }, lastSeen: Date.now() }] });
+      assert.ok(node._peerWakeChannels.has('phone-1'), 'another peer cannot turn it off');
+      node._frameHandler.handle(phone, { type: 'wake-channel', platform: 'none' });
       assert.strictEqual(node._peerWakeChannels.has('phone-1'), false, 'the peer turned its own channel off');
       assert.strictEqual(io.writes(), before + 1, 'and it was saved');
-      // Not one held at a stronger rank than the frame: that takes the relay or a proven session.
-      node._frameHandler.handle('phone-2', 'phone-2', { type: 'wake-channel', platform: 'none' });
-      assert.ok(node._peerWakeChannels.has('phone-2'));
-      node._relay._setPhase = () => {};
-      node._relay._handleRelayPeers({ peers: [{ nodeId: 'phone-2', wakeChannel: { platform: 'none' }, offline: true }] });
-      assert.strictEqual(node._peerWakeChannels.has('phone-2'), false, "the relay's registration turned it off");
-      wm.loadWakeChannels();
-      assert.strictEqual(node._peerWakeChannels.size, 0, 'and neither comes back from the file');
+      node._wakeManager.loadWakeChannels();
+      assert.strictEqual(node._peerWakeChannels.size, 0, 'and it does not come back from the file');
     });
   });
 });
@@ -321,37 +284,19 @@ describe('0.14.0 release review B: every store and list is bounded', () => {
       const out = wm.gossipEntries('peer-x');
       assert.strictEqual(out.length, 256);
       assert.ok(out.every((e) => Number(e.nodeId.slice(1)) >= 44), 'the 256 most recently seen');
-      // A receiver reading a longer frame (from an older sender) says so once a minute, not per frame.
-      const long = { type: 'peer-info', peers: Array.from({ length: 300 }, (_, i) => ({ nodeId: `q${i}`, wakeChannel: apns('t'), lastSeen: now })) };
-      for (let i = 0; i < 20; i++) node._frameHandler.handle('peer-y', 'old-sender', long);
-      assert.strictEqual(io.lines.filter((l) => /entries, reading the first/.test(l)).length, 1);
     });
   });
 
-  it("the relay's peer list is read for its first 256 entries, and room is made without scanning the map (F12)", () => {
+  it("the relay's peer list is read for its first 256 entries (F12)", () => {
     withNode((node) => {
-      const wm = node._wakeManager;
       node._relay._setPhase = () => {};
       node._relay._log = () => {};
       let joined = 0;
       node._relay._handleRelayPeerJoined = () => { joined++; };
       const peers = Array.from({ length: 200000 }, (_, i) => ({ nodeId: `r${i}`, wakeChannel: apns(`t${i}`) }));
-      // Count steps over the channel map: making room must not walk it.
-      let steps = 0;
-      const map = node._peerWakeChannels;
-      for (const m of ['entries', 'keys', 'values', Symbol.iterator]) {
-        const real = map[m].bind(map);
-        map[m] = (...a) => { const it = real(...a); return { next: () => { steps++; return it.next(); }, [Symbol.iterator]() { return this; } }; };
-      }
-      wm._maxChannels = 100;
-      let saves = 0;
-      node._relay._saveWakeChannels = () => { saves++; };   // the one save per list serialises the map; counted apart
       node._relay._handleRelayPeers({ peers });
       assert.strictEqual(joined, 256, 'the first 256 entries');
-      assert.strictEqual(node._peerWakeChannels.size, 100, 'at the cap');
-      assert.strictEqual(steps, 0, 'and making room for 156 of them walked nothing');
-      assert.strictEqual(saves, 1);
-      assert.ok(node._peerWakeChannels.has('r255') && !node._peerWakeChannels.has('r0'), 'the least recently set went first');
+      assert.strictEqual(node._peerWakeChannels.size, 0, 'and no channel is learned from it');
     });
   });
 
@@ -384,9 +329,9 @@ describe('0.14.0 release review B: every store and list is bounded', () => {
     });
   });
 
-  it('a relay leg built without a wake manager does not throw on a peer list with channels (F8)', () => {
+  it('a relay leg does not throw on a peer list with channels (F8)', () => {
     const { RelayConnection } = require('../lib/relay');
-    const relay = new RelayConnection({ relayUrl: 'ws://127.0.0.1:1', token: 'x'.repeat(32), getIdentity: () => ({ nodeId: 'me' }), getPeers: () => new Map(), createPeer: () => ({}), addPeer: () => {}, log: () => {}, nodeName: 'n', peerWakeChannels: new Map(), saveWakeChannels: () => {} });
+    const relay = new RelayConnection({ relayUrl: 'ws://127.0.0.1:1', relayToken: 'x'.repeat(32), getIdentity: () => ({ nodeId: 'me' }), log: () => {}, nodeName: 'n' });
     relay._setPhase = () => {};
     relay._handleRelayPeerJoined = () => {};
     assert.doesNotThrow(() => relay._handleRelayPeers({ peers: [{ nodeId: 'p', wakeChannel: apns('t'), offline: true }] }));

@@ -90,16 +90,13 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
 
       const [tA, tB] = bidirectionalPair();
       // Wire inbound frames into each side's frame-handler.
-      tA.on('message', (frame) => nodeA._frameHandler.handle(nodeB.nodeId, bName, frame));
-      tB.on('message', (frame) => nodeB._frameHandler.handle(nodeA.nodeId, aName, frame));
 
       // Register each as a peer on the other.
-      nodeA._addPeer(nodeA._createPeer(tA, nodeB.nodeId, bName, true, 'bonjour'));
-      nodeB._addPeer(nodeB._createPeer(tB, nodeA.nodeId, aName, false, 'bonjour'));
+      nodeA.connectTransport(tA, { role: 'client', expectNodeId: nodeB.nodeId });
+      nodeB.connectTransport(tB, { role: 'server' });
 
-      // Handshake frames flow during _addPeer — give the async round-trip
-      // a moment to settle before emitting the CMB.
-      await new Promise(r => setTimeout(r, 300));
+      // The §5.2 handshake runs over the pair; the record is sent once both sides hold the session.
+      await waitFor(() => nodeA._peers.has(nodeB.nodeId) && nodeB._peers.has(nodeA.nodeId));
 
       // Record outcomes on the receiver side. Any of these events proves
       // the inbound frame reached the frame-handler and SVAF ran.
@@ -124,13 +121,9 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
       // mood-delivery (reject with non-neutral mood is the only way to see
       // a mood-delivered event; neutral rejects emit nothing, so we fall
       // back to checking for a frame arrival via peer.lastSeen drift).
-      const lastSeenBefore = nodeB._peers.get(nodeA.nodeId)?.lastSeen;
-      const proofOfProcessing = await waitFor(() => {
-        if (outcomes.memoryReceived) return true;
-        if (outcomes.moodDelivered) return true;
-        const lastSeenNow = nodeB._peers.get(nodeA.nodeId)?.lastSeen;
-        return lastSeenNow && lastSeenBefore && lastSeenNow > lastSeenBefore;
-      });
+      // (0.14: a liveness bump is no proof here — the session's own sealed control frames, sent as it
+      // is greeted, advance lastSeen too.)
+      const proofOfProcessing = await waitFor(() => !!(outcomes.memoryReceived || outcomes.moodDelivered));
       assert.ok(
         proofOfProcessing,
         'nodeB frame-handler must process the inbound CMB ' +
@@ -180,15 +173,11 @@ describe('E2E CMB path — MMP §4.2 / §4.4.4 / §9.2', () => {
 
       const [tA_B, tB_A] = bidirectionalPair();
       const [tA_C, tC_A] = bidirectionalPair();
-      tA_B.on('message', (f) => nodeA._frameHandler.handle(nodeB.nodeId, bName, f));
-      tB_A.on('message', (f) => nodeB._frameHandler.handle(nodeA.nodeId, aName, f));
-      tA_C.on('message', (f) => nodeA._frameHandler.handle(nodeC.nodeId, cName, f));
-      tC_A.on('message', (f) => nodeC._frameHandler.handle(nodeA.nodeId, aName, f));
 
-      nodeA._addPeer(nodeA._createPeer(tA_B, nodeB.nodeId, bName, true, 'bonjour'));
-      nodeA._addPeer(nodeA._createPeer(tA_C, nodeC.nodeId, cName, true, 'bonjour'));
-      nodeB._addPeer(nodeB._createPeer(tB_A, nodeA.nodeId, aName, false, 'bonjour'));
-      nodeC._addPeer(nodeC._createPeer(tC_A, nodeA.nodeId, aName, false, 'bonjour'));
+      nodeA.connectTransport(tA_B, { role: 'client', expectNodeId: nodeB.nodeId });
+      nodeA.connectTransport(tA_C, { role: 'client', expectNodeId: nodeC.nodeId });
+      nodeB.connectTransport(tB_A, { role: 'server' });
+      nodeC.connectTransport(tC_A, { role: 'server' });
 
       await new Promise(r => setTimeout(r, 300));
 

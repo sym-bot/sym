@@ -1,63 +1,46 @@
 'use strict';
 require('./_isolate-home');
 /**
- * NEVER IN THE CLEAR THROUGH THE RELAY. A peer reached only over the relay whose handshake
- * carried no E2E key used to receive CMB categories in plaintext, through a server that promises
- * it cannot read them. The sender now refuses: nothing is sent to that peer over the relay, the
- * refusal is logged once, and peers() says so. A LAN peer without a key still receives (the frame
- * never leaves the local network), and a relay peer WITH a key receives ciphertext.
+ * NEVER IN THE CLEAR, ON ANY TRANSPORT (Core Secure, sym 0.14). Until 0.14 a relay peer whose
+ * handshake carried no E2E key was refused records (0.13.7), while a LAN peer without one still got
+ * them in plaintext. A peer is now a confirmed §5.2 session, and a session seals every record
+ * (cmb-encrypted) and every other frame (control-encrypted): there is no keyless peer, and the LAN
+ * exception is gone. Checked on the wire of a LAN session and a relay session.
  */
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const crypto = require('crypto');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
-const { nodeDir } = require('../lib/config');
+const { nodeDirById } = require('../lib/config');
+const { connectNodes, until } = require('./_core-secure');
 
-async function withNode(fn) {
-  const name = `clear-refusal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const logs = [];
-  const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-  node._log = (m) => logs.push(String(m));
-  await node.start();
-  try { return await fn(node, logs); } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
-}
-function plant(node, peerId, source, name) {
-  const sent = [];
-  const transport = { send: (f) => sent.push(f), close: () => {} };
-  const transports = new Map([[source, transport]]);
-  node._peers.set(peerId, { peerId, name, transport, transports, source, lastSeen: Date.now() });
-  return sent;
-}
+const SEALED_OR_HANDSHAKE = new Set(['client-hello', 'server-hello', 'client-finish', 'cmb-encrypted', 'control-encrypted', 'ping', 'pong']);
 
-describe('never in the clear through the relay', () => {
-  it('a relay-only peer with no key gets nothing; a LAN peer without a key still gets the frame; a keyed relay peer gets ciphertext', async () => {
-    await withNode(async (node, logs) => {
-      const relayNoKey = plant(node, 'r'.repeat(32), 'relay', 'stranger-old-engine');
-      const lanNoKey = plant(node, 'l'.repeat(32), 'bonjour', 'lan-old-engine');
-      const relayKeyed = plant(node, 'k'.repeat(32), 'relay', 'relay-current');
-      node._peerSharedSecrets.set('k'.repeat(32), crypto.randomBytes(32));
-
-      node.remember({ focus: 'the content the relay must never see' });
-
-      assert.strictEqual(relayNoKey.filter((f) => f.type === 'cmb').length, 0, 'relay peer without a key must receive no CMB');
-      assert.strictEqual(lanNoKey.filter((f) => f.type === 'cmb').length, 1, 'LAN peer without a key still receives (never leaves the LAN)');
-      const keyed = relayKeyed.filter((f) => f.type === 'cmb');
-      assert.strictEqual(keyed.length, 1);
-      assert.strictEqual(typeof keyed[0].cmb.categories, 'string', 'relay peer with a key receives ciphertext, not an object');
-      assert.ok(keyed[0].cmb._e2e && keyed[0].cmb._e2e.nonce, 'ciphertext carries its nonce');
-
-      // Said once, with the peer named, and visible in peers().
-      const refusals = logs.filter((m) => m.includes('Refused to send in the clear through the relay'));
-      assert.strictEqual(refusals.length, 1);
-      assert.ok(refusals[0].includes('stranger-old-engine'));
-      node.remember({ focus: 'a second share' });
-      assert.strictEqual(logs.filter((m) => m.includes('Refused to send in the clear')).length, 1, 'logged once per peer, not per frame');
-      const byName = Object.fromEntries(node.peers().map((p) => [p.name, p]));
-      assert.deepStrictEqual([byName['stranger-old-engine'].e2e, byName['stranger-old-engine'].clearRefused], [false, true]);
-      assert.deepStrictEqual([byName['relay-current'].e2e, byName['relay-current'].clearRefused], [true, false]);
-      assert.deepStrictEqual([byName['lan-old-engine'].e2e, byName['lan-old-engine'].clearRefused], [false, false]);
+describe('never in the clear, on any transport', () => {
+  for (const kind of ['bonjour', 'relay']) {
+    it(`a ${kind} session carries no plaintext record and no category text`, async () => {
+      const a = new SymNode({ name: `clear-a-${kind}-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+      const b = new SymNode({ name: `clear-b-${kind}-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+      const wire = [];
+      await a.start(); await b.start();
+      try {
+        await connectNodes(a, b, { kind, tap: (f) => wire.push(f) });
+        const heard = [];
+        b.on('verified-record', (e) => heard.push(e));
+        a.remember({ focus: 'the content no transport may carry in the clear' });
+        a.broadcastMood('a mood is content too');
+        await until(() => heard.length > 0);
+        assert.strictEqual(heard.length, 1, 'the record arrived');
+        assert.deepStrictEqual(wire.filter((f) => !SEALED_OR_HANDSHAKE.has(f.type)).map((f) => f.type), [], 'every frame after the handshake was sealed');
+        const text = JSON.stringify(wire);
+        assert.ok(!text.includes('the content no transport may carry'), 'no category text on the wire');
+        assert.ok(!text.includes('a mood is content too'), 'no mood text on the wire');
+        assert.strictEqual(a.peers().find((p) => p.peerId === b.nodeId).e2e, true);
+      } finally {
+        await a.stop(); await b.stop();
+        for (const n of [a, b]) fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true });
+      }
     });
-  });
+  }
 });

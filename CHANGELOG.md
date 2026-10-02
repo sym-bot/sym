@@ -2,9 +2,158 @@
 
 ## 0.14.0 (unreleased)
 
-A minor version because one change breaks readers outside sym: the store's annotations moved from
-the stored record to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and
-its follow-ups) and 0.13.17 (the inbound-frame security hotfix).
+**Core Secure.** 0.14.0 makes every sym node an MMP v2.0 Core Secure participant (design
+"Core Secure identity: a peer is a proven session, never a hint", v2, 2026-10-02). It breaks the
+wire with 0.13 and older: a 0.13 node is reached only through an explicit Legacy Import route
+(below). It also breaks readers outside sym: the store's annotations moved from the stored record
+to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and its
+follow-ups) and 0.13.17 (the inbound-frame security hotfix).
+
+### Core Secure — breaking
+
+- **A peer is a proven session.** A sym peer used to exist before anything was proven about it: on
+  TCP connect, on any first `handshake` frame (whose keys were pinned), on a relay's
+  `relay-peer-joined`. Now every transport — LAN TCP, loopback, relay — runs the MMP §5.2
+  handshake (client-hello → server-hello → client-finish, both proofs, key confirmation), and a
+  peer is the set of confirmed sessions that proved one nodeId with one identity key. Every
+  per-peer structure is keyed by the proven nodeId; a name is a label. The listener takes
+  `client-hello` first and nothing else; a legacy `handshake` is refused at once (counted,
+  said once a minute per address). Over the relay the node with the smaller nodeId sends
+  `client-hello` in an envelope; a relay session is bound to the relay `from` it was made on (a
+  hello naming another nodeId is refused),
+  torn down on `relay-peer-left`, superseded by a newer confirmed session for the same (nodeId,
+  key) (a restart under 4004), and never torn down by an unconfirmed hello. 10 s timeout.
+- **Discovery advertises the profile.** TXT `mmp=2.0` and `room=<room>` (and the same in the
+  loopback registry). A record without `mmp=2.0` is a legacy node: never dialled as Core Secure.
+  The lexicographically smaller nodeId dials (§5.1).
+- **Ephemeral E2E, sealed frames.** The persistent X25519 key (`e2e-keypair.json`) and the
+  per-peer shared-secret map are gone: each handshake uses a fresh X25519 key pair and derives
+  directional keys (§5.2.1). Records travel only as `cmb-encrypted` (§18.2.1), one sealed frame
+  per peer session. Every other post-handshake frame except ping/pong/error travels sealed as
+  `control-encrypted` (`mood` included: it is cognitive content). The receive counter advances
+  only after the AEAD opens (it advanced first, so one forged frame with the right sequence
+  desynchronised a session); a gap or replay closes the session and re-handshakes.
+- **Records are v2.0** (`MMP_EMIT_V2` on). Every record is signed `mmp-sig-v2.0` with the signed
+  author `createdByNodeId`; the receiver resolves the author key by `createdByNodeId` through
+  the key registry. An unsigned, legacy-suite or unresolvable record is refused (a legacy-suite
+  one on its own metric, `cmb-legacy-suite-refused`: old history is not counted as a forgery).
+  **Release
+  note (M12):** "X via Y" deliveries from authors this node has never proven, and no grant
+  vouches, no longer surface. That is §18.3.1's rule, not a regression.
+- **Binding from the signed `metadata.to`.** Directed versus room-bound (§9.2.2) is the record's
+  signed, AAD-bound `metadata.to`; the frame flags `to`/`directed` are no longer read. A
+  `remember({ payload })` payload now rides as the record's signed application section (§8.8.3)
+  and is given back to the receiver as `cmb.payload`.
+- **The frame table.** `cmb` (plaintext) is refused (Legacy Import sessions only);
+  `cmb-fetch` may name one `key` or up to 32 `keys`; each record found goes out as its own
+  sealed `cmb-encrypted` frame, then one sealed `cmb-fetch-result` that carries only the
+  correlation id and the key lists, `{ reqId, found: [...], notFound: [...] }` (it carried the
+  record in the clear); `role-grant`/`role-revoke` are verified against
+  the grant chain, never the delivering session; `peer-info` and `wake-channel` are learned only
+  for the session's own nodeId (gossip about other nodes and the relay's peer list are hints,
+  never stored); `message` is retired: `send()` sends a directed CMB whose signed application
+  section marks it a message, and the receiver raises its `message` event from it;
+  `attestation`, `checkpoint`, `witness`, `node-stats` go only to sessions that selected
+  `sym-attest-v1`, `xmesh-insight` only with `xmesh-insight-v1`; `state-sync` is refused. Records
+  replayed as context on connect are announced in a sealed `cmb-anchors` frame (the `_anchor`
+  frame flag could not ride a sealed record).
+- **One key registry, an explicit conflict matrix.** No source ever overrides a different key
+  (the 0.13 "strictly stronger source overrides" rule is gone). A different key for a bound
+  nodeId, from any source, is a conflict: refused, recorded (`roster-conflicts.jsonl`), shown in
+  `status().coreSecure.keyConflicts` and `sym status`; the operator resolves it
+  (`sym keys <name> resolve <nodeId> <key>`). The configured anchor is read from configuration at
+  every start and never persisted, so re-pinning it out of band takes effect. Every 0.13
+  `handshake` entry becomes `legacy-claim` on first load: the expected key, never one that
+  verifies; a proven session presenting it binds `proven`, one presenting another key is a
+  conflict. `roster-keys.jsonl` gets a version marker line (a 0.13 rollback skips it).
+- **Authority follows the key.** `resolveRole(nodeId, key, at)`: a grant confers its role only on
+  the key its `granteeKey` names. Grant chains are verified top-down with the key each verified
+  grant vouches, never the registry's key for the grantor. Every role-grant carries `granteeKey`
+  (one without it is malformed), and `grantRole` refuses a grantee with no proven or pinned key
+  (or pass `{ granteeKey }`).
+- **Room admission on proven keys.** A gated room admits its owner by its pinned key and a grantee
+  whose room-join grant binds the key its session proved (the grant is presented in a sealed
+  `mesh-room-join` frame); `roomGate().admits` is now `grant-holders`. The `provenPublicKey`
+  strip and the "refuses everyone" fallback are gone.
+- **The Class 1 emitter speaks Core Secure.** `sym emit` / `lib/emit.js` run the v2 handshake
+  and send sealed records. The room is explicit: an emitter that names none is in `default`, and
+  a node in another room refuses it at the handshake.
+
+### Core Secure — new API (for hosts: xmesh, mesh-channel)
+
+- `node.on('verified-record', ({ record, session, verification }) => …)`: every record that
+  passed §8.8.5, with the proven session facts (`nodeId`, `name`, `identityKey`, `sessionId`,
+  `transport`, `role`, `room`, `extensions`, `confirmedAt`, `implementation`, `profile`) and
+  `verification` (`suite`, `assertionId`, `authorNodeId`, `authorName`, `authorKey`,
+  `authorKeySource`, `audience`, `room`, `to`, `relayed`, `anchor`). Hosts no longer reach into
+  `_frameHandler`, `_peerSharedSecrets` or `_identityKey`; `frame-received` (raw, unverified
+  frames) is removed.
+- `loadIdentity({ nodeId | name, create })` and `new SymNode({ name, nodeId, create })`:
+  identities live at `nodes/by-id/<nodeId>/` with the name as an index; `create: false` throws
+  `EIDENTITYABSENT` instead of minting; a tombstoned identity throws `EIDENTITYTOMBSTONED`.
+  `renameIdentity(old, new)` moves the index, never the identity. A 0.13 `nodes/<name>/`
+  directory moves once, idempotently, and `nodes/<name>` stays as a symlink for one release so a
+  0.13 rollback reads the old path.
+- `sym node export <name> --out <file> (--passphrase-env VAR | --to-host <key>)` tombstones the
+  node, then writes its encrypted bundle; `sym node import <file> --expect-node <id>
+  [--expect-key <k> | --expect-fingerprint sha256:…]` verifies it against an independently
+  pinned key (or this host's key registry) and refuses a re-keyed bundle; `sym node host-key`.
+- `node.interior()`: the interior submission path for the node's mind — `startMind({ kinds,
+  allowTo, ratePerMinute })` issues a per-mission capability (`queueMind` waits its turn; one
+  mind per node), `submit(capability, { kind, categories, to, parents, payload })` and the
+  interior socket (`listen()`, newline JSON) check audience, size (64 KiB text, 512 KiB
+  application), rate, declared kinds and lineage before the node signs; `endMind` revokes.
+- `node.connectTransport(transport, { role, expectNodeId })` runs the handshake over a transport
+  the host provides; `node.inviteURL()` and `node.acceptInvite(url)` (invites carry the issuer's
+  `node` and `key`; accepting pins the issuer only where that nodeId is unbound); `lib/invite.js`.
+- `sym keys <name> [conflicts | resolve | reset-floor]`.
+
+### Legacy Import (temporary: network Legacy Import is removed in 0.15.0)
+
+- Off by default. A route (`legacyRoutes: [{ nodeId, endpoint: 'host:port' | 'relay', key |
+  fingerprint }]`, or `legacy-routes.json` in the node dir) names a 0.13 peer; the identity key
+  fingerprint is mandatory and is pinned. This node always dials a route itself and never accepts
+  a legacy hello. Over the relay it sends its legacy hello to the routed nodeId, and takes only
+  records whose signature verifies against the pinned key.
+- What it sends on a legacy session: its records as legacy `cmb` under the legacy E2E
+  construction (never plaintext). `sym status` says the session uses legacy encryption, with no
+  forward secrecy and no transcript proof. Everything received is stored `verified: false`,
+  `profile: 'legacy-import'`, never given authority. Connection-level frames are hints.
+- The sticky floor is the registry's persisted proven binding: once a nodeId has proven itself
+  over Core Secure its route is refused until an operator reset (`sym keys <name> reset-floor`).
+
+### Removed
+
+- The daemon's `register` virtual nodes, `register-agent` hosted agents and `agent-cmb` path
+  (which broadcast a plain `cmb` with a client-supplied `from`): one agent, one node; a node's
+  mind uses its interior. Local clients send `hello` and subscribe with `listen`.
+- `_peerSharedSecrets`, `_pinPeerKey`, `_peerIdentityKeys`, `_deriveAndStoreSecret`,
+  `_buildHandshake` (outside Legacy Import), `_createPeer`/`_addPeer`, per-connection gossip
+  lanes (the gossip budget is kept per proven peer), the `frame-received` event, `state-sync`.
+
+### Relay
+
+- **4006 and 4007 are hard stops, like 4004.** The client did not handle 4006 (§4.4.7: the
+  existing holder is the legitimate one) and retried it at the normal backoff. Now 4006, and 4007
+  (draft MMP spec PR meshcognition-website#20: the relay binds this nodeId to a different key) are
+  said once, loudly, kept in `state().stopped` / `status().relayState.stopped` with phases
+  `duplicate-rejected` and `key-conflict`, reported to the host (`identity-collision` with `code`
+  and `kind`, and a `relay-hard-stop` metric), and never reconnected. relay-auth v2 (the
+  challenge in that PR) is not implemented until it merges.
+- A relay socket that `destroy()` let go no longer schedules a reconnect when its close arrives
+  (a stopped node object kept redialling when its host reported it still running).
+- The client paces everything it sends under sym-relay's limit (25 frames/s, burst 300, then
+  4008) at 20 frames/s, burst 200, and uses the fan-out envelope `{ fanout: [{ to, payload }] }`
+  (one message for many recipients, at most 64 entries, never a recipient twice) when the relay
+  lists `fanout` in `relay-peers.features` (MMP spec draft PR meshcognition-website#25) —
+  sym-relay 0.6.0.
+
+### Known limits (design §5, said in README and SECURITY.md)
+
+- First contact with no anchor, invite or grant is trust on first proven use.
+- Relay eviction: `relay-auth` is unproven and 4004 lets a token holder evict a node; an evicted
+  node re-handshakes and a squatter gets no session.
+- No key rotation (§3.4). A same-user process can read identity files.
 
 Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
 debt, and the daemon's log flood. Every item has a test that fails without its fix.

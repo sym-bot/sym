@@ -30,7 +30,7 @@ function bidirectionalPair() {
   const b = {};
   const mk = (self, peer) => ({
     on: (ev, fn) => { self[ev] = fn; },
-    send: (frame) => setImmediate(() => { if (peer.message) peer.message(frame); }),
+    send: (frame) => { const copy = JSON.parse(JSON.stringify(frame)); setImmediate(() => { if (peer.message) peer.message(copy); }); return true; },
     close: () => { if (self.close) self.close(); },
   });
   return [mk(a, b), mk(b, a)];
@@ -59,12 +59,14 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   await nodeA.start();
   await nodeB.start();
 
+  // Core Secure (0.14): the pair proves itself through the real §5.2 handshake over the pipe;
+  // neither is a peer of the other until both proofs validate.
   const [tA, tB] = bidirectionalPair();
-  tA.on('message', (frame) => nodeA._frameHandler.handle(nodeB.nodeId, bName, frame));
-  tB.on('message', (frame) => nodeB._frameHandler.handle(nodeA.nodeId, aName, frame));
-  nodeA._addPeer(nodeA._createPeer(tA, nodeB.nodeId, bName, true, 'bonjour'));
-  nodeB._addPeer(nodeB._createPeer(tB, nodeA.nodeId, aName, false, 'bonjour'));
-  await new Promise((r) => setTimeout(r, 400)); // let the handshake round-trip settle
+  nodeB.connectTransport(tB, { role: 'server' });
+  nodeA.connectTransport(tA, { role: 'client', expectNodeId: nodeB.nodeId });
+  if (!(await waitFor(() => nodeA._peers.has(nodeB.nodeId) && nodeB._peers.has(nodeA.nodeId), 10000))) {
+    throw new Error('the two nodes did not complete the Core Secure handshake');
+  }
 
   const received = [];
   nodeB.on('memory-received', (evt) => received.push(evt));

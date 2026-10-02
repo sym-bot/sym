@@ -27,7 +27,7 @@ const crypto = require('node:crypto');
 const { SymNode } = require('../lib/node');
 const { BonjourDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { verifyCMB, signCMB, createCMB } = require('../lib/core');
+const { verifyCMB, signCMB, createCMB, assertionIdV2_0 } = require('../lib/core');
 
 const ROOM = 'p6group';
 
@@ -112,6 +112,9 @@ test('P-6: a pre-boundary block is REFUSED — grandfathering is retired', async
     // forgery counter must not see ordinary history in it. Refused is not the same as forged.
     assert.equal(metrics.filter((m) => m.type === 'cmb-signature-rejected').length, 0,
       'a legacy block MUST NOT increment the forgery counter — refusing it is not accusing it');
+    // sym 0.14 (Core Secure): it is refused before any verification as a legacy-suite record, and
+    // counted on its own metric.
+    assert.equal(metrics.filter((m) => m.type === 'cmb-legacy-suite-refused').length, 1);
   });
 });
 
@@ -122,8 +125,10 @@ test('P-6: the OTHER arm — a genuinely bad signature is still rejected as forg
     const victimPub = victim.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64url');
     node._identityKey = () => victimPub;
 
-    // A well-formed v2 record signed by SOMEONE ELSE — the forgery case.
-    const cmb = createCMB({ categories: LEGACY_FIELDS, createdBy: 'impostor@p6group', room: ROOM });
+    // A well-formed v2.0 record (the only suite Core Secure verifies, sym 0.14) naming the victim's
+    // nodeId as author, signed by SOMEONE ELSE — the forgery case.
+    const cmb = createCMB({ categories: LEGACY_FIELDS, createdBy: 'impostor@p6group', createdByNodeId: 'victim-node', room: ROOM, emitV2: true });
+    cmb.metadata.assertionId = assertionIdV2_0(cmb);
     const attacker = crypto.generateKeyPairSync('ed25519');
     const attackerPriv = attacker.privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32).toString('base64url');
     signCMB(cmb, attackerPriv);

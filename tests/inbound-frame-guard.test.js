@@ -14,6 +14,10 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
  *     node has no insight engine.
  * Every inbound frame now goes through one guarded dispatch, whatever carried it: a frame the node
  * cannot handle is refused and counted, never thrown out of the transport.
+ *
+ * Since 0.14 (Core Secure) a frame reaches that dispatch only from a confirmed session, so these
+ * drive real sessions: two nodes over a fake relay, and over a LAN TCP connection. A plaintext frame
+ * from an unproven relay `from` is refused before it, and the process survives that too.
  */
 
 const { describe, it } = require('node:test');
@@ -28,6 +32,8 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { sendFrame } = require('../lib/frame-parser');
+const { fakeRelay } = require('./_fake-relay');
+const { admitAs } = require('./_core-secure');
 
 const uniq = (base) => `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 const until = async (cond, ms = 5000) => { for (let t = 0; t < ms && !cond(); t += 20) await new Promise((r) => setTimeout(r, 20)); };
@@ -42,70 +48,64 @@ function throwOnce(seen) {
 }
 
 describe('every inbound frame goes through one guarded dispatch (G2, C3)', () => {
+  async function exercise(a, b) {
+    const seen = [];
+    const moods = [];
+    b.on('message', throwOnce(seen));
+    b.on('mood-delivered', (d) => moods.push(d));
+    b.on('mood-rejected', (d) => moods.push(d));
+    a.send('first', { to: b.nodeId });
+    a.broadcastMood('exhausted after a long debugging session');
+    a.send('second', { to: b.nodeId });
+    await until(() => seen.length >= 2 && moods.length >= 1);
+    return { seen, moods };
+  }
+
   it('relay: a frame whose handling throws is refused and counted; the process and the relay link survive', async () => {
     const uncaught = [];
     const onUncaught = (err) => uncaught.push(err);
     process.on('uncaughtException', onUncaught);
-    const evil = 'e'.repeat(64);
-    const wss = new WebSocketServer({ port: 0 });
-    wss.on('connection', (ws) => ws.on('message', (m) => {
-      if (JSON.parse(String(m)).type !== 'relay-auth') return;
-      const send = (payload) => ws.send(JSON.stringify({ from: evil, fromName: 'evil', payload }));
-      send({ type: 'message', content: 'first' });
-      send({ type: 'mood', mood: 'exhausted after a long debugging session', fromName: 'evil' });
-      send({ type: 'message', content: 'second' });
-    }));
-    const name = uniq('guard-relay');
-    const node = new SymNode({ name, silent: true, relayOnly: true, relay: `ws://127.0.0.1:${wss.address().port}`, relayToken: 'x'.repeat(40), room: 'g' });
-    const seen = [];
-    const moods = [];
-    node.on('message', throwOnce(seen));
-    node.on('mood-delivered', (d) => moods.push(d));
-    node.on('mood-rejected', (d) => moods.push(d));
+    const relay = fakeRelay();
+    const mk = (n) => new SymNode({ name: uniq(n), silent: true, relayOnly: true, discovery: new NullDiscovery(), relay: relay.url, relayToken: 'x'.repeat(40), room: 'g' });
+    const a = mk('guard-relay-a'); const b = mk('guard-relay-b');
     try {
-      await node.start();
-      await until(() => seen.length >= 2);
+      await a.start(); await b.start();
+      await until(() => a._peers.has(b.nodeId) && b._peers.has(a.nodeId), 8000);
+      // A plaintext frame from an unproven relay `from` is refused before the dispatch.
+      relay.inject('e'.repeat(64), b.nodeId, { type: 'mood', mood: 'evil', fromName: 'evil' });
+      const { seen, moods } = await exercise(a, b);
       assert.deepStrictEqual(uncaught, [], 'nothing reached uncaughtException');
       assert.deepStrictEqual(seen, ['first', 'second'], 'the frame after the refused one is still dispatched');
       assert.strictEqual(moods.length, 1, 'the mood frame is evaluated, not thrown');
-      const m = node.metrics();
+      const m = b.metrics();
       assert.strictEqual(m.framesRefused, 1);
-      assert.deepStrictEqual(m.framesRefusedByType, { message: 1 });
-      assert.strictEqual(node.status().relayConnected, true, 'the relay link is still up');
+      assert.deepStrictEqual(m.framesRefusedByType, { cmb: 1 }, 'the directed message record whose listener threw');
+      assert.strictEqual(b.status().relayConnected, true, 'the relay link is still up');
+      assert.ok(b._sessionStats.refusedByReason['not-core-secure'] >= 1, 'the unproven plaintext frame was refused and counted');
     } finally {
       process.removeListener('uncaughtException', onUncaught);
-      await node.stop();
-      await new Promise((r) => wss.close(() => r()));
-      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+      await a.stop(); await b.stop();
+      await relay.close();
+      for (const n of [a, b]) fs.rmSync(nodeDir(n.name), { recursive: true, force: true });
     }
   });
 
-  it('LAN and loopback: the same dispatch refuses and counts (0.13.16 swallowed it in the transport, uncounted)', async () => {
-    const socks = [];
-    const server = net.createServer((sock) => {
-      socks.push(sock);
-      sock.on('error', () => {});
-      sendFrame(sock, { type: 'handshake', nodeId: 'lan-peer', name: 'lan-peer' });
-      sendFrame(sock, { type: 'message', content: 'first' });
-      sendFrame(sock, { type: 'message', content: 'second' });
-    });
-    await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    const name = uniq('guard-lan');
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: 'g' });
-    const seen = [];
-    node.on('message', throwOnce(seen));
+  it('LAN: the same dispatch refuses and counts over a TCP session', async () => {
+    const { BonjourDiscovery } = require('../lib/discovery');
+    const a = new SymNode({ name: uniq('guard-lan-a'), silent: true, discovery: new NullDiscovery(), room: 'g' });
+    const b = new SymNode({ name: uniq('guard-lan-b'), silent: true, discovery: new BonjourDiscovery({ mdns: false }), room: 'g' });
     try {
-      await node.start();
-      node._connectToPeer('127.0.0.1', server.address().port, 'lan-peer', 'lan-peer');
-      await until(() => seen.length >= 2);
+      await a.start(); await b.start();
+      a._pendingBonjour = a._pendingBonjour || new Set();
+      a._connectToPeer('127.0.0.1', b._port, b.nodeId, b.name);
+      await until(() => a._peers.has(b.nodeId) && b._peers.has(a.nodeId));
+      const { seen } = await exercise(a, b);
       assert.deepStrictEqual(seen, ['first', 'second']);
-      assert.strictEqual(node.metrics().framesRefused, 1);
-      assert.deepStrictEqual(node.metrics().framesRefusedByType, { message: 1 });
+      assert.strictEqual(b.metrics().framesRefused, 1);
+      assert.deepStrictEqual(b.metrics().framesRefusedByType, { cmb: 1 });
     } finally {
-      await node.stop();
-      for (const sock of socks) sock.destroy();
-      server.close();
-      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+      await a.stop(); await b.stop();
+      for (const n of [a, b]) fs.rmSync(nodeDir(n.name), { recursive: true, force: true });
     }
   });
 });
@@ -118,7 +118,8 @@ describe('a mood frame on a stock node (G2)', () => {
     node.on('mood-delivered', (d) => out.push(['delivered', d]));
     node.on('mood-rejected', (d) => out.push(['rejected', d]));
     try {
-      node._frameHandler.handle('p', 'p', { type: 'mood', mood: 'tired', fromName: 'p' });
+      const p = admitAs(node, { nodeId: 'p' });
+      node._frameHandler.handle(p, { type: 'mood', mood: 'tired', fromName: 'p' });
       assert.strictEqual(out.length, 1);
       assert.strictEqual(typeof out[0][1].drift, 'number');
       assert.ok(out[0][1].drift >= 0 && out[0][1].drift <= 2, `drift ${out[0][1].drift} is a cosine drift`);
@@ -126,7 +127,7 @@ describe('a mood frame on a stock node (G2)', () => {
       const entry = node.remember({ focus: 'own work after a mood frame', issue: 'none', intent: 'x', motivation: 'y', commitment: 'z', perspective: 'me', mood: { text: 'calm', valence: 0, arousal: 0 } });
       assert.ok(entry, 'remember() still works (in 0.13.16 it threw for two minutes after one mood frame)');
       assert.ok(Array.isArray(node.peers()));
-      for (const mood of [42, { text: 'x' }, null, '']) node._frameHandler.handle('p', 'p', { type: 'mood', mood });
+      for (const mood of [42, { text: 'x' }, null, '']) node._frameHandler.handle(p, { type: 'mood', mood });
       assert.strictEqual(out.length, 1, 'a mood that is not text is not a mood');
     } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
@@ -163,32 +164,40 @@ describe('the asynchronous half of a frame (SVAF) is refused by the same guard',
 });
 
 describe('the daemon survives a peer\'s mood and message frames over the relay (G2, C3)', () => {
-  it('stays up, handles both, and answers an insight-engine request it cannot serve instead of throwing', async () => {
+  it('stays up, handles both from a Core Secure peer, refuses them in the clear, and answers an insight-engine request it cannot serve', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-daemon-guard-'));
     const sock = path.join(home, 'd.sock');
-    const wss = new WebSocketServer({ port: 0 });
-    wss.on('connection', (ws) => ws.on('message', (m) => {
-      if (JSON.parse(String(m)).type !== 'relay-auth') return;
-      const send = (payload) => ws.send(JSON.stringify({ from: 'e'.repeat(64), fromName: 'evil', payload }));
-      send({ type: 'mood', mood: 'exhausted after a long debugging session', fromName: 'evil' });
-      send({ type: 'message', content: 'hello daemon', fromName: 'evil' });
-    }));
+    const relay = fakeRelay();
     const daemon = spawn(process.execPath, [path.join(__dirname, '..', 'bin', 'sym-daemon.js')], {
       env: { ...process.env, HOME: home, USERPROFILE: home, SYM_STATE_DIR: path.join(home, '.sym'), SYM_SOCKET: sock,
         SYM_NODE_NAME: 'daemon-guard-test', SYM_ROOM: 'daemon-guard-room', SYM_RELAY_ONLY: '1',
-        SYM_RELAY_URL: `ws://127.0.0.1:${wss.address().port}`, SYM_RELAY_TOKEN: 'x'.repeat(32) },
+        SYM_RELAY_URL: relay.url, SYM_RELAY_TOKEN: 'x'.repeat(32) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
     daemon.stdout.on('data', (b) => { out += b; });
     daemon.stderr.on('data', (b) => { out += b; });
+    const peer = new SymNode({ name: uniq('guard-peer'), silent: true, relayOnly: true, discovery: new NullDiscovery(), relay: relay.url, relayToken: 'x'.repeat(32), room: 'daemon-guard-room' });
     try {
-      await until(() => /Message from evil: hello daemon/.test(out) && /sym-daemon ready/.test(out) || daemon.exitCode !== null, 15000);
-      await new Promise((r) => setTimeout(r, 500));
+      await until(() => /sym-daemon ready/.test(out) || daemon.exitCode !== null, 15000);
+      await peer.start();
+      await until(() => peer._peers.size === 1, 10000);
+      const daemonId = [...peer._peers.keys()][0];
+      // In the clear, from an unproven relay `from`: refused, and the daemon survives it.
+      relay.inject('e'.repeat(64), daemonId, { type: 'mood', mood: 'unproven', fromName: 'evil' });
+      relay.inject('e'.repeat(64), daemonId, { type: 'message', content: 'unproven', fromName: 'evil' });
+      // Over the session: handled.
+      peer.broadcastMood('exhausted after a long debugging session');
+      peer.send('hello daemon', { to: daemonId });
+      await until(() => /Message from .*: hello daemon/.test(out) || daemon.exitCode !== null, 15000);
+      await new Promise((r) => setTimeout(r, 300));
       assert.strictEqual(daemon.exitCode, null, `the daemon is still running; log:\n${out.slice(-1500)}`);
       assert.doesNotMatch(out, /FATAL/);
-      assert.doesNotMatch(out, /Refused a/, 'both frames are handled, not refused: the cause is gone, not just caught');
-      assert.match(out, /Mood from evil: .*(ACCEPTED|IGNORED)/);
+      assert.match(out, /Mood from .*: .*(ACCEPTED|IGNORED)/, 'the session\'s mood is handled, not merely survived');
+      assert.match(out, /Message from .*: hello daemon/);
+      // Named by the relay envelope's label ('injected' in the fake relay), never the frame's own fromName.
+      assert.match(out, /Refused a '(mood|message)' frame from injected: not-core-secure/, 'the plaintext ones were refused');
+      assert.doesNotMatch(out, /from evil/, 'a frame-supplied name is never printed');
       const reply = await new Promise((resolve, reject) => {
         const c = net.createConnection(sock, () => c.write(JSON.stringify({ type: 'xmesh-context' }) + '\n'));
         let buf = '';
@@ -200,9 +209,10 @@ describe('the daemon survives a peer\'s mood and message frames over the relay (
       assert.match(String(reply.error), /insight engine/);
       assert.strictEqual(daemon.exitCode, null);
     } finally {
+      await peer.stop();
       daemon.kill('SIGTERM');
       await new Promise((r) => (daemon.exitCode !== null ? r() : daemon.once('exit', r)));
-      await new Promise((r) => wss.close(() => r()));
+      await relay.close();
       fs.rmSync(home, { recursive: true, force: true });
     }
   });

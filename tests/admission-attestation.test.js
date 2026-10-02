@@ -156,7 +156,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
     const tag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const A = new SymNode({ name: `att-rx-a-${tag()}`, silent: true, discovery: new NullDiscovery(), room: 'hotel', ...aOpts });
     const B = new SymNode({ name: `att-rx-b-${tag()}`, silent: true, discovery: new NullDiscovery(), room: 'hotel' });
-    B._pinPeerKey(A.nodeId, A._identity.publicKey);
+    B._roster.bind(A.nodeId, A._identity.publicKey, 'proven');
     // A direct peer is what gives the attester a name; the label is whatever it announced.
     if (aAsPeer) B._peers.set(A.nodeId, { peerId: A.nodeId, name: aAsPeer, transport: { send() {} } });
     const seen = [];
@@ -186,7 +186,7 @@ describe("'attestation-received' — a peer's verified verdict is observable as 
       assert.strictEqual(e.sig, att.sig);
       assert.strictEqual(e.sigAlg, 'ed25519');
       assert.strictEqual(e.verified, true);
-      assert.strictEqual(e.keySource, 'handshake');
+      assert.strictEqual(e.keySource, 'proven', 'the key A proved on its Core Secure session (0.14: no more trust-on-first-hello)');
       assert.strictEqual(e.from, 'concierge');
       assert.strictEqual(e.fromPeerId, A.nodeId);
       assert.strictEqual(e.relayed, false);
@@ -460,8 +460,8 @@ describe('the witness storm', () => {
   it('a second copy of a witness is not relayed, and a held checkpoint is not witnessed again', () => {
     const ATT = kp(), WIT = kp();
     withNode('att-storm', { lifecycleRole: 'participant', room: 'g' }, (node) => {
-      node._pinPeerKey('node-att', ATT.pub);
-      node._pinPeerKey('node-wit', WIT.pub);
+      node._roster.bind('node-att', ATT.pub, 'proven');
+      node._roster.bind('node-wit', WIT.pub, 'proven');
       const relayed = [];
       node._gossipToRoster = (frame) => relayed.push(frame.type);
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
@@ -480,8 +480,8 @@ describe('the witness storm', () => {
   it('a repeat is dropped before its signature is checked; nothing unverified changes state', () => {
     const ATT = kp(), WIT = kp();
     withNode('att-early', { lifecycleRole: 'participant', room: 'g' }, (node) => {
-      node._pinPeerKey('node-att', ATT.pub);
-      node._pinPeerKey('node-wit', WIT.pub);
+      node._roster.bind('node-att', ATT.pub, 'proven');
+      node._roster.bind('node-wit', WIT.pub, 'proven');
       node._gossipToRoster = () => {};
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');
@@ -499,7 +499,7 @@ describe('the witness storm', () => {
   it('a signed second root is a conflict: surfaced once, reported by reconcile, never relayed', () => {
     const ATT = kp();
     withNode('att-conflict', { lifecycleRole: 'participant', room: 'g' }, (node) => {
-      node._pinPeerKey('node-att', ATT.pub);
+      node._roster.bind('node-att', ATT.pub, 'proven');
       const relayed = [];
       node._gossipToRoster = (f) => relayed.push(f.type);
       const metrics = [];
@@ -520,7 +520,7 @@ describe('the witness storm', () => {
   it('a replayed checkpoint with its position spelled as text is refused', () => {
     const ATT = kp();
     withNode('att-text-seq', { lifecycleRole: 'participant', room: 'g' }, (node) => {
-      node._pinPeerKey('node-att', ATT.pub);
+      node._roster.bind('node-att', ATT.pub, 'proven');
       node._gossipToRoster = () => {};
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');

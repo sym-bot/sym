@@ -5,8 +5,9 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 /**
  * 0.13.16: peer-info gossip logged one line per entry and rewrote the wake-channel file on every
  * frame, and every peer re-sends its whole list on every connect, so the daemon's log reached 1 GB.
- * Only a channel that changed is set and saved, with one line per frame. (In 0.14.0 a gossiped entry
- * carries the sighting it reports, lastSeen, and is weighed by its source: see wake-channels.test.js.)
+ * Only a channel that changed is set and saved, with one line per frame. (In 0.14.0 only the entry a
+ * session's own node gives is learned — design D1 — and the relay's list is a hint: see
+ * wake-channels.test.js.)
  */
 
 const { describe, it } = require('node:test');
@@ -17,6 +18,9 @@ const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 
 describe('peer-info gossip is quiet when nothing changed', () => {
+  // Core Secure (design D1): only the entry naming the session's own nodeId is learned; entries about
+  // other nodes are hints, never stored. The 0.13.16 property still holds for what is learned: a
+  // repeat logs nothing and writes nothing.
   it('a repeat of the same list logs nothing and writes nothing; a change logs one line', () => {
     const name = `pinfo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
@@ -25,19 +29,21 @@ describe('peer-info gossip is quiet when nothing changed', () => {
     let writes = 0;
     node._wakeManager.saveWakeChannels = () => { writes++; };
     try {
+      const seen = Date.now();
       const frame = { type: 'peer-info', peers: [
-        { nodeId: 'phone-1', name: 'unknown', wakeChannel: { platform: 'apns', token: 't1', environment: 'sandbox' }, lastSeen: Date.now() },
-        { nodeId: 'phone-2', name: 'unknown', wakeChannel: { platform: 'apns', token: 't2', environment: 'sandbox' }, lastSeen: Date.now() },
+        { nodeId: 'phone-1', name: 'unknown', wakeChannel: { platform: 'apns', token: 't1', environment: 'sandbox' }, lastSeen: seen },
+        { nodeId: 'phone-2', name: 'unknown', wakeChannel: { platform: 'apns', token: 't2', environment: 'sandbox' }, lastSeen: seen },
       ] };
-      node._frameHandler._handlePeerInfo('peer-x', 'peer-x', frame);
-      assert.deepStrictEqual(lines.filter((l) => /wake channel/.test(l)), ['Gossip from peer-x: learned 2 wake channel(s)']);
+      node._frameHandler._handlePeerInfo('phone-1', 'phone-1', frame);
+      assert.deepStrictEqual(lines.filter((l) => /[Ww]ake channel/.test(l)), ['Wake channel from phone-1: apns'], 'its own entry, said once');
       assert.strictEqual(writes, 1);
-      for (let i = 0; i < 50; i++) node._frameHandler._handlePeerInfo('peer-x', 'peer-x', frame);
-      assert.strictEqual(lines.filter((l) => /wake channel/.test(l)).length, 1, 'repeats are silent');
+      assert.strictEqual(node._peerWakeChannels.has('phone-2'), false, 'what it says about another node is not stored');
+      for (let i = 0; i < 50; i++) node._frameHandler._handlePeerInfo('phone-1', 'phone-1', frame);
+      assert.strictEqual(lines.filter((l) => /[Ww]ake channel/.test(l)).length, 1, 'repeats are silent');
       assert.strictEqual(writes, 1, 'and write nothing');
       const big = { type: 'peer-info', peers: Array.from({ length: 1000 }, (_, i) => ({ nodeId: `n${i}`, wakeChannel: { platform: 'apns', token: `x${i}` }, lastSeen: Date.now() })) };
       node._frameHandler._handlePeerInfo('peer-x', 'peer-x', big);
-      assert.strictEqual(node._peerWakeChannels.size, 2 + 256, 'one frame is read for its first 256 entries');
+      assert.strictEqual(node._peerWakeChannels.size, 1, 'a frame of 1,000 entries about others stores nothing');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
@@ -58,37 +64,34 @@ describe('0.13.16 review follow-ups', () => {
     try {
       const now = Date.now();
       const at = (token, lastSeen) => ({ type: 'peer-info', peers: [{ nodeId: 'phone-1', wakeChannel: { platform: 'apns', token, environment: 'sandbox' }, lastSeen }] });
-      node._frameHandler._handlePeerInfo('p', 'p', at('t1', now - 1000));
-      node._frameHandler._handlePeerInfo('p', 'p', at('t2', now));   // a newer sighting from the same source
+      node._frameHandler._handlePeerInfo('phone-1', 'phone-1', at('t1', now - 1000));
+      node._frameHandler._handlePeerInfo('phone-1', 'phone-1', at('t2', now));   // the phone's own newer channel
       assert.strictEqual(node._peerWakeChannels.get('phone-1').token, 't2');
       node._frameHandler._handlePeerInfo('p', 'p', { type: 'peer-info', peers: Array.from({ length: 300 }, (_, i) => ({ nodeId: `n${i}`, wakeChannel: { platform: 'apns', token: `x${i}` }, lastSeen: now })) });
       assert.ok(lines.some((l) => /300 entries, reading the first 256/.test(l)));
+      node._frameHandler._handlePeerInfo('p', 'p', { type: 'peer-info', peers: Array.from({ length: 300 }, (_, i) => ({ nodeId: `n${i}` })) });
+      assert.strictEqual(lines.filter((l) => /300 entries/.test(l)).length, 1, 'said once a minute per peer');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  it('the relay\'s peer list sets, saves and logs only what changed (F3)', async () => {
+  it('the relay\'s peer list is a hint: it sets, saves and logs no wake channel (F3, Core Secure D1)', async () => {
     const list = (token) => JSON.stringify({ type: 'relay-peers', peers: [{ nodeId: 'phone-1', name: 'phone', offline: true, wakeChannel: { platform: 'apns', token, environment: 'sandbox' } }] });
     const wss = new WebSocketServer({ port: 0 });
-    wss.on('connection', (ws) => ws.on('message', () => { ws.send(list('t1')); ws.send(list('t1')); ws.send(list('t1')); ws.send(list('t2')); }));
+    let sent = 0;
+    wss.on('connection', (ws) => ws.on('message', () => { ws.send(list('t1')); ws.send(list('t1')); ws.send(list('t2')); sent += 3; }));
     const logs = [];
-    let saves = 0;
-    const map = new Map();
-    const { WakeManager } = require('../lib/core/wake');
-    const wm = new WakeManager({ wakeChannelsFile: path.join(os.tmpdir(), `wc-relay-${process.pid}.json`), peerWakeChannels: map, peerLastWake: new Map(), pendingFrames: new Map(), log: () => {} });
     let running = true;
     const rc = new RelayConnection({
-      learnWakeChannel: (id, ch, o) => wm.learnWakeChannel(id, ch, o),
       relayUrl: `ws://127.0.0.1:${wss.address().port}`, relayToken: 'x'.repeat(40), log: (l) => logs.push(l),
-      getIdentity: () => ({ nodeId: 'b'.repeat(64) }), isRunning: () => running, getPeers: () => new Map(), getMeshNode: () => null,
-      createPeer: () => { throw new Error('no peers expected'); }, addPeer: () => {}, handlePeerMessage: () => {}, onPeerLeft: () => {},
-      onAuthRefused: () => {}, nodeName: 'quiet-relay', peerWakeChannels: map, saveWakeChannels: () => { saves++; },
+      getIdentity: () => ({ nodeId: 'b'.repeat(64) }), isRunning: () => running, onAuthRefused: () => {}, nodeName: 'quiet-relay',
     });
     try {
       rc.connect();
-      for (let i = 0; i < 100 && map.get('phone-1')?.token !== 't2'; i++) await new Promise((r) => setTimeout(r, 20));
-      assert.strictEqual(map.get('phone-1').token, 't2');
-      assert.strictEqual(saves, 2, 'written once for t1 and once for t2, not for the repeats');
-      assert.strictEqual(logs.filter((l) => /wake channel/.test(l)).length, 2);
+      for (let i = 0; i < 100 && sent < 3; i++) await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 100));
+      assert.strictEqual(rc.state().phase, 'connected');
+      assert.strictEqual(logs.filter((l) => /wake channel/i.test(l)).length, 0, 'nothing learned, nothing said');
+      assert.ok(rc.present.has('phone-1') === false, 'an offline entry is not even a candidate');
     } finally { running = false; rc.destroy(); await new Promise((r) => wss.close(() => r())); }
   });
 

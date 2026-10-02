@@ -23,6 +23,7 @@ const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { createCMB, signCMB, assertionIdV2_0 } = require('../lib/core');
 const { settle } = require('./_settle'); // waits for every in-flight frame, not a fixed guess
+const { admitAs } = require('./_core-secure');
 
 function kp() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', {
@@ -42,9 +43,9 @@ function v2Record({ nodeId, createdBy, signWith, focus = 'v2 observation', room 
 function withNode(fn) {
   const name = `v2bind-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-  node._pinPeerKey('node-alice', ALICE.pub);
-  node._pinPeerKey('node-mallory', MALLORY.pub);
-  node._pinPeerKey('node-relay', RELAY.pub);
+  node._roster.bind('node-alice', ALICE.pub, 'proven');
+  node._roster.bind('node-mallory', MALLORY.pub, 'proven');
+  node._roster.bind('node-relay', RELAY.pub, 'proven');
   try { return fn(node); } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
 }
 
@@ -64,12 +65,15 @@ describe('v2.0 author binding (B-R4)', () => {
     });
   });
 
-  it('an author whose key this node does not hold yet is unverified, not refused', () => {
+  it('an author whose key this node does not hold is REFUSED in Core Secure (§18.3.1; release note M12)', () => {
     withNode((node) => {
       const stranger = kp();
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
       const msg = { cmb: v2Record({ nodeId: 'node-stranger', createdBy: 'stranger', signWith: stranger }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), false);
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
       assert.strictEqual(msg._cmbVerified, false);
+      assert.ok(metrics.some((m) => m.type === 'cmb-author-unresolvable' && m.author === 'node-stranger'));
     });
   });
 });
@@ -83,15 +87,16 @@ describe('assertionId (B-R6)', () => {
     });
   });
 
-  it('on an older-suite record, a carried assertionId (which nothing signs) is dropped', () => {
+  it('an older-suite record does not enter Core Secure at all (§18.3.1)', () => {
     withNode((node) => {
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
       const cmb = createCMB({ categories: { focus: 'old suite' }, createdBy: 'alice', room: 'default' });
       signCMB(cmb, ALICE.priv);
       cmb.metadata.assertionId = 'asrt-' + '1'.repeat(64);
-      const msg = { cmb };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', msg), false);
-      assert.strictEqual(msg._cmbVerified, true);
-      assert.strictEqual('assertionId' in msg.cmb.metadata, false);
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', { cmb }), true);
+      assert.ok(metrics.some((m) => m.type === 'cmb-legacy-suite-refused'), 'counted on its own metric');
+      assert.ok(!metrics.some((m) => m.type === 'cmb-signature-rejected'), 'and never as a forgery (P-6)');
     });
   });
 });
@@ -102,12 +107,12 @@ describe('the inbox names a proven author (K5)', () => {
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      node._pinPeerKey('node-alice', ALICE.pub);
-      node._pinPeerKey('node-relay', RELAY.pub);
+      node._roster.bind('node-alice', ALICE.pub, 'proven');
+      const relay = admitAs(node, { nodeId: 'node-relay', name: 'relay', publicKey: RELAY.pub });
       node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
       const got = [];
       node.on('cmb-accepted', (e) => got.push(e));
-      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
+      node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
       await settle();
       assert.strictEqual(got.length, 1);
       assert.strictEqual(got[0].author.nodeId, 'node-alice');
@@ -142,10 +147,11 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
       // Through the node's one guarded dispatch (0.13.17), which every transport calls.
-      assert.doesNotThrow(() => node._receiveFrame('node-alice', 'alice', { type: 'cmb', cmb: malformed() }, 'relay'));
+      const alice = admitAs(node, { nodeId: 'node-alice', name: 'alice', publicKey: ALICE.pub });
+      assert.doesNotThrow(() => node._receiveSessionFrame(alice, { type: 'cmb', cmb: malformed() }));
       const original = node._frameHandler._handleMemoryShare;
       node._frameHandler._handleMemoryShare = () => { throw new Error('boom'); };
-      assert.doesNotThrow(() => node._receiveFrame('node-alice', 'alice', { type: 'cmb', cmb: malformed() }, 'relay'));
+      assert.doesNotThrow(() => node._receiveSessionFrame(alice, { type: 'cmb', cmb: malformed() }));
       node._frameHandler._handleMemoryShare = original;
       assert.ok(metrics.some((m) => m.type === 'frame-handler-error' && /boom/.test(m.error)));
     });
@@ -166,15 +172,15 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      node._pinPeerKey('node-alice', ALICE.pub);
-      node._pinPeerKey('node-relay', RELAY.pub);
+      node._roster.bind('node-alice', ALICE.pub, 'proven');
+      const relay = admitAs(node, { nodeId: 'node-relay', name: 'relay', publicKey: RELAY.pub });
       node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
       const c = capture(node);
       const got = [];
       node.on('cmb-accepted', (e) => got.push(e));
       // Alice signs a record for Bob; a relay hands it to this node, which holds Alice's key.
       const forBob = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for bob only', to: 'node-bob' });
-      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: forBob });
+      node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: forBob });
       await settle();
       assert.strictEqual(got.length, 0, 'not surfaced');
       assert.strictEqual(node._store.get(forBob.metadata.key), null, 'not stored');
@@ -182,7 +188,7 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
 
       // The same author's record for THIS node is admitted, so the refusal is the audience's.
       const forMe = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for this node', to: node.nodeId });
-      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: forMe });
+      node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: forMe });
       await settle();
       assert.strictEqual(got.length, 1, 'a record addressed here is surfaced');
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
@@ -197,26 +203,13 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
     });
   });
 
-  it('an older-suite record verified against its author on relay is checked too', () => {
-    withNode((node) => {
-      node._pinPeerKey('alice', ALICE.pub); // the relayed arm resolves the author by its label
-      const c = capture(node);
-      const cmb = createCMB({ categories: { focus: 'older suite, for bob' }, createdBy: 'alice', room: 'default', to: 'node-bob' });
-      signCMB(cmb, ALICE.priv);
-      const msg = { cmb };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
-      assert.strictEqual(msg._cmbVerified, true, 'precondition: it verified against its author');
-      assert.deepStrictEqual(c.refused().map((m) => m.reason), ['wrong-recipient']);
-    });
-  });
-
-  it('a record whose author key is not held is refused for its audience all the same', () => {
+  it('a record whose author key is not held is refused before its audience is read', () => {
     withNode((node) => {
       const c = capture(node);
       const stranger = kp();
       const msg = { cmb: v2Record({ nodeId: 'node-stranger', createdBy: 'stranger', signWith: stranger, to: 'node-bob' }) };
       assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
-      assert.deepStrictEqual(c.refused().map((m) => [m.reason, m.verified]), [['wrong-recipient', false]]);
+      assert.ok(c.metrics.some((m) => m.type === 'cmb-signature-rejected' && m.reason === 'unresolvable-author'));
     });
   });
 

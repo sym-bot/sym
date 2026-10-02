@@ -40,10 +40,8 @@ describe('E2E checkpoint + witness (D3)', () => {
     B._svafEvaluator.evaluate = async () => null;
 
     const [tA, tB] = pair();
-    tA.on('message', f => A._frameHandler.handle(B.nodeId, bName, f));
-    tB.on('message', f => B._frameHandler.handle(A.nodeId, aName, f));
-    A._addPeer(A._createPeer(tA, B.nodeId, bName, true, 'bonjour'));
-    B._addPeer(B._createPeer(tB, A.nodeId, aName, false, 'bonjour'));
+    A.connectTransport(tA, { role: 'client', expectNodeId: B.nodeId });
+    B.connectTransport(tB, { role: 'server' });
     await sleep(400);
 
     // B sends two distinct CMBs to A; A admits both, reaching seq 2 → A checkpoints.

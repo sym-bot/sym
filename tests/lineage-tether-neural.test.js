@@ -57,9 +57,11 @@ async function withNode(baseName, opts, fn) {
   }
 }
 
+// A signed v2.0 remix from peerA (Core Secure, 0.14): the lineage is inside the signed metadata.
+const { identity, signedRecord, admitAs } = require('./_core-secure');
+const PEER = identity('peerA');
 function remixFrame(text, parentKey, extra = {}) {
-  const cmb = createCMB({ categories: cat7(text), createdBy: 'peerA' });
-  cmb.metadata.lineage = { parents: [parentKey], method: 'SVAF-v2' };
+  const cmb = signedRecord(PEER, { categories: cat7(text), lineage: { parents: [parentKey], method: 'SVAF-v2' } });
   Object.assign(cmb, extra);
   return { type: 'cmb', timestamp: Date.now(), content: text, cmb };
 }
@@ -99,7 +101,7 @@ describe('MMP §15.8 lineage tether on the neural admission path', () => {
       const root = createCMB({ categories: cat7(TOPIC_A), createdBy: 'peerR' });
       node._store.receiveFromPeer('peerR', { key: root.metadata.key, content: TOPIC_A, source: 'peerR', cmb: root, _cmbVerified: true });
       const frame = remixFrame(TOPIC_B_NEW, root.metadata.key);
-      await node._frameHandler._handleMemoryShare('peerA', 'peerA', frame);
+      await node._frameHandler._handleMemoryShare(PEER.nodeId, PEER.name, frame, admitAs(node, PEER));
 
       const stored = node._store.get(frame.cmb.metadata.key);
       assert.ok(stored, 'the neural evaluator admitted the remix');

@@ -177,10 +177,11 @@ const node = new SymNode({
 
 // ── IPC Server (Unix Socket) ───────────────────────────────────
 
-/** Connected virtual nodes. socketId → { socket, name, cognitiveProfile } */
-const virtualNodes = new Map();
-/** Hosted agents (Section 3.2 + 4.3). socketId → { socket, nodeId, name, publicKey, activity } */
-const hostedAgents = new Map();
+// sym 0.14 (design D8): ONE AGENT, ONE NODE. The daemon's virtual nodes (`register`), hosted agents
+// (`register-agent`) and their outbound path (`agent-cmb`, which broadcast a plain `cmb` with a
+// client-supplied `from`) are gone: an autonomous agent is its own node, with its own identity, and a
+// node's reasoning process is its interior (lib/interior.js), which has no mesh identity. Local
+// clients query the daemon's node and subscribe to its events with `listen` (MMP §14.9).
 /** Agent activity state. name → { status, timestamp } */
 const agentActivity = new Map();
 /** Task board — persisted to ~/.sym/tasks.json */
@@ -260,10 +261,6 @@ function onIPCConnection(socket) {
   });
 
   socket.on('close', () => {
-    const vn = virtualNodes.get(socketId);
-    if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
-    const ha = hostedAgents.get(socketId);
-    if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
     listeners.delete(socketId);
   });
 
@@ -271,8 +268,7 @@ function onIPCConnection(socket) {
     if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
       log(`IPC socket error: ${err.message}`);
     }
-    virtualNodes.delete(socketId);
-    hostedAgents.delete(socketId);
+    listeners.delete(socketId);
   });
 }
 
@@ -353,64 +349,20 @@ const NO_INSIGHT_ENGINE = 'this node runs no insight engine';
  */
 function handleIPCMessage(socketId, socket, msg) {
   switch (msg.type) {
-    case 'register': {
-      virtualNodes.set(socketId, {
-        socket,
-        name: msg.name || `virtual-${socketId}`,
-        cognitiveProfile: msg.cognitiveProfile || null,
-      });
-      sendIPC(socket, {
-        type: 'registered',
-        nodeId: node._identity?.nodeId,
-        name: node.name,
-        relay: relayUrl,
-      });
-      log(`Virtual node registered: ${msg.name}`);
+    // A client's opener: who this daemon's node is. (The `register` virtual-node path is gone in
+    // 0.14, design D8: a client is not a node.)
+    case 'hello':
+      sendIPC(socket, { type: 'result', action: 'hello', nodeId: node._identity?.nodeId, name: node.name, relay: relayUrl });
       break;
-    }
 
-    // ── Hosted Agent Registration (Section 4.3.1) ──────────
-    case 'register-agent': {
-      if (!msg.nodeId || !msg.name) {
-        sendIPC(socket, { type: 'error', message: 'register-agent requires nodeId and name' });
-        break;
-      }
-      hostedAgents.set(socketId, {
-        socket,
-        nodeId: msg.nodeId,
-        name: msg.name,
-        publicKey: msg.publicKey || null,
-        svafFieldWeights: msg.svafFieldWeights || null,
-        svafFreshnessSeconds: msg.svafFreshnessSeconds || null,
-      });
+    case 'register':
+    case 'register-agent':
+    case 'agent-cmb':
       sendIPC(socket, {
-        type: 'registered-agent',
-        nodeId: msg.nodeId,
-        daemonNodeId: node._identity?.nodeId,
-        relay: relayUrl,
-        peers: node.peers(),
+        type: 'result', action: msg.type, code: 'EREMOVED',
+        error: `'${msg.type}' was removed in sym 0.14 (one agent, one node): an agent runs its own node; a node's mind submits through its interior socket. Use 'hello' and 'listen' for local clients.`,
       });
-      log(`Hosted agent registered: ${msg.name} (${msg.nodeId.slice(0, 8)})`);
       break;
-    }
-
-    // ── Hosted Agent Outbound CMB (Section 4.3.2) ─────────
-    case 'agent-cmb': {
-      // Hosted agent produced a CMB — broadcast to remote peers with agent's nodeId
-      if (!msg.cmb || !msg.from) break;
-      const frame = { type: 'cmb', timestamp: msg.timestamp || Date.now(), cmb: msg.cmb, from: msg.from, fromName: msg.fromName };
-      // Broadcast via all peer transports
-      for (const [, peer] of node._peers) {
-        peer.transport.send(frame);
-      }
-      // Also forward to other hosted agents (local mesh)
-      for (const [id, agent] of hostedAgents) {
-        if (id !== socketId) {
-          sendIPC(agent.socket, { type: 'event', event: 'frame-received', data: { peerId: msg.from, peerName: msg.fromName, frame } });
-        }
-      }
-      break;
-    }
 
     case 'agent-activity':
       if (msg.name && msg.status) {
@@ -462,7 +414,7 @@ function handleIPCMessage(socketId, socket, msg) {
       tasks.set(id, task);
       saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-create', task });
-      broadcastToHostedAgents({ type: 'event', event: 'task-created', data: task });
+      broadcastToListeners({ type: 'event', event: 'task-created', data: task });
       break;
     }
 
@@ -487,7 +439,7 @@ function handleIPCMessage(socketId, socket, msg) {
       task.updatedAt = now;
       saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-update', task });
-      broadcastToHostedAgents({ type: 'event', event: 'task-updated', data: task });
+      broadcastToListeners({ type: 'event', event: 'task-updated', data: task });
       break;
     }
 
@@ -553,26 +505,9 @@ function handleIPCMessage(socketId, socket, msg) {
       log(`Listener registered (socket ${socketId}${msg.categoryWeights ? ', with category weights' : ''})`);
       break;
 
-    case 'peers': {
-      const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
-      const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
-      const hosted = Array.from(hostedAgents.values()).map(a => {
-        const act = agentActivity.get(a.name);
-        return {
-          id: a.nodeId?.slice(0, 8) || '',
-          name: a.name,
-          connected: true,
-          lastSeen: Date.now(),
-          coupling: 'hosted',
-          drift: 0,
-          source: 'ipc',
-          activity: act?.status || 'idle',
-          svafFieldWeights: a.svafFieldWeights || null,
-        };
-      });
-      sendIPC(socket, { type: 'result', action: 'peers', peers: [...meshPeers, ...hosted] });
+    case 'peers':
+      sendIPC(socket, { type: 'result', action: 'peers', peers: node.peers() });
       break;
-    }
 
     case 'metrics':
       sendIPC(socket, { type: 'result', action: 'metrics', metrics: node.metrics() });
@@ -583,10 +518,6 @@ function handleIPCMessage(socketId, socket, msg) {
         type: 'result',
         action: 'status',
         status: node.status(),
-        virtualNodes: Array.from(virtualNodes.values()).map(v => v.name),
-        hostedAgents: Array.from(hostedAgents.values()).map(a => ({
-          nodeId: a.nodeId, name: a.name,
-        })),
       });
       break;
 
@@ -625,17 +556,6 @@ function sendIPC(socket, msg) {
   try { socket.write(JSON.stringify(msg) + '\n'); } catch {}
 }
 
-/**
- * Broadcast to all hosted agents (Section 4.3.2).
- * Hosted agents receive raw frames — they run their own SVAF.
- */
-function broadcastToHostedAgents(msg) {
-  const data = JSON.stringify(msg) + '\n';
-  for (const [id, agent] of hostedAgents) {
-    try { agent.socket.write(data); } catch { hostedAgents.delete(id); }
-  }
-}
-
 // MMP Section 13.9.2: Subscriber Category Weights.
 // If subscriber declared category weights, evaluate CMB relevance before delivery.
 function shouldDeliverToListener(listener, msg) {
@@ -669,8 +589,8 @@ function broadcastToListeners(msg) {
   }
 }
 
-/** Forward mesh events to all registered virtual nodes. */
-function forwardEventsToVirtualNodes() {
+/** Forward mesh events to the local subscribers (`listen`, MMP §14.9). */
+function forwardEventsToListeners() {
   const events = [
     ['mood-delivered', (d) => ({ type: 'event', event: 'mood-delivered', data: d })],
     ['mood-rejected', (d) => ({ type: 'event', event: 'mood-rejected', data: d })],
@@ -680,11 +600,10 @@ function forwardEventsToVirtualNodes() {
   ];
 
   for (const [event, formatter] of events) {
-    node.on(event, (data) => broadcastToVirtualNodes(formatter(data)));
+    node.on(event, (data) => broadcastToListeners(formatter(data)));
   }
 
   node.on('message', (from, content) => {
-    broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
     broadcastToListeners({ type: 'event', event: 'message', data: { from, content, timestamp: Date.now() } });
 
     // Feed messages (including Telegram) into the insight engine, if this node has one. A stock
@@ -713,24 +632,13 @@ function forwardEventsToVirtualNodes() {
   });
 
   node.on('xmesh-insight', (data) => {
-    broadcastToVirtualNodes({ type: 'event', event: 'xmesh-insight', data });
+    broadcastToListeners({ type: 'event', event: 'xmesh-insight', data });
   });
 
   node.on('memory-received', ({ from, entry, decision }) => {
     // xMesh ingestion already happens in frame-handler after SVAF evaluation.
-    broadcastToVirtualNodes({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
+    broadcastToListeners({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
   });
-}
-
-/**
- * Broadcast a message to all connected virtual nodes.
- * @param {object} msg — message to broadcast
- */
-function broadcastToVirtualNodes(msg) {
-  const data = JSON.stringify(msg) + '\n';
-  for (const [id, vn] of virtualNodes) {
-    try { vn.socket.write(data); } catch { virtualNodes.delete(id); }
-  }
 }
 
 // ── launchd Install/Uninstall ──────────────────────────────────
@@ -867,7 +775,8 @@ function showStatus() {
           console.log(`  relay:    ${s.relayConnected ? 'connected' : 'disconnected'} (${s.relay || 'none'})`);
           console.log(`  peers:    ${s.peerCount}`);
           console.log(`  memories: ${s.memoryCount}`);
-          console.log(`  virtual:  ${(msg.virtualNodes || []).join(', ') || 'none'}`);
+          if (s.coreSecure) console.log(`  sessions: ${s.coreSecure.sessions.confirmed} confirmed (Core Secure)${s.coreSecure.keyConflicts.length ? `, ${s.coreSecure.keyConflicts.length} KEY CONFLICT(S) to resolve: sym keys` : ''}`);
+          if (s.legacyImport && s.legacyImport.sessions.length) console.log(`  legacy:   ${s.legacyImport.sessions.length} Legacy Import session(s) — legacy encryption, no forward secrecy, no transcript proof`);
           console.log(`  socket:   ${SOCKET_PATH}`);
         }
       } catch {}
@@ -951,17 +860,9 @@ async function main() {
   loadTasks();
   log(`Loaded ${tasks.size} task(s)`);
 
-  forwardEventsToVirtualNodes();
+  forwardEventsToListeners();
 
-  // Section 4.3.2: forward raw frames to hosted agents (before SVAF evaluation)
-  node.on('frame-received', ({ peerId, peerName, frame }) => {
-    if (hostedAgents.size > 0) {
-      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: { peerId, peerName, frame } });
-    }
-  });
-
-  // When daemon accepts a CMB (from peer or local observe), forward to hosted agents
-  // so they can ingest it into their local memory via their own SVAF
+  // A CMB the daemon's node accepted (from a peer or a local observe) goes to the subscribers.
   node.on('cmb-accepted', (entry) => {
     broadcastToListeners({
       type: 'event', event: 'cmb-accepted',
@@ -973,31 +874,9 @@ async function main() {
         timestamp: entry.timestamp || Date.now(),
       },
     });
-    if (hostedAgents.size > 0) {
-      // Wrap as a cmb frame so hosted agent's SVAF can evaluate it
-      const frame = {
-        type: 'cmb',
-        timestamp: entry.timestamp || entry.storedAt || Date.now(),
-        cmb: entry.cmb,
-        source: entry.source,
-      };
-      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: {
-        peerId: entry.peerId || entry.source || 'daemon',
-        peerName: entry.source || 'daemon',
-        frame,
-      }});
-    }
   });
 
-  // Forward peer events to hosted agents
-  node.on('peer-joined', (data) => {
-    broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data });
-    broadcastToListeners({ type: 'event', event: 'peer-joined', data: { name: data.name || 'unknown', peerId: data.peerId } });
-  });
-  node.on('peer-left', (data) => {
-    broadcastToHostedAgents({ type: 'event', event: 'peer-left', data });
-    broadcastToListeners({ type: 'event', event: 'peer-left', data: { name: data.name || 'unknown', peerId: data.peerId } });
-  });
+  // peer-joined/left reach the subscribers through forwardEventsToListeners.
 
   if (!(await startIPCServer())) {
     log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);

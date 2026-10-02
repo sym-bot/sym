@@ -46,7 +46,8 @@
     ".agents/",
     ".claude/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "SECURITY.md"
   ],
   "optionalDependencies": {
     "@huggingface/transformers": "^4.3.0"

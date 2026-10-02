@@ -47,6 +47,8 @@ describe('node earned-authority wiring (EA2/EA3)', () => {
     try {
       assert.strictEqual(node._resolvedRole(), 'anchor');
       const peer = 'node-peer-xyz';
+      assert.strictEqual(node.grantRole(peer, 'validator'), null, 'no grant to an id whose key nothing proved (design D3)');
+      node._roster.bind(peer, kp(peer).pub, 'proven');
       const g = node.grantRole(peer, 'validator');
       assert.ok(g && g.sig, 'grant is signed');
       assert.strictEqual(node.resolveRole(peer), 'validator', 'grantee resolves to validator');
@@ -136,7 +138,7 @@ describe('aggregateAttestations — weighted by earned authority (EA6)', () => {
     try {
       const V = kp('val'), P = kp('part'), O = kp('overclaim'), U = kp('unknown');
       // teach the node every attester's key, then grant V validator (so V resolves up)
-      for (const x of [V, P, O]) node._roster.pin(x.nodeId, x.pub, 'handshake');
+      for (const x of [V, P, O]) node._roster.bind(x.nodeId, x.pub, 'proven');
       node.grantRole(V.nodeId, 'validator');
 
       // anchor (self, weight 4) + validator (weight 2) admit; participant (weight 1) rejects;
@@ -173,7 +175,7 @@ describe('aggregateAttestations — weighted by earned authority (EA6)', () => {
     const { node, name } = anchorNode('ea-agg-tamper');
     try {
       const P = kp('p');
-      node._roster.pin(P.nodeId, P.pub, 'handshake');
+      node._roster.bind(P.nodeId, P.pub, 'proven');
       const a = att(P.nodeId, 'participant', 'aligned', { focus: 'admit' }, P.priv);
       a.verdict = 'rejected'; // tamper after signing
       node._attestations.record(a);

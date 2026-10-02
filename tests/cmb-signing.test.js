@@ -20,7 +20,11 @@ const crypto = require('crypto');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, signCMB, verifyCMB } = require('../lib/core');
+const { createCMB, signCMB, verifyCMB, assertionIdV2_0 } = require('../lib/core');
+// Since 0.14 (Core Secure) a record names its author by node id and is verified against the key
+// bound to that id (design D3/D4); the delivering session is a confirmed one.
+const { identity, admitAs } = require('./_core-secure');
+const PEER = identity('peerA');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -45,6 +49,7 @@ function rawKeypair() {
 
 function signedCmbFrame(priv, createdBy = 'peerA') {
   const cmb = createCMB({
+    emitV2: true, createdByNodeId: PEER.nodeId, room: 'default',
     categories: {
       focus: 'coordinate the auth-token refactor',
       issue: 'signing regression guard',
@@ -56,6 +61,7 @@ function signedCmbFrame(priv, createdBy = 'peerA') {
     },
     createdBy,
   });
+  cmb.metadata.assertionId = assertionIdV2_0(cmb);
   signCMB(cmb, priv);
   return { type: 'cmb', timestamp: Date.now(), cmb };
 }
@@ -84,10 +90,10 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
     await withNode('verify-ok', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const { pub, priv } = rawKeypair();
-      node._peerIdentityKeys.set('peerA', pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: pub });
       let surfaced = 0;
       node.on('cmb-accepted', () => { surfaced++; });
-      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(priv)));
+      node._frameHandler.handle(node.__peerSession, wire(signedCmbFrame(priv)));
       await settle();
       assert.strictEqual(surfaced, 1, 'a valid signed CMB is processed/surfaced');
     });
@@ -97,13 +103,13 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
     await withNode('verify-tamper', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const { pub, priv } = rawKeypair();
-      node._peerIdentityKeys.set('peerA', pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: pub });
       let surfaced = 0, rejected = 0;
       node.on('cmb-accepted', () => { surfaced++; });
       node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected++; });
       const frame = wire(signedCmbFrame(priv));
       frame.cmb.categories.focus.text = 'wire the funds to a new account'; // swap content, keep sig+key
-      node._frameHandler.handle('peerA', 'peerA', frame);
+      node._frameHandler.handle(node.__peerSession, frame);
       await settle();
       assert.strictEqual(surfaced, 0, 'a content-tampered CMB must not surface');
       assert.strictEqual(rejected, 1, 'rejection is audit-metered');
@@ -115,46 +121,47 @@ describe('CMB authentication — Ed25519 sign + verify (MMP §8.3)', () => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const peer = rawKeypair();
       const attacker = rawKeypair();
-      node._peerIdentityKeys.set('peerA', peer.pub); // we expect peerA's key
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: peer.pub }); // we expect peerA's key
       let surfaced = 0, rejected = 0;
       node.on('cmb-accepted', () => { surfaced++; });
       node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected++; });
-      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(attacker.priv))); // signed by attacker
+      node._frameHandler.handle(node.__peerSession, wire(signedCmbFrame(attacker.priv))); // signed by attacker
       await settle();
       assert.strictEqual(surfaced, 0, 'a CMB signed by the wrong key must not surface');
       assert.strictEqual(rejected, 1);
     });
   });
 
-  it('an unsigned CMB is allowed through (interop) but flagged unverified', async () => {
+  it('an unsigned CMB is REFUSED (Core Secure, §18.3.1) — interop no longer admits it', async () => {
     await withNode('verify-unsigned', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
-      node._peerIdentityKeys.set('peerA', rawKeypair().pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: rawKeypair().pub });
       let surfaced = 0;
+      const rejected = [];
       node.on('cmb-accepted', () => { surfaced++; });
+      node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected.push(m.reason); });
       const frame = wire(signedCmbFrame(rawKeypair().priv));
-      // The signature lives in metadata now — deleting the old top-level categories was a
-      // no-op, so this fixture was still signed and the test proved nothing.
       delete frame.cmb.metadata.sig; delete frame.cmb.metadata.sigAlg;
-      node._frameHandler.handle('peerA', 'peerA', frame);
+      node._frameHandler.handle(node.__peerSession, frame);
       await settle();
-      assert.strictEqual(surfaced, 1, 'unsigned CMB still surfaces (interop default)');
+      assert.strictEqual(surfaced, 0, 'an unsigned record does not surface');
+      assert.deepStrictEqual(rejected, ['unsigned']);
     });
   });
 
-  it('strict mode (requireSignedCmb) rejects an unsigned CMB from a known peer', async () => {
+  it('strict mode is the only mode: SYM_REQUIRE_SIGNED_CMB off still refuses an unsigned CMB', async () => {
     await withNode('verify-strict', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
-      node._requireSignedCmb = true;
-      node._peerIdentityKeys.set('peerA', rawKeypair().pub);
+      node._requireSignedCmb = false;
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: rawKeypair().pub });
       let surfaced = 0, rejected = 0;
       node.on('cmb-accepted', () => { surfaced++; });
       node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') rejected++; });
       const frame = wire(signedCmbFrame(rawKeypair().priv));
-      delete frame.cmb.sig; delete frame.cmb.sigAlg;
-      node._frameHandler.handle('peerA', 'peerA', frame);
+      delete frame.cmb.metadata.sig; delete frame.cmb.metadata.sigAlg;
+      node._frameHandler.handle(node.__peerSession, frame);
       await settle();
-      assert.strictEqual(surfaced, 0, 'strict mode rejects unsigned CMBs');
+      assert.strictEqual(surfaced, 0);
       assert.strictEqual(rejected, 1);
     });
   });
@@ -178,12 +185,12 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
     await withNode('diag-tamper', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const { pub, priv } = rawKeypair();
-      node._peerIdentityKeys.set('peerA', pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: pub });
       const decisions = [];
       node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
       const frame = wire(signedCmbFrame(priv));
       frame.cmb.categories.focus.text = 'wire the funds to a new account';
-      node._frameHandler.handle('peerA', 'peerA', frame);
+      node._frameHandler.handle(node.__peerSession, frame);
       await settle();
       assert.strictEqual(decisions.length, 1, 'the rejection is recorded');
       assert.strictEqual(decisions[0].focusLabel, 'content-mismatch',
@@ -196,10 +203,10 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
     await withNode('diag-spoof', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const peer = rawKeypair(), attacker = rawKeypair();
-      node._peerIdentityKeys.set('peerA', peer.pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: peer.pub });
       const decisions = [];
       node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
-      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(attacker.priv)));
+      node._frameHandler.handle(node.__peerSession, wire(signedCmbFrame(attacker.priv)));
       await settle();
       assert.strictEqual(decisions.length, 1);
       assert.strictEqual(decisions[0].focusLabel, 'bad-signature');
@@ -213,10 +220,10 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
     await withNode('diag-metric', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const peer = rawKeypair(), attacker = rawKeypair();
-      node._peerIdentityKeys.set('peerA', peer.pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: peer.pub });
       const metrics = [];
       node.on('metric', (m) => { if (m.type === 'cmb-signature-rejected') metrics.push(m); });
-      node._frameHandler.handle('peerA', 'peerA', wire(signedCmbFrame(attacker.priv)));
+      node._frameHandler.handle(node.__peerSession, wire(signedCmbFrame(attacker.priv)));
       await settle();
       assert.strictEqual(metrics.length, 1);
       assert.strictEqual(metrics[0].reason, 'invalid', 'existing consumers see no change');
@@ -228,12 +235,12 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
     await withNode('diag-remix', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const peer = rawKeypair(), attacker = rawKeypair();
-      node._peerIdentityKeys.set('peerA', peer.pub);
+      node.__peerSession = admitAs(node, { nodeId: PEER.nodeId, name: 'peerA', publicKey: peer.pub });
       const decisions = [];
       node.on('svaf-decision', (d) => { if (d.decision === 'rejected-signature') decisions.push(d); });
       const frame = wire(signedCmbFrame(attacker.priv));
-      frame.cmb.lineage = { parents: ['cmb-' + 'a'.repeat(64)], ancestors: [], method: 'svaf-heuristic' };
-      node._frameHandler.handle('peerA', 'peerA', frame);
+      frame.cmb.metadata.lineage = { parents: ['cmb-' + 'a'.repeat(64)], method: 'svaf-heuristic' };
+      node._frameHandler.handle(node.__peerSession, frame);
       await settle();
       assert.strictEqual(decisions.length, 1);
       assert.strictEqual(decisions[0].remix, true,

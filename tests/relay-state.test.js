@@ -166,3 +166,46 @@ test('destroy() returns the state to idle, never leaves a stale connected/refuse
     assert.equal(c.rc.state().nextRetryAt, null);
   } finally { c.stop(); await relay.close(); }
 });
+
+// MMP §4.4.7 / §4.4.9: 4006 (the existing holder is the legitimate one) is a hard stop like 4004;
+// 4007 (draft spec PR meshcognition-website#20: the relay binds this nodeId to a different key) is an
+// identity conflict and stops the same way. Neither is retried; each is said once and kept in state().
+for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*legitimate one\. Not reconnecting/], [4007, 'key-conflict', /DIFFERENT key \(4007\).*Not reconnecting/]]) {
+  test(`${code}: awaitOutcome resolves with phase ${phase}; no reconnect; said once; kept in state().stopped`, async () => {
+    const relay = fakeRelay((ws) => ws.close(code, code === 4007 ? 'nodeId bound to another key' : 'Duplicate rejected'));
+    const told = [];
+    const c = client(relay.url, { onIdentityCollision: (info) => told.push(info) });
+    try {
+      c.rc.connect();
+      const s = await c.rc.awaitOutcome(5000);
+      assert.equal(s.phase, phase);
+      assert.equal(s.nextRetryAt, null, 'nothing scheduled');
+      assert.equal(s.stopped.code, code);
+      assert.match(c.rc.describe(), words);
+      await wait(1500); // past the first backoff (1 s)
+      assert.equal(relay.state.attempts, 1, 'no second knock');
+      assert.equal(told.length, 1, 'the host is told once');
+      assert.equal(told[0].code, code);
+      assert.equal(c.logs.filter((l) => l.startsWith('FATAL')).length, 1, 'said once, loudly');
+      c.rc.connect();
+      await wait(200);
+      assert.equal(relay.state.attempts, 1, 'a later connect() does not dial either');
+      c.rc.destroy();
+      assert.equal(c.rc.state().phase, phase, 'destroy() does not hide the stop');
+    } finally { c.stop(); await relay.close(); }
+  });
+}
+
+test('a socket destroy() let go never schedules a reconnect when its close arrives', async () => {
+  const relay = fakeRelay((ws) => ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })));
+  const c = client(relay.url);
+  try {
+    c.rc.connect();
+    await c.rc.awaitOutcome(5000);
+    c.rc.destroy();   // the node object may start again later, so isRunning() can still be true here
+    await wait(300);  // the close event arrives
+    assert.equal(c.rc.state().nextRetryAt, null);
+    assert.equal(c.rc._relayReconnectTimer, null, 'nothing scheduled');
+    assert.equal(c.rc.state().phase, 'idle');
+  } finally { c.stop(); await relay.close(); }
+});

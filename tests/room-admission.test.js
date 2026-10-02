@@ -1,15 +1,11 @@
 'use strict';
 
 /**
- * Stage 2 — the handshake admission decision (SymNode#_roomAdmission).
- *
- * Before this existed, NOTHING compared the room at all: the handshake has always
- * carried `room` and bound it into the signed transcript, but no receiver looked, so a
- * peer announcing any room joined the peer set and LAN isolation was a property of the
- * mDNS browse filter rather than of any check.
- *
- * Tested against the real prototype method with a minimal receiver stub, so these pin the
- * shipped implementation rather than a re-description of it.
+ * The room door (design D6, Core Secure). The room is explicit and inside the §5.2 transcript: a
+ * room mismatch, or a hello naming no room, closes the connection before admission (see
+ * core-secure-session.test.js). What is left to decide is a GATED room: its owner is recognised by
+ * its pinned key, and a grantee when its room-join grant's bound key equals the key its session
+ * PROVED. Tested against the real prototype method with a minimal receiver stub.
  */
 
 const { describe, it } = require('node:test');
@@ -34,163 +30,97 @@ const ROOM = 'x-review--team-02779b950c3d8d7378fd11d6';
 function receiver(room, owner) {
   const owners = new RoomOwnershipRegistry();
   if (owner) owners.pin(room, owner.nodeId, owner.publicKey, 'config');
-  const logged = [];
-  return { _room: room, _roomOwners: owners, _log: (m) => logged.push(m), logged };
+  return { _room: room, _roomOwners: owners, _log: () => {} };
 }
-const admit = (rcv, peerId, msg) => SymNode.prototype._roomAdmission.call(rcv, peerId, msg);
+/** The decision for a confirmed session that proved `key` for `nodeId`, presenting `grant`. */
+const decide = (rcv, nodeId, key, grant) => SymNode.prototype._roomAdmissionDecide.call(rcv, { nodeId, identityKey: key, roomGrant: grant || null });
 
-describe('the room comparison that did not exist', () => {
-  it('a peer claiming a DIFFERENT room is refused, even when the room is ungated', () => {
-    const r = receiver('backend-team');
-    const d = admit(r, 'peer-1', { nodeId: 'peer-1', room: 'someone-elses-room' });
-    assert.strictEqual(d.admit, false);
-    assert.match(d.reason, /room-mismatch/);
-  });
-
-  // This test previously asserted the DEFECT: that an absent room is `default`
-  // and therefore refused by a node in a named room. It read as a deliberate
-  // decision and was neither -- `|| 'default'` collapsed "made no claim" into
-  // "claims the public square". A test can defend a bug as convincingly as it
-  // defends a behaviour, and this one did.
-  it('an ABSENT room claim is admitted — silence is not a claim, and it is not a mismatch', () => {
-    const named = receiver('backend-team');
-    assert.strictEqual(admit(named, 'p', { nodeId: 'p' }).admit, true,
-      'every shipped sym-swift device sends no room; refusing them partitions the iOS fleet');
-    assert.strictEqual(admit(receiver('default'), 'p', { nodeId: 'p' }).admit, true);
-    // The log must state the OBSERVATION, not a cause it cannot see. Two
-    // populations land here — nodes that CANNOT claim a room, and callers that
-    // chose not to — and they are byte-identical on the wire. Asserting a
-    // reason would make the count that gates the tightening un-zeroable.
-    assert.match(named.logged.join('\n'), /no room claimed/,
-      'the admission must be logged so the population is countable before tightening');
-    assert.doesNotMatch(named.logged.join('\n'), /predates|older|legacy/i,
-      'the log must not assert why the claim was absent — it cannot observe that');
-  });
-
-  it('an EMPTY room string is treated as absent, not as a room named ""', () => {
-    assert.strictEqual(admit(receiver('backend-team'), 'p', { nodeId: 'p', room: '' }).admit, true);
-  });
-
-  it('a peer that DOES claim a room is still held to it — the isolation still works', () => {
-    const d = admit(receiver('backend-team'), 'p', { nodeId: 'p', room: 'default' });
-    assert.strictEqual(d.admit, false, 'an explicit `default` claim is a claim, and it mismatches');
-    assert.match(d.reason, /room-mismatch/);
+describe('ungated rooms admit every confirmed session', () => {
+  it('a session in an ungated room is admitted with no grant, because none is required', () => {
+    assert.deepStrictEqual(decide(receiver('backend-team'), 'p', keypair().pub), { admit: true });
+    assert.deepStrictEqual(decide(receiver(ROOM), 'p', keypair().pub), { admit: true });
   });
 });
 
-describe('ungated rooms are unchanged — upgrade day moves nothing', () => {
-  it('a matching room with no owner admits exactly as before', () => {
-    assert.strictEqual(admit(receiver(ROOM), 'peer-1', { nodeId: 'peer-1', room: ROOM }).admit, true);
-  });
-
-  it('and it admits with no grant presented, because none is required', () => {
-    const d = admit(receiver('backend-team'), 'p', { nodeId: 'p', room: 'backend-team', roomGrant: undefined });
-    assert.strictEqual(d.admit, true);
-  });
-});
-
-describe('gated rooms — fail closed, and the owner is never locked out', () => {
-  it('a stranger with no grant is refused', () => {
+describe('gated rooms — fail closed on proven keys, and the owner is never locked out', () => {
+  it('a stranger with no grant is pending (refused when its handshake timeout passes)', () => {
     const owner = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const d = admit(r, 'stranger', { nodeId: 'stranger', room: ROOM });
-    assert.strictEqual(d.admit, false);
-    assert.match(d.reason, /no room-join grant/);
+    assert.deepStrictEqual(decide(r, 'stranger', keypair().pub), { pending: true });
   });
 
-  it('the OWNER needs no grant in its own room', () => {
+  it('the OWNER needs no grant in its own room — recognised by its pinned key, not its id', () => {
     const owner = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    assert.strictEqual(admit(r, 'owner-node', { nodeId: 'owner-node', room: ROOM }).admit, true);
+    assert.strictEqual(decide(r, 'owner-node', owner.pub).admit, true);
+    const imp = decide(r, 'owner-node', keypair().pub);
+    assert.strictEqual(imp.admit, false, 'the owner\'s id under another key is not the owner');
+    assert.match(imp.reason, /under another key/);
   });
 
-  it('a foreign peer WITH the owner\'s grant is admitted — sharing stays possible, as an act', () => {
+  it('a grantee is admitted when the grant binds the key its session proved; an impostor proving its own key is not', () => {
     const owner = keypair(), volunteer = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const grant = signRoomGrant(
-      { room: ROOM, grantee: 'volunteer', granteeKey: volunteer.pub, grantedBy: 'owner-node' }, owner.priv);
-    // WITH ITS KEY PROVEN, the invitation still works — sharing stays a decision someone makes.
-    assert.strictEqual(
-      admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant, provenPublicKey: volunteer.pub }).admit,
-      true);
-
-    // WITHOUT PROOF, nobody is admitted — including the real invitee. The old handshake only
-    // ASSERTS a key, and the key an impostor must assert is inside the grant it holds, so the
-    // gate stays shut until the proving handshake reaches this path (2026-09-16).
-    const unproven = admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant });
-    assert.strictEqual(unproven.admit, false, 'an unproven presenter is refused');
-    assert.match(String(unproven.reason), /no-proven-key/);
-
-    // AND AN IMPOSTOR PROVING ITS OWN KEY IS REFUSED BY THE BINDING.
-    const impostorKey = keypair();
-    const imp = admit(r, 'volunteer', { nodeId: 'volunteer', room: ROOM, roomGrant: grant, provenPublicKey: impostorKey.pub });
-    assert.strictEqual(imp.admit, false, 'the grant binds a key and the binding is enforced');
+    const grant = signRoomGrant({ room: ROOM, grantee: 'volunteer', granteeKey: volunteer.pub, grantedBy: 'owner-node' }, owner.priv);
+    assert.strictEqual(decide(r, 'volunteer', volunteer.pub, grant).admit, true, 'sharing stays possible, as an act');
+    const imp = decide(r, 'volunteer', keypair().pub, grant);
+    assert.strictEqual(imp.admit, false, 'a copied grant admits nobody: the binding is enforced');
     assert.match(String(imp.reason), /grantee-key-mismatch/);
   });
 
   it('a grant minted by someone who is NOT the owner is refused', () => {
-    const owner = keypair(), impostor = keypair();
+    const owner = keypair(), impostor = keypair(), evil = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const forged = signRoomGrant({ room: ROOM, grantee: 'evil', grantedBy: 'owner-node' }, impostor.priv);
-    const d = admit(r, 'evil', { nodeId: 'evil', room: ROOM, roomGrant: forged });
+    const forged = signRoomGrant({ room: ROOM, grantee: 'evil', granteeKey: evil.pub, grantedBy: 'owner-node' }, impostor.priv);
+    const d = decide(r, 'evil', evil.pub, forged);
     assert.strictEqual(d.admit, false);
     assert.match(d.reason, /grant refused/);
   });
 
-  it('a valid grant issued to SOMEONE ELSE cannot be presented by this peer', () => {
-    const owner = keypair();
+  it('a valid grant issued to SOMEONE ELSE cannot be presented by this session', () => {
+    const owner = keypair(), alice = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const grant = signRoomGrant({ room: ROOM, grantee: 'alice', grantedBy: 'owner-node' }, owner.priv);
-    const d = admit(r, 'mallory', { nodeId: 'mallory', room: ROOM, roomGrant: grant });
+    const grant = signRoomGrant({ room: ROOM, grantee: 'alice', granteeKey: alice.pub, grantedBy: 'owner-node' }, owner.priv);
+    const d = decide(r, 'mallory', keypair().pub, grant);
     assert.strictEqual(d.admit, false);
     assert.match(d.reason, /grantee-mismatch/);
+  });
+
+  it('a grant that binds no key is a bearer token and is refused (§5.8.1)', () => {
+    const owner = keypair(), bob = keypair();
+    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
+    const bearer = signRoomGrant({ room: ROOM, grantee: 'bob', grantedBy: 'owner-node' }, owner.priv);
+    assert.strictEqual(decide(r, 'bob', bob.pub, bearer).admit, false);
   });
 
   it('an expired grant is refused at join', () => {
     const owner = keypair(), late = keypair();
     const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const long_ago = Date.now() - 48 * 3600_000;
+    const longAgo = Date.now() - 48 * 3600_000;
     const grant = signRoomGrant(
-      { room: ROOM, grantee: 'late', granteeKey: late.pub, grantedBy: 'owner-node', grantedAt: long_ago, expiresAt: long_ago + 3600_000 },
+      { room: ROOM, grantee: 'late', granteeKey: late.pub, grantedBy: 'owner-node', grantedAt: longAgo, expiresAt: longAgo + 3600_000 },
       owner.priv);
-    // proof supplied, so what is under test here is still the CLOCK
-    assert.match(
-      admit(r, 'late', { nodeId: 'late', room: ROOM, roomGrant: grant, provenPublicKey: late.pub }).reason,
-      /expired/);
-  });
-
-  it('the grantee is the handshake nodeId, not the transport peerId', () => {
-    // a peer cannot present a grant for a nodeId it is not announcing
-    const owner = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const grant = signRoomGrant({ room: ROOM, grantee: 'alice', grantedBy: 'owner-node' }, owner.priv);
-    assert.strictEqual(admit(r, 'alice', { nodeId: 'mallory', room: ROOM, roomGrant: grant }).admit, false,
-      'the announced identity is what the grant must name');
+    assert.match(decide(r, 'late', late.pub, grant).reason, /expired/);
   });
 });
 
-describe('the decision is enforced in BOTH directions', () => {
+describe('the decision is made for every session before anything per-peer exists', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const read = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'node.js'), 'utf8');
 
-  it('the inbound path decides BEFORE the peer is added to the set', () => {
-    const src = read('lib/node.js');
-    const decide = src.indexOf('const admission = this._roomAdmission(peerId, handshakeMsg)');
-    const add = src.indexOf('const peer = this._createPeer(transport, peerId, peerName, false, \'bonjour\')');
-    assert.ok(decide > 0 && add > 0, 'both present');
-    assert.ok(decide < add, 'refused peers are never created or added');
+  it('every confirmed session, client or server, goes through the door before it is admitted', () => {
+    const confirmed = src.slice(src.indexOf('  _onSessionConfirmed(session) {'), src.indexOf('  _decideAdmission(session) {'));
+    assert.match(confirmed, /this\._decideAdmission\(session\)/);
+    assert.doesNotMatch(confirmed, /this\._peers\.set/, 'no peer is created at confirmation');
+    const admit = src.slice(src.indexOf('  _admitSession(session) {'), src.indexOf('  _greetSession('));
+    assert.match(admit, /this\._peers\.set/, 'the peer is created on admission only');
   });
 
-  it('the outbound path decides when the dialled peer\'s handshake arrives', () => {
-    // the loopback tie-break means the stranger dials US in half of all nodeId
-    // orderings — a check on only the accepting path is dead code for those pairs
-    const src = read('lib/frame-handler.js');   // the handler lib/node.js loads; lib/core/frame-handler.js was a dead copy
-    assert.match(src, /_handleHandshake\(peerId, peerName, msg\) \{[\s\S]{0,900}_roomAdmission\(peerId, msg\)/);
-    assert.match(src, /this\._node\._peers\.delete\(peerId\)/, 'a refused peer is removed, not merely logged');
-  });
-
-  it('the handshake carries the grant so a gated room is joinable at all', () => {
-    assert.match(read('lib/node.js'), /roomGrant: this\._roomGrant \|\| undefined/);
+  it('a frame from a session the door has not admitted is refused, except its room-join grant', () => {
+    const frame = src.slice(src.indexOf('  _onSessionFrame(session, frame) {'), src.indexOf('  _onSessionClosed(session, info) {'));
+    assert.match(frame, /state !== 'admitted'/);
+    assert.match(frame, /mesh-room-join/);
+    assert.match(frame, /not-admitted/);
   });
 });

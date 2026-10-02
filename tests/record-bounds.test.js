@@ -164,28 +164,40 @@ describe('on receipt', () => {
     try { return fn(node, metrics, lines); } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   }
 
-  it('accepts a record an earlier release minted with a category over 256 KiB (0.14.0 review C-F4)', async () => {
-    // Exactly the record 0.13.16's createCMB mints for these categories (checked against it): no
-    // text bound but the frame, signed under mmp-sig-v2. This release would not mint it.
+  // Records are minted under bounds (cmb-encoder) but none is applied on receipt beyond the frame the
+  // record arrived in: an earlier release minted larger categories and longer agent ids. Since 0.14 a
+  // received record must be a signed v2.0 record (Core Secure), so these are shaped as an
+  // implementation without the minting bound would sign them under mmp-sig-v2.0.
+  const { admitAs, identity } = require('./_core-secure');
+  function v2Record(peer, categories, createdBy, room) {
+    const cmb = { categories, metadata: {
+      key: blockKeyV2(categories), addressScheme: 'mmp-cmb-merkle-v2', signatureSuite: 'mmp-sig-v2.0',
+      createdByNodeId: peer.nodeId, createdBy, createdTimestamp: Date.now(), room, to: null, lineage: null, application: null,
+    } };
+    cmb.metadata.assertionId = assertionIdV2_0(cmb);
+    signCMB(cmb, peer.privateKey);
+    return cmb;
+  }
+
+  it('accepts a record with a category over 256 KiB, which this release would not mint (0.14.0 review C-F4)', async () => {
     const name = `bounds-bigcat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
-      node._pinPeerKey('peer-old', publicKey.slice(-32).toString('base64url'));
-      const texts = { focus: 'b'.repeat(MAX_CATEGORY_BYTES + 40 * 1024), issue: 'a large category from an older peer' };
+      const peer = identity('peer-old');
+      const session = admitAs(node, peer);
+      const texts = { focus: 'b'.repeat(MAX_CATEGORY_BYTES + 40 * 1024), issue: 'a large category from another implementation' };
       const categories = {};
       for (const f of CAT7_CATEGORIES) {
         const text = texts[f] || 'neutral';
         categories[f] = { text, meta: { key: categoryKeyV1(f, text), parents: [] } };
       }
-      const cmb = { categories, metadata: { key: blockKeyV2(categories), createdBy: 'peer-old', createdTimestamp: Date.now(), lineage: null, room: node._room, to: null } };
-      signCMB(cmb, privateKey.slice(-32).toString('base64url'));
+      const cmb = v2Record(peer, categories, 'peer-old', node._room);
       assert.throws(() => createCMB({ categories: texts, createdBy: 'peer-old' }), (e) => e.code === 'ECMBSIZE', 'this release does not mint it');
 
       const accepted = [];
       node.on('cmb-accepted', (e) => accepted.push(e));
-      await node._frameHandler.handle('peer-old', 'peer-old', { type: 'cmb', timestamp: Date.now(), cmb });
+      await node._frameHandler.handle(session, { type: 'cmb', timestamp: Date.now(), cmb });
       await settle();
       assert.strictEqual(accepted.length, 1, 'admitted');
       assert.strictEqual(accepted[0]._cmbVerified, true, 'and verified');
@@ -193,25 +205,21 @@ describe('on receipt', () => {
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  it('accepts a record an earlier release minted with an agent id over 64 bytes (0.14.0 review C-F4)', async () => {
-    // Shaped as 0.13.16 mints it: the two-section record, signed under mmp-sig-v2, with no bound on
-    // createdBy. Its address does not cover the author, so only the signature is redone here.
+  it('accepts a record with an agent id over 64 bytes, which this release would not mint (0.14.0 review C-F4)', async () => {
     const name = `bounds-longid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
-      const peer = { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
-      node._pinPeerKey('peer-long', peer.pub);
+      const peer = identity('peer-long');
+      const session = admitAs(node, peer);
       const longId = 'claude-' + 'host-qualified-session-label-'.repeat(4); // 123 bytes
-      const cmb = createCMB({ categories: { focus: 'a record from a peer with a long agent id' }, createdBy: 'short', room: node._room });
-      cmb.metadata.createdBy = longId;
-      signCMB(cmb, peer.priv);
+      const base = createCMB({ categories: { focus: 'a record from a peer with a long agent id' }, createdBy: 'short', room: node._room });
+      const cmb = v2Record(peer, base.categories, longId, node._room);
       assert.throws(() => createCMB({ categories: { focus: 'x' }, createdBy: longId }), (e) => e.code === 'ECMBSIZE', 'this release does not mint one');
 
       const accepted = [];
       node.on('cmb-accepted', (e) => accepted.push(e));
-      await node._frameHandler.handle('peer-long', 'peer-long', { type: 'cmb', timestamp: Date.now(), cmb });
+      await node._frameHandler.handle(session, { type: 'cmb', timestamp: Date.now(), cmb });
       await settle();
       assert.strictEqual(accepted.length, 1, 'admitted');
       assert.strictEqual(accepted[0].author.name, longId);
@@ -219,23 +227,31 @@ describe('on receipt', () => {
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
-  it('counts every unsigned record and names the peer once', () => {
-    withNode((node, metrics, lines) => {
+  it('refuses and counts every unsigned record (Core Secure: §18.3.1)', () => {
+    withNode((node, metrics) => {
+      const peer = identity('old-peer');
+      const session = admitAs(node, peer);
       for (let i = 0; i < 3; i++) {
-        const cmb = createCMB({ categories: { focus: `unsigned ${i}` }, createdBy: 'old-peer' });
-        node._frameHandler.handle('peer-old', 'old-peer', { type: 'cmb', cmb, timestamp: Date.now() });
+        const cmb = createCMB({ categories: { focus: `unsigned ${i}` }, createdBy: 'old-peer', emitV2: true, createdByNodeId: peer.nodeId, room: node._room });
+        cmb.metadata.assertionId = assertionIdV2_0(cmb);
+        node._frameHandler.handle(session, { type: 'cmb', cmb, timestamp: Date.now() });
       }
-      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-unsigned-received').length, 3);
-      assert.strictEqual(lines.filter((l) => /UNSIGNED CMB from old-peer/.test(l)).length, 1);
+      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-signature-rejected' && m.reason === 'unsigned').length, 3);
+      assert.strictEqual(node._store.allEntries().length, 0, 'none stored');
     });
   });
 
-  it('a signed record is not counted as unsigned', () => {
+  it('a signed record is not refused as unsigned', () => {
     withNode((node, metrics) => {
-      const cmb = createCMB({ categories: { focus: 'signed' }, createdBy: node.name });
-      signCMB(cmb, node._identity.privateKey);
-      node._frameHandler.handle('peer-x', 'peer-x', { type: 'cmb', cmb, timestamp: Date.now() });
-      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-unsigned-received').length, 0);
+      const self = { nodeId: node.nodeId, name: node.name, publicKey: node._identity.publicKey, privateKey: node._identity.privateKey };
+      const peer = identity('peer-x');
+      const session = admitAs(node, peer);
+      const cmb = createCMB({ categories: { focus: 'signed' }, createdBy: peer.name, emitV2: true, createdByNodeId: peer.nodeId, room: node._room });
+      cmb.metadata.assertionId = assertionIdV2_0(cmb);
+      signCMB(cmb, peer.privateKey);
+      node._frameHandler.handle(session, { type: 'cmb', cmb, timestamp: Date.now() });
+      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-signature-rejected').length, 0);
+      void self;
     });
   });
 });

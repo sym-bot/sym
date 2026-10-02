@@ -33,7 +33,7 @@ function withNode(n, fn) {
   const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: ROOM });
   try {
     const keys = Array.from({ length: n }, (_, i) => ({ id: `att-${i}`, ...kp() }));
-    for (const k of keys) node._pinPeerKey(k.id, k.pub);
+    for (const k of keys) node._roster.bind(k.id, k.pub, 'proven');
     const sent = [];
     node._gossipToRoster = (frame) => sent.push(frame);
     const clock = { t: 1_800_000_000_000 };

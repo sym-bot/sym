@@ -113,31 +113,52 @@ mesh-channel are open source.
 ## Security, and what the relay can and cannot see
 
 We treat this as the product's first property, and we state it as mechanisms with their
-limits rather than as a promise.
+limits rather than as a promise. Since 0.14 every sym node is an MMP 2.0 **Core Secure**
+participant.
 
-- **Every node signs.** A node's identity is an Ed25519 keypair on its own disk; every CMB it
-  emits is signed, and a receiver verifies the signature against the key it pinned at the
-  handshake.
-- **Content is encrypted for each peer.** At the handshake two nodes exchange X25519 public
-  keys and derive a secret only they hold. A CMB's seven categories — the content — are
-  encrypted for each recipient separately before they leave the sender. This is the same on
-  the local network and through a relay.
-- **Never in the clear through a relay** (engine 0.13.7 and later). If a peer reached only
-  over a relay presented no encryption key, the sender sends it nothing, says so once in its
-  log, and `sym status` shows the peer with `e2e: false, clearRefused: true`. On the local
-  network a keyless peer still receives, because the frame never leaves that network.
-- **The relay is a forwarder that cannot read what it carries.** `@sym-bot/sym-relay` reads
-  only the routing envelope (who, to whom, which room), forwards the sealed payload, and drops
-  it: no message store, no keys, no addresses. A channel is the set of nodes connected with
-  the same token; a self-serve token must be 32 characters or more, and a refused connection
-  is logged with the token's length, never the token.
+- **A peer is a proven session, never a hint.** Two nodes run the MMP §5.2 handshake on every
+  transport — LAN, loopback and relay. Each proves possession of its Ed25519 identity key over
+  a transcript that binds both nonces, both nodeIds, both keys, the room and the extensions,
+  and confirms the X25519 key schedule. Nothing about a peer — its key, its room membership, its
+  roles — exists until both proofs validate. A discovery record or a relay roster entry only
+  decides whom to dial.
+- **One key per nodeId, for life.** The first proven key for a nodeId is bound; a session that
+  later proves the same nodeId with a different key is a *conflict*: refused, recorded, and
+  shown in `sym status` for you to resolve (`sym keys <name> resolve`). No source overrides a
+  different key.
+- **Every record is signed, and verified by its author's node id.** A record is accepted only
+  if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
+  `createdByNodeId` — a key it proved, pinned from an invite, or holds from an anchor-rooted
+  grant. An unsigned, legacy or unresolvable record is refused.
+- **Content is sealed per session.** Records travel only as `cmb-encrypted` frames, and every
+  other frame (mood, gossip, grants) as a sealed control frame, under directional keys derived
+  fresh for each handshake (X25519, HKDF-SHA256, ChaCha20-Poly1305). A relay sees routing
+  envelopes and ciphertext. There is no long-lived encryption key to steal later.
+- **Authority follows the key.** A role grant names the key it confers authority on, and a
+  grant chain is checked with the keys each grant vouches, from the anchor down.
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
-  evaluation on every block it hears and stores only what it admits.
+  evaluation on every record it hears and stores only what it admits.
 
-What this does not cover: a room name or relay token is not an enterprise trust boundary —
-anyone holding the token is in the channel; the envelope (names, room, timing, sizes) is
-visible to the relay operator; and a peer's own machine is trusted with everything that peer
-admitted.
+What this does not solve, said plainly:
+
+- **First contact** with a node you hold no anchor, invite or grant for is *trust on first
+  proven use*: the handshake proves the peer holds the key it presents, not that the key is
+  the one you meant. Pin it out of band (an invite carries the issuer's key) when that matters.
+- **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
+  replace another node's connection (close 4004). A squatter gets no session — it cannot
+  prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
+- **Key compromise.** There is no key rotation: a node whose private key leaks must be
+  replaced, under a new nodeId.
+- **Your own machine.** Another process running as the same user can read the identity file.
+  Operating-system isolation is out of scope.
+- **Legacy peers (0.13 and older)** are reached only through explicit Legacy Import routes,
+  which use the old encryption (no forward secrecy, no transcript proof); what they send is
+  quarantined as unverified. Network Legacy Import is removed in 0.15.0.
+
+A room name or relay token is still not an enterprise trust boundary — anyone holding the
+token is in the channel; the envelope (who, to whom, room, timing, sizes) is visible to the
+relay operator; and a peer's own machine is trusted with everything that peer admitted. See
+[SECURITY.md](SECURITY.md).
 
 ## Current boundaries
 

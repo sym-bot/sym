@@ -29,6 +29,12 @@ const { recordCreatedBy } = require('../lib/record');
  *   sym rooms                        # Discover rooms live on the LAN
  *   sym join <name>                   # Switch into a room ("room chat")
  *   sym leave                         # Return to the default global mesh
+ *   sym keys <name> [conflicts]       # Key registry: bindings and conflicts (Core Secure, 0.14)
+ *   sym keys <name> resolve <nodeId> <key>    # Operator: bind nodeId to key (pinned), clearing its conflicts
+ *   sym keys <name> reset-floor <nodeId>      # Operator: let a Legacy Import route be used again
+ *   sym node export <name> --out <file> (--passphrase-env VAR | --to-host <x25519 pub>)
+ *   sym node import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR]
+ *   sym node host-key                 # This host's X25519 key for receiving node bundles
  *   sym logs                          # Tail daemon logs
  *   sym version                       # Show version
  *
@@ -102,6 +108,8 @@ switch (command) {
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
+  case 'keys':    cmdKeys(); break;
+  case 'node':    cmdNode(); break;
   default:
     console.error(`Unknown command: ${command}`);
     console.error('Run sym --help for usage.');
@@ -109,6 +117,77 @@ switch (command) {
 }
 
 // ── Command Implementations ───────────────────────────────────
+
+/**
+ * The key registry of a stopped node (design D3), offline: a running node holds its registry in
+ * memory, so the operator stops it first (or uses the node's own API).
+ */
+function cmdKeys() {
+  const config = require('../lib/config');
+  const { RosterKeyRegistry, keyFingerprint } = require('../lib/roster-keys');
+  const name = args[1];
+  if (!name) { console.error('usage: sym keys <name> [conflicts | resolve <nodeId> <key> | reset-floor <nodeId>]'); process.exit(1); }
+  const nodeId = config.nodeIdForName(name);
+  if (!nodeId) { console.error(`no node named "${name}" on this host`); process.exit(1); }
+  const dir = config.nodeDirById(nodeId);
+  const lock = config.readLockFile(path.join(dir, 'lock.pid'));
+  const sub = args[2] || 'list';
+  if ((sub === 'resolve' || sub === 'reset-floor') && lock && config.lockIsHeldByLiveProcess(lock)) {
+    console.error(`${name} is running (PID ${lock.pid}): stop it before changing its key registry`);
+    process.exit(1);
+  }
+  const reg = new RosterKeyRegistry({ dir: path.join(dir, 'roster-keys') });
+  if (sub === 'resolve') {
+    const r = reg.resolveConflict(args[3], args[4]);
+    if (!r.resolved) { console.error(`not resolved: ${r.reason}`); process.exit(1); }
+    console.log(`${args[3]} is now bound to ${keyFingerprint(args[4])} (pinned, by the operator)`);
+    return;
+  }
+  if (sub === 'reset-floor') {
+    reg.resetFloor(args[3]);
+    console.log(`the sticky floor of ${args[3]} is reset: its Legacy Import route may be used again`);
+    return;
+  }
+  const conflicts = reg.conflicts();
+  if (jsonFlag) { console.log(JSON.stringify({ bindings: reg.entries(), conflicts }, null, 2)); return; }
+  if (sub !== 'conflicts') {
+    for (const e of reg.entries()) console.log(`${e.nodeId}  ${e.source.padEnd(12)}  ${keyFingerprint(e.key).slice(0, 23)}…`);
+  }
+  if (conflicts.length === 0) console.log('no key conflicts');
+  for (const c of conflicts) {
+    console.log(`CONFLICT ${c.nodeId}: bound ${keyFingerprint(c.had).slice(0, 23)}… (${c.hadSource}); refused ${keyFingerprint(c.got).slice(0, 23)}… (${c.gotSource}) — resolve: sym keys ${name} resolve ${c.nodeId} <key>`);
+  }
+}
+
+/** Move a node between hosts (design D9.2): export (tombstone first), import (independently pinned). */
+function cmdNode() {
+  const relocation = require('../lib/relocation');
+  const sub = args[1];
+  const passphrase = () => { const v = flagValue('--passphrase-env'); return v ? process.env[v] : undefined; };
+  try {
+    if (sub === 'host-key') {
+      const k = relocation.hostKey();
+      console.log(k.publicKey);
+      return;
+    }
+    if (sub === 'export') {
+      const r = relocation.exportNode({ name: args[2], out: flagValue('--out'), passphrase: passphrase(), toHostKey: flagValue('--to-host') || undefined });
+      console.log(`exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.`);
+      return;
+    }
+    if (sub === 'import') {
+      const expect = { nodeId: flagValue('--expect-node') || undefined, key: flagValue('--expect-key') || undefined, fingerprint: flagValue('--expect-fingerprint') || undefined };
+      const r = relocation.importNode({ from: args[2], passphrase: passphrase(), expect, name: flagValue('--name') || undefined });
+      console.log(`imported ${r.name} (${r.nodeId}), verified against ${r.pinnedBy}: ${r.files} file(s)`);
+      return;
+    }
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  console.error('usage: sym node (export <name> --out <file> (--passphrase-env VAR | --to-host <pub>) | import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR] | host-key)');
+  process.exit(1);
+}
 
 function cmdStart() {
   applyStartFlags();                       // parse + persist --room / --relay-* first
@@ -795,7 +874,7 @@ function broadcastQuestion(question) {
       resolve(v);
     };
     const socket = net.createConnection(SOCKET_PATH, () => {
-      socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
+      socket.write(JSON.stringify({ type: 'hello' }) + '\n');
     });
     let buffer = '';
     socket.on('data', (data) => {
@@ -806,7 +885,7 @@ function broadcastQuestion(question) {
         if (!line.trim()) continue;
         try {
           const res = JSON.parse(line);
-          if (res.type === 'registered') {
+          if (res.type === 'result' && res.action === 'hello') {
             socket.write(JSON.stringify({ type: 'send', message: question }) + '\n');
           } else if (res.type === 'result') {
             finish(true); return;
@@ -1076,8 +1155,9 @@ function cmdIPC(msg, formatter) {
       return;
     }
 
-    // Register first, then send command
-    socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
+    // Say hello first, then send the command (0.14: a CLI is a client of the daemon's node, not a
+    // virtual node — design D8).
+    socket.write(JSON.stringify({ type: 'hello' }) + '\n');
   });
 
   let buffer = '';
@@ -1106,8 +1186,8 @@ function cmdIPC(msg, formatter) {
           return;
         }
 
-        // Handle registration
-        if (res.type === 'registered' && !registered) {
+        // The daemon answered hello: send the command
+        if (res.type === 'result' && res.action === 'hello' && !registered) {
           registered = true;
           socket.write(JSON.stringify(msg) + '\n');
           return;

@@ -3,152 +3,102 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * Regression: a RELAYED CMB must not be reported as forged.
+ * The verifying key belongs to the AUTHOR, resolved by the signed `createdByNodeId` — never the peer
+ * that delivered the record (sym 0.14, design D4; MMP §8.8.5).
  *
- * `_rejectOnBadSignature` resolves the verifying key from the DELIVERING peer
- * (`_identityKey(peerId)`, and the roster is keyed by nodeId), while
- * `signingPayload` binds the AUTHOR (`cmb.createdBy`). Those coincide only when
- * the author handed the block over directly. For every relayed CMB the check
- * ran against the wrong node's public key, so an untouched, genuinely-signed
- * block failed 100% of the time and was dropped before SVAF with the log text
- * "forged/tampered" — invisible in every drift distribution and admission tally
- * because the drop happens upstream of evaluation.
- *
- * The relaxation is deliberately narrow: only a NAMED author that is not the
- * deliverer is treated as unverifiable. An absent `createdBy`, or an author that
- * IS the deliverer, still hard-rejects — otherwise omitting the category would be a
- * way to dodge signature rejection entirely.
- *
- * This does NOT authenticate relayed CMBs. The author's key is unresolvable from
- * a name (roster is nodeId-keyed), so the honest outcome is "unverified", which
- * is the posture the no-key branch already takes. Authenticating them needs
- * `createdByNodeId` bound into `signingPayload` — an MMP schema change.
+ * History: 0.13 resolved the key from the DELIVERING peer, so a relayed record failed against the
+ * relayer's key; the fix then let a record whose author was named but unresolvable through as
+ * "unverified". Core Secure removes both: the author's key is looked up by the nodeId the signature
+ * binds, a relayed record verifies against its author, and a record whose author has no proven,
+ * pinned or vouched key here is refused (counted `cmb-author-unresolvable`), never delivered
+ * unverified. A legacy-suite (pre-v2.0) record, an unsigned one and one without an author nodeId are
+ * refused.
  */
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const crypto = require('node:crypto');
 const { FrameHandler } = require('../lib/frame-handler');
 const { createCMB, signCMB } = require('../lib/core');
+const { identity, signedRecord } = require('./_core-secure');
 
 const GROUP = 'test-group';
-const RECEIVER_NODE_ID = 'receiver-node-id';
 
-/** A fresh Ed25519 identity in the raw base64url form sym stores. */
-function identity() {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-  const rawPriv = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(16);
-  const rawPub = publicKey.export({ type: 'spki', format: 'der' }).subarray(12);
-  return { priv: rawPriv.toString('base64url'), pub: rawPub.toString('base64url') };
-}
-
-/** A signed CMB as it appears on the wire (emit.js: whole object, then signCMB). */
-function signedCMB({ author, signWith }) {
-  // The room goes in metadata, where the signature binds it. (A top-level `room` is read by
-  // nothing; this fixture once passed only because a record with no room read as "every room".)
-  const cmb = createCMB({ categories: { focus: 'a relayed observation' }, createdBy: author, room: GROUP });
-  signCMB(cmb, signWith);
-  return cmb;
-}
-
-/** Receiver node stub. `keyFor` maps the delivering peerId → the key we hold. */
-function harness(keyFor) {
+/** Receiver node stub. `keys` maps an AUTHOR nodeId → the key this node holds for it. */
+function harness(keys) {
   const logs = [];
   const metrics = [];
   const decisions = [];
+  const asked = [];
   const node = {
-    nodeId: RECEIVER_NODE_ID,
+    nodeId: 'receiver-node-id',
     _room: GROUP,
-    _requireSignedCmb: false,
     _log: (m) => logs.push(m),
     emit: (type, payload) => { if (type === 'metric') metrics.push(payload); },
-    _identityKey: (peerId) => keyFor[peerId],
+    _identityKey: (nodeId) => { asked.push(nodeId); return keys[nodeId] || null; },
     _recordDecision: (d) => decisions.push(d),
   };
-  return { fh: new FrameHandler(node, {}), logs, metrics, decisions };
+  return { fh: new FrameHandler(node, {}), logs, metrics, decisions, asked };
 }
 
-describe('_rejectOnBadSignature — the verifying key must belong to the author', () => {
-  it('does NOT reject a CMB authored by A and relayed by B (the 100%-loss case)', () => {
-    const a = identity();
-    const b = identity();
-    const cmb = signedCMB({ author: 'node-a', signWith: a.priv });
-    // C holds B's key for the delivering peer, and has never met A.
-    const { fh, logs, metrics, decisions } = harness({ 'peer-b': b.pub });
-    const msg = { cmb, source: 'node-a' };
-
-    const rejected = fh._rejectOnBadSignature('peer-b', 'node-b', msg);
-
-    assert.strictEqual(rejected, false, 'a relayed CMB must reach SVAF, not be dropped as forged');
-    assert.strictEqual(msg._cmbVerified, false, 'and must be flagged unverified — it is NOT authenticated');
-    assert.ok(
-      !decisions.some((d) => d.decision === 'rejected-signature'),
-      `must never record rejected-signature, got: ${JSON.stringify(decisions)}`,
-    );
-    assert.ok(
-      metrics.some((m) => m.type === 'cmb-signature-unverifiable' && m.author === 'node-a'),
-      `the population must stay countable, got: ${JSON.stringify(metrics)}`,
-    );
-    assert.ok(
-      !logs.some((m) => m.includes('forged/tampered')),
-      `must not be logged as forgery, got: ${logs.join(' | ')}`,
-    );
-  });
-
-  it('still rejects a forgery from the peer that claims to have authored it', () => {
-    const a = identity();
-    const b = identity();
-    // B names itself the author but the bytes were signed by A: B's own key is
-    // the right key to check, and it fails. That is a real forgery.
-    const cmb = signedCMB({ author: 'node-b', signWith: a.priv });
-    const { fh, logs, decisions } = harness({ 'peer-b': b.pub });
-    const msg = { cmb, source: 'node-b' };
-
-    const rejected = fh._rejectOnBadSignature('peer-b', 'node-b', msg);
-
-    assert.strictEqual(rejected, true, 'author === deliverer means the verdict is meaningful');
-    assert.ok(decisions.some((d) => d.decision === 'rejected-signature'));
-    assert.ok(logs.some((m) => m.includes('forged/tampered')));
-  });
-
-  it('still rejects when createdBy is absent — omitting it cannot dodge rejection', () => {
-    const a = identity();
-    const b = identity();
-    const cmb = signedCMB({ author: 'node-a', signWith: a.priv });
-    delete cmb.createdBy;
-    if (cmb.metadata) delete cmb.metadata.createdBy; // absent means absent on the two-section record too
-    const { fh, decisions } = harness({ 'peer-b': b.pub });
-    const msg = { cmb, source: 'node-a' };
-
-    const rejected = fh._rejectOnBadSignature('peer-b', 'node-b', msg);
-
-    assert.strictEqual(rejected, true, 'an unnamed author must not buy a pass');
-    assert.ok(decisions.some((d) => d.decision === 'rejected-signature'));
-  });
-
-  it('verifies normally when the author delivers its own CMB', () => {
-    const a = identity();
-    const cmb = signedCMB({ author: 'node-a', signWith: a.priv });
-    const { fh, decisions } = harness({ 'peer-a': a.pub });
-    const msg = { cmb, source: 'node-a' };
-
-    const rejected = fh._rejectOnBadSignature('peer-a', 'node-a', msg);
-
-    assert.strictEqual(rejected, false);
-    assert.strictEqual(msg._cmbVerified, true, 'the direct path must still authenticate');
+describe('_rejectOnBadSignature — the verifying key is the author\'s, by createdByNodeId', () => {
+  it('a record authored by A and relayed by B verifies against A\'s key (the 0.13 100%-loss case)', () => {
+    const A = identity('node-a'), B = identity('node-b');
+    const cmb = signedRecord(A, { room: GROUP });
+    const { fh, decisions, asked } = harness({ [A.nodeId]: A.publicKey, [B.nodeId]: B.publicKey });
+    const msg = { cmb };
+    assert.strictEqual(fh._rejectOnBadSignature(B.nodeId, 'node-b', msg), false);
+    assert.strictEqual(msg._cmbVerified, true, 'authenticated, not merely let through');
+    assert.strictEqual(msg._verifiedAuthorNodeId, A.nodeId);
+    assert.deepStrictEqual(asked, [A.nodeId], 'only the author\'s key is looked up, never the deliverer\'s');
     assert.strictEqual(decisions.length, 0);
   });
 
-  it('leaves the unresolvable-key path untouched (unverified, not rejected)', () => {
-    const a = identity();
-    const cmb = signedCMB({ author: 'node-a', signWith: a.priv });
-    const { fh, decisions } = harness({}); // no key for anyone
-    const msg = { cmb, source: 'node-a' };
-
-    const rejected = fh._rejectOnBadSignature('peer-b', 'node-b', msg);
-
-    assert.strictEqual(rejected, false);
+  it('a relayed record whose author has no key here is refused, not delivered unverified', () => {
+    const A = identity('node-a'), B = identity('node-b');
+    const cmb = signedRecord(A, { room: GROUP });
+    const { fh, metrics, decisions } = harness({ [B.nodeId]: B.publicKey });
+    const msg = { cmb };
+    assert.strictEqual(fh._rejectOnBadSignature(B.nodeId, 'node-b', msg), true);
     assert.strictEqual(msg._cmbVerified, false);
+    assert.ok(metrics.some((m) => m.type === 'cmb-author-unresolvable' && m.author === A.nodeId), 'counted by author');
+    assert.ok(decisions.some((d) => d.decision === 'rejected-signature' && /unresolvable|no proven/.test(d.focusLabel)));
+  });
+
+  it('a record whose signature was made by another key is refused (B claims A\'s nodeId)', () => {
+    const A = identity('node-a'), B = identity('node-b');
+    const cmb = signedRecord({ ...A, privateKey: B.privateKey }, { room: GROUP });
+    const { fh, logs, decisions } = harness({ [A.nodeId]: A.publicKey, [B.nodeId]: B.publicKey });
+    assert.strictEqual(fh._rejectOnBadSignature(B.nodeId, 'node-b', { cmb }), true);
+    assert.ok(decisions.some((d) => d.decision === 'rejected-signature'));
+    assert.ok(logs.some((m) => /refused/.test(m)));
+  });
+
+  it('a record with no createdByNodeId is refused — omitting it cannot dodge the check', () => {
+    const A = identity('node-a');
+    const cmb = signedRecord(A, { room: GROUP });
+    delete cmb.metadata.createdByNodeId;
+    const { fh, decisions } = harness({ [A.nodeId]: A.publicKey });
+    assert.strictEqual(fh._rejectOnBadSignature(A.nodeId, 'node-a', { cmb }), true);
+    assert.ok(decisions.some((d) => d.focusLabel === 'no-author-node-id'));
+  });
+
+  it('a legacy-suite record (pre-v2.0 signature) is refused even when its signature is genuine', () => {
+    const A = identity('node-a');
+    const cmb = createCMB({ categories: { focus: 'an old record' }, createdBy: 'node-a', room: GROUP });
+    signCMB(cmb, A.privateKey);
+    const { fh, decisions, metrics } = harness({ [A.nodeId]: A.publicKey });
+    assert.strictEqual(fh._rejectOnBadSignature(A.nodeId, 'node-a', { cmb }), true);
+    assert.ok(metrics.some((m) => m.type === 'cmb-legacy-suite-refused'), 'counted on its own metric');
+    assert.strictEqual(decisions.length, 0, 'and not recorded as a rejected signature: old history is not a forgery');
+  });
+
+  it('a record its author delivers directly verifies normally', () => {
+    const A = identity('node-a');
+    const cmb = signedRecord(A, { room: GROUP });
+    const { fh, decisions } = harness({ [A.nodeId]: A.publicKey });
+    const msg = { cmb };
+    assert.strictEqual(fh._rejectOnBadSignature(A.nodeId, 'node-a', msg), false);
+    assert.strictEqual(msg._cmbVerified, true);
     assert.strictEqual(decisions.length, 0);
   });
 });

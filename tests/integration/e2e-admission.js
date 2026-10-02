@@ -41,10 +41,8 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
       B._svafEvaluator.evaluate = async () => null;
 
       const [tA, tB] = bidirectionalPair();
-      tA.on('message', f => A._frameHandler.handle(B.nodeId, bName, f));
-      tB.on('message', f => B._frameHandler.handle(A.nodeId, aName, f));
-      A._addPeer(A._createPeer(tA, B.nodeId, bName, true, 'bonjour'));
-      B._addPeer(B._createPeer(tB, A.nodeId, aName, false, 'bonjour'));
+      A.connectTransport(tA, { role: 'client', expectNodeId: B.nodeId });
+      B.connectTransport(tB, { role: 'server' });
       await sleep(400);
 
       let received = null;

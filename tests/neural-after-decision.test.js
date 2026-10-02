@@ -39,7 +39,12 @@ async function withNode(fn) {
   }
 }
 
-const frame = (text) => { const cmb = createCMB({ categories: cat7(text), createdBy: 'peerA' }); return { type: 'cmb', timestamp: Date.now(), content: text, cmb }; };
+// A signed v2.0 record from peerA, delivered on peerA's confirmed session (Core Secure, 0.14).
+const { identity, signedRecord, admitAs } = require('./_core-secure');
+const PEER = identity('peerA');
+void createCMB;
+const frame = (text) => ({ type: 'cmb', timestamp: Date.now(), content: text, cmb: signedRecord(PEER, { categories: cat7(text) }) });
+const share = (node, f) => node._frameHandler._handleMemoryShare(PEER.nodeId, PEER.name, f, admitAs(node, PEER));
 
 describe('the neural path after its decision', () => {
   it('a tether that cannot be evaluated leaves the record stored unverified, decided and attested once', async () => {
@@ -48,7 +53,7 @@ describe('the neural path after its decision', () => {
       const broken = new Proxy({}, { get() { throw new Error('encoder fault'); }, ownKeys() { throw new Error('encoder fault'); } });
       node._frameHandler._prepareLineageTether = () => ({ key: 'anchor-key', categories: broken });
       const f = frame('a remix whose tether the model cannot encode');
-      await node._frameHandler._handleMemoryShare('peerA', 'peerA', f);
+      await share(node, f);
       const key = f.cmb.metadata.key;
       assert.strictEqual(seen.heuristic, 0, 'the heuristic gate did not run on the frame as well');
       assert.strictEqual(seen.decisions, 1, 'one decision');
@@ -64,7 +69,7 @@ describe('the neural path after its decision', () => {
     await withNode(async (node, seen) => {
       node._store.receiveFromPeer = () => { throw new Error('disk full'); };
       const f = frame('an admitted record the store cannot write');
-      await node._frameHandler._handleMemoryShare('peerA', 'peerA', f);
+      await share(node, f);
       assert.strictEqual(seen.heuristic, 0, 'not gated again');
       assert.strictEqual(seen.decisions, 1);
       assert.strictEqual(node._attestations.byCmb(f.cmb.metadata.key).length, 1, 'attested once');
@@ -75,7 +80,7 @@ describe('the neural path after its decision', () => {
   it("the evaluator's own failure still falls back to the heuristic gate", async () => {
     await withNode(async (node, seen) => {
       node._svafEvaluator = { evaluate: async () => { throw new Error('model not loaded'); } };
-      await node._frameHandler._handleMemoryShare('peerA', 'peerA', frame('a record the neural evaluator cannot judge'));
+      await share(node, frame('a record the neural evaluator cannot judge'));
       assert.strictEqual(seen.heuristic, 1);
       assert.ok(seen.logs.some((l) => /SVAF neural error: model not loaded — falling back to heuristic/.test(l)));
     });

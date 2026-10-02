@@ -63,10 +63,11 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
     });
   });
 
-  it('payload rides the wire frame to connected peers', async () => {
+  it('payload rides the record to connected peers as its signed application section (§8.8.3)', async () => {
+    const { admitAs, identity } = require('./_core-secure');
     await withNode('payload-wire', async (node) => {
-      const tA = capturingTransport();
-      node._addPeer(node._createPeer(tA, 'peer-AAAAAAAA', 'peer-a', false, 'bonjour'));
+      const peer = identity('peer-a');
+      const session = admitAs(node, peer);
 
       node.remember({
         focus: 'llm-request:test-r2',
@@ -77,16 +78,19 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
         perspective: 'test-sender',
         mood: { text: 'procedural', valence: 0, arousal: 0 },
       }, {
-        to: 'peer-AAAAAAAA',
+        to: peer.nodeId,
         payload: { request_id: 'r2', user_message: 'check the wire' },
       });
 
-      const cmbFrames = tA.frames.filter(f => f.type === 'cmb');
-      assert.strictEqual(cmbFrames.length, 1, 'peer should receive one CMB frame');
-      assert.deepStrictEqual(cmbFrames[0].cmb.payload, {
+      const cmbFrames = session.sent.filter(f => f.type === 'cmb');
+      assert.strictEqual(cmbFrames.length, 1, 'peer should be sent one record (the session seals it)');
+      const app = cmbFrames[0].cmb.metadata.application;
+      assert.strictEqual(app.mediaType, 'application/json');
+      assert.deepStrictEqual(JSON.parse(Buffer.from(app.data, 'base64url').toString('utf8')), {
         request_id: 'r2',
         user_message: 'check the wire',
-      }, 'wire frame should carry the payload through');
+      }, 'the signed application section carries the payload');
+      assert.strictEqual(cmbFrames[0].cmb.metadata.signatureSuite, 'mmp-sig-v2.0');
     });
   });
 

@@ -58,7 +58,15 @@ describe('MMP v2.0 §5.2 authenticated handshake flow', () => {
     const { clientSession, serverSession, clientFinishResult } = handshake(pair());
     assert.strictEqual(clientSession.sessionId, serverSession.sessionId);
     assert.ok(clientSession.confirmed && serverSession.confirmed, 'both sessions are confirmed');
-    assert.deepStrictEqual(clientFinishResult.selected, [EXT_CMB_ENCRYPTED_V2]);
+    // §16.1: the server selects the intersection of both offers (bytewise order), cmb-encrypted-v2
+    // among them whenever both offer it. (Until 0.14 it selected cmb-encrypted-v2 alone.)
+    assert.deepStrictEqual(clientFinishResult.selected, ['admission-attestation-v1', EXT_CMB_ENCRYPTED_V2]);
+  });
+
+  it('selects the intersection exactly as the published handshake vector does', () => {
+    const vec = require('./mmp-v2-handshake.vector.json').fixture.handshake;
+    const { selectExtensions } = require('../lib/core/mmp-extensions');
+    assert.deepStrictEqual(selectExtensions(vec.client.extensions, vec.server.extensions).selected, vec.selectedExtensions);
   });
 
   it('the established session immediately carries a sealed frame end to end', () => {
@@ -74,8 +82,7 @@ describe('MMP v2.0 §5.2 authenticated handshake flow', () => {
     };
     const s = clientSession.nextSend();
     const frame = buildEncryptedFrame({ cmb, sessionId: clientSession.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey });
-    const r = serverSession.acceptRecv(frame.sequence, frame.direction);
-    const out = openEncryptedFrame({ frame, trafficKey: r.trafficKey });
+    const out = serverSession.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey }));
     assert.deepStrictEqual(out.cmb.categories, cmb.categories);
   });
 
@@ -143,6 +150,6 @@ describe('MMP v2.0 §5.2 authenticated handshake flow', () => {
 
   it('a peer without cmb-encrypted-v2 negotiates no v2 (legacy posture decided upstream)', () => {
     const { clientFinishResult } = handshake(pair(EXTS, ['admission-attestation-v1']));
-    assert.deepStrictEqual(clientFinishResult.selected, []);
+    assert.deepStrictEqual(clientFinishResult.selected, ['admission-attestation-v1'], 'the intersection, without cmb-encrypted-v2');
   });
 });

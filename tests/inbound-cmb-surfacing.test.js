@@ -36,7 +36,6 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB } = require('../lib/core');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -53,18 +52,32 @@ async function withNode(baseName, fn) {
 const ALIGNED = { decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } };
 const REJECTED = { decision: 'rejected', total_drift: 9, category_drifts: {}, gate_values: { g: 0 } };
 
-function cmbFrame(focusText, mood = { text: 'neutral', valence: 0, arousal: 0 }) {
-  const cmb = createCMB({
+// Since 0.14 (Core Secure) an inbound record is a signed v2.0 record from an author this node holds a
+// key for, delivered on a confirmed session; its binding is its signed metadata.to (design D4).
+const { identity, signedRecord, admitAs } = require('./_core-secure');
+const PEER_A = identity('peerA');
+const PEER_B = identity('peerB');
+const sessions = new WeakMap();
+function from(node, peer = PEER_A) {
+  let m = sessions.get(node);
+  if (!m) { m = new Map(); sessions.set(node, m); }
+  if (!m.has(peer.nodeId)) m.set(peer.nodeId, admitAs(node, peer));
+  return m.get(peer.nodeId);
+}
+
+function cmbFrame(focusText, mood = { text: 'neutral', valence: 0, arousal: 0 }, { to = null, author = PEER_A } = {}) {
+  const cmb = signedRecord(author, {
     categories: {
       focus: focusText,
       issue: 'inbound surfacing regression',
       intent: 'verify receive path',
       motivation: 'public real-time claim',
       commitment: 'guard against silent drop',
-      perspective: 'peerA',
+      perspective: author.name,
       mood,
     },
-    createdBy: 'peerA',
+    room: 'default',
+    to,
   });
   return { type: 'cmb', timestamp: Date.now(), cmb };
 }
@@ -75,15 +88,10 @@ function wireCopy(frame) {
   return JSON.parse(JSON.stringify(frame));
 }
 
-// A directed (peer-bound) frame: marked with `directed` + `to` = the receiving
-// node's id, the way node.remember({to}) marks a targeted send on the wire
-// (MMP §4.4.4 / §9.2.2). `to` must equal the receiver's nodeId for the
-// directed-delivery branch to fire.
+// A directed (peer-bound) record: its author SIGNED `to` = the receiving node (MMP §9.2.2, design
+// D4). The frame flags `directed`/`to` are no longer read.
 function directedFrame(receiverNode, focusText, mood) {
-  const frame = cmbFrame(focusText, mood);
-  frame.to = receiverNode.nodeId;
-  frame.directed = true;
-  return frame;
+  return cmbFrame(focusText, mood, { to: receiverNode.nodeId });
 }
 
 // Waits for every in-flight frame to finish, not a fixed guess at how long that takes.
@@ -95,7 +103,7 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       let surfaced = 0;
       node.on('cmb-accepted', () => { surfaced++; });
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(cmbFrame('first inbound CMB')));
+      node._frameHandler.handle(from(node), wireCopy(cmbFrame('first inbound CMB')));
       await settle();
       assert.strictEqual(surfaced, 1, 'inbound CMB must surface to the application layer');
     });
@@ -119,13 +127,13 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
       const frame = cmbFrame('shared question to the mesh'); // neutral mood
 
       // Arrival #1: SVAF rejects, neutral mood → surfaces nothing.
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      node._frameHandler.handle(from(node), wireCopy(frame));
       await settle();
       assert.strictEqual(surfaces.length, 0, 'neutral reject surfaces nothing (precondition)');
 
       // Arrival #2: identical CMB re-sent (reconnect anchor replay). SVAF now
       // admits. Pre-fix this was deduped and silently dropped — receive-blind.
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      node._frameHandler.handle(from(node), wireCopy(frame));
       await settle();
       assert.ok(
         surfaces.length > 0,
@@ -142,7 +150,7 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
       const frame = cmbFrame('admitted observation that keeps getting replayed');
       // Five identical wire-fresh re-sends (five Bonjour reconnect replays).
       for (let i = 0; i < 5; i++) {
-        node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+        node._frameHandler.handle(from(node), wireCopy(frame));
         await settle(60);
       }
       assert.strictEqual(surfaced, 1, 'an identical CMB must surface exactly once; the replay storm stays bounded');
@@ -160,8 +168,8 @@ describe('inbound CMB surfacing — public real-time mesh claim', () => {
         nodeB.on('cmb-accepted', () => { bSurfaced++; });
 
         // A→B and B→A, each a distinct CMB so neither is deduped.
-        nodeB._frameHandler.handle('peerA', 'peerA', wireCopy(cmbFrame('from A to B')));
-        nodeA._frameHandler.handle('peerB', 'peerB', wireCopy(cmbFrame('from B to A')));
+        nodeB._frameHandler.handle(from(nodeB, PEER_A), wireCopy(cmbFrame('from A to B')));
+        nodeA._frameHandler.handle(from(nodeA, PEER_B), wireCopy(cmbFrame('from B to A', undefined, { author: PEER_B })));
         await settle();
 
         assert.strictEqual(bSurfaced, 1, 'B must surface the CMB sent from A');
@@ -191,7 +199,7 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
       node._svafEvaluator.evaluate = async () => REJECTED;
       const surfaced = [];
       node.on('cmb-accepted', (e) => surfaced.push(e));
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(directedFrame(node, 'urgent: please review the auth token flow')));
+      node._frameHandler.handle(from(node), wireCopy(directedFrame(node, 'urgent: please review the auth token flow')));
       await settle();
       assert.strictEqual(surfaced.length, 1, 'a directed CMB MUST surface even when SVAF rejects it for memory');
       assert.strictEqual(surfaced[0].directed, true, 'surfaced entry is flagged directed');
@@ -205,7 +213,7 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const surfaced = [];
       node.on('cmb-accepted', (e) => surfaced.push(e));
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(directedFrame(node, 'directed observation that aligns with memory')));
+      node._frameHandler.handle(from(node), wireCopy(directedFrame(node, 'directed observation that aligns with memory')));
       await settle();
       assert.strictEqual(surfaced.length, 1, 'a directed CMB that admits surfaces exactly once (admit path)');
       assert.strictEqual(surfaced[0].remixed, true, 'an admitted CMB is ingested — remixed into local memory');
@@ -219,7 +227,7 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
       node.on('cmb-accepted', (e) => surfaced.push(e));
       // No `to`/`directed` → room-bound. Neutral mood so the mood fast-path
       // surfaces nothing either.
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(cmbFrame('ambient broadcast unrelated to my domain')));
+      node._frameHandler.handle(from(node), wireCopy(cmbFrame('ambient broadcast unrelated to my domain')));
       await settle();
       assert.strictEqual(surfaced.length, 0, 'a rejected broadcast MUST NOT surface — receiver-autonomous attention');
     });
@@ -230,10 +238,8 @@ describe('directed (peer-bound) delivery + ingestion flag — MMP §9.2.2', () =
       node._svafEvaluator.evaluate = async () => REJECTED;
       const surfaced = [];
       node.on('cmb-accepted', (e) => surfaced.push(e));
-      const frame = cmbFrame('directed at someone else');
-      frame.directed = true;
-      frame.to = 'some-other-node-id'; // not this node's nodeId
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      const frame = cmbFrame('directed at someone else', undefined, { to: identity('other').nodeId }); // not this node
+      node._frameHandler.handle(from(node), wireCopy(frame));
       await settle();
       assert.strictEqual(surfaced.length, 0, 'a CMB directed at another node must not be force-surfaced here');
     });
@@ -252,13 +258,13 @@ describe('replay horizon — a stale directive must not dress as fresh', () => {
       let surfaced = 0;
       node.on('cmb-accepted', () => { surfaced += 1; });
       const frame = directedFrame(node, 'directive: commit the README change from message 457');
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      node._frameHandler.handle(from(node), wireCopy(frame));
       await settle();
       assert.equal(surfaced, 1, 'first delivery surfaces');
       // Backdate the seen record by 30 hours — the daemon-spool replay horizon observed live.
       const fh = node._frameHandler;
       for (const [k, ts] of fh._seenCmbKeys) fh._seenCmbKeys.set(k, ts - 30 * 60 * 60 * 1000);
-      node._frameHandler.handle('peerA', 'peerA', wireCopy(frame));
+      node._frameHandler.handle(from(node), wireCopy(frame));
       await settle();
       assert.equal(surfaced, 1,
         'a 30-hour-later replay of an already-surfaced directive must not re-surface as fresh');

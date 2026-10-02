@@ -27,11 +27,18 @@ function kp(nodeId) {
 }
 
 const T = 1_000_000;
+// Since 0.14 every role-grant names the key it confers authority on (design D3).
 function grant(type, grantee, role, grantor, at) {
-  return signGrant({ type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at }, grantor.priv);
+  const g = { type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at };
+  if (type === 'role-grant') g.granteeKey = grantee.pub;
+  return signGrant(g, grantor.priv);
 }
 
-/** A store whose keys map is pre-populated with every party's pubkey + anchor pinned. */
+/**
+ * A store whose key map holds every party's pubkey + anchor pinned. Since 0.14 the map only answers
+ * "which key is this subject bound to" (resolveRole's two-argument form); grants are verified with
+ * the keys the chain itself vouches, never with it.
+ */
 function storeWith(anchor, parties, opts = {}) {
   const keys = new Map();
   for (const p of [anchor, ...parties]) keys.set(p.nodeId, p.pub);
@@ -208,18 +215,22 @@ describe('RoleGrantStore — relayed key learning (grant vouches for grantee key
     // X (a participant) grants Y, vouching Y's key — X's key is in the registry (say via
     // some handshake) so the grant verifies, but X is unrooted so it confers nothing, is
     // not kept (0.13.17: an unrooted record is not stored or relayed) AND vouches for no key.
-    reg.pin(X.nodeId, X.pub, 'handshake');
-    assert.deepStrictEqual(store.record(grantWithKey(Y, 'validator', X, T)), { stored: false, reason: 'unrooted' });
+    reg.bind(X.nodeId, X.pub, 'proven');
+    assert.deepStrictEqual(store.record(grantWithKey(Y, 'validator', X, T)), { stored: false, reason: 'unknown-grantor-key' },
+      'no chain vouches a key for X, so its grant cannot even be checked (the registry is never asked)');
     assert.strictEqual(reg.has(Y.nodeId), false, 'unrooted grantor vouches for no key');
   });
 
-  it('a grant-vouched key cannot override a key already pinned by handshake', () => {
-    const A = kp('A'), V = kp('V');
+  it('a grant-vouched key cannot override a key already proven: it is a conflict', () => {
+    const A = kp('A'), V = kp('V'), other = kp('V-other');
     const reg = new RosterKeyRegistry({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
     const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, keys: reg });
-    reg.pin(V.nodeId, 'real-handshake-key', 'handshake');
-    // a rooted grant vouching a DIFFERENT key for V must not repoint the handshake binding
-    store.record(grantWithKey(V, 'validator', A, T));
-    assert.strictEqual(reg.get(V.nodeId), 'real-handshake-key', 'handshake binding stands');
+    reg.bind(V.nodeId, other.pub, 'proven');
+    // a rooted grant vouching a DIFFERENT key for V must not repoint the proven binding
+    assert.strictEqual(store.record(grantWithKey(V, 'validator', A, T)).stored, true, 'the grant itself is rooted and kept');
+    assert.strictEqual(reg.get(V.nodeId), other.pub, 'the proven binding stands');
+    assert.deepStrictEqual(reg.conflicts().map((c) => [c.nodeId, c.got, c.gotSource]), [[V.nodeId, V.pub, 'grant']], 'and the vouch is recorded as a conflict');
+    assert.strictEqual(store.resolveRole(V.nodeId, T + 1), 'participant', 'the key V is bound to holds no grant');
+    assert.strictEqual(store.resolveRole(V.nodeId, V.pub, T + 1), 'validator', 'the vouched key does');
   });
 });

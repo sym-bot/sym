@@ -23,6 +23,7 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir, loadOrCreateIdentity } = require('../lib/config');
 const { signGrant } = require('../lib/core');
+const { admitAs, deliver } = require('./_core-secure');
 
 function kp(nodeId) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -32,8 +33,10 @@ function kp(nodeId) {
     pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
   };
 }
+// Since 0.14 every role-grant names the key it confers authority on (design D3): the fixtures carry
+// granteeKey, so each record exercises the check the 0.13.17 test meant it to.
 const grant = (type, grantee, role, grantor, at, extra = {}) =>
-  signGrant({ type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at, ...extra }, grantor.priv);
+  signGrant({ type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at, ...(type === 'role-grant' ? { granteeKey: grantee.pub } : {}), ...extra }, grantor.priv);
 
 const uniq = (base) => `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 const grantsFile = (name) => path.join(nodeDir(name), 'role-grants', 'role-grants.jsonl');
@@ -45,9 +48,10 @@ function boot(name, founder, extra = {}) {
     ...extra,
   });
 }
-// A peer connects: its handshake pins its key at first use, which is what a self-signed grant verifies against.
+// A peer connects: its session proves its key (design D1/D3), the strongest binding a self-signed
+// grant could ever be checked against. Frames then reach the node through the one guarded dispatch.
 function handshake(node, peer) {
-  node._frameHandler.handle(peer.nodeId, peer.nodeId, { type: 'handshake', nodeId: peer.nodeId, name: peer.nodeId, publicKey: peer.pub });
+  return admitAs(node, { nodeId: peer.nodeId, name: peer.nodeId, publicKey: peer.pub });
 }
 
 describe('a role-grant that is not rooted at the anchor is not stored (F3)', () => {
@@ -60,9 +64,9 @@ describe('a role-grant that is not rooted at the anchor is not stored (F3)', () 
       try {
         const relayed = [];
         node._gossipToRoster = (frame) => relayed.push(frame);
-        handshake(node, evil);
+        const session = handshake(node, evil);
         const self = grant('role-grant', evil, 'anchor', evil, Date.now());
-        node._frameHandler.handle(evil.nodeId, 'evil', { type: 'role-grant', grant: self });
+        deliver(node, session, { type: 'role-grant', grant: self });
         assert.strictEqual(node._roleGrants.has(self.sig), false, 'the unrooted grant is not held');
         assert.strictEqual(fs.existsSync(grantsFile(name)), false, 'and nothing was written');
         assert.deepStrictEqual(relayed, [], 'and nothing was relayed');
@@ -81,9 +85,9 @@ describe('a role-grant that is not rooted at the anchor is not stored (F3)', () 
     try {
       const relayed = [];
       node._gossipToRoster = (frame, except) => relayed.push({ frame, except });
-      handshake(node, relayer);
+      const session = handshake(node, relayer);
       const g = grant('role-grant', V, 'validator', founder, Date.now() - 1000, { granteeKey: V.pub });
-      node._frameHandler.handle(relayer.nodeId, 'relayer', { type: 'role-grant', grant: g });
+      deliver(node, session, { type: 'role-grant', grant: g });
       assert.strictEqual(node._roleGrants.has(g.sig), true);
       assert.strictEqual(relayed.length, 1, 'relayed once');
       assert.strictEqual(relayed[0].except, relayer.nodeId, 'not back to the peer it came from');
@@ -101,11 +105,12 @@ describe('a role-grant that is not rooted at the anchor is not stored (F3)', () 
     const self = { nodeId: id.nodeId, pub: id.publicKey };
     let node = boot(name, self);
     try {
-      const peer = 'node-peer-xyz';
-      assert.ok(node.grantRole(peer, 'validator'));
+      const peer = kp('node-peer-xyz');
+      node._roster.bind(peer.nodeId, peer.pub, 'proven'); // a grant names a proven key (design D3)
+      assert.ok(node.grantRole(peer.nodeId, 'validator'));
       node.stop();
       node = boot(name, self);
-      assert.strictEqual(node.resolveRole(peer), 'validator');
+      assert.strictEqual(node.resolveRole(peer.nodeId), 'validator');
     } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
@@ -116,6 +121,7 @@ describe('a role-grant that is not rooted at the anchor is not stored (F3)', () 
     try {
       const sent = [];
       node._gossipToRoster = (frame) => sent.push(frame);
+      node._roster.bind('someone', kp('someone').pub, 'proven');
       assert.strictEqual(node.grantRole('someone', 'validator'), null);
       assert.deepStrictEqual(sent, []);
       assert.strictEqual(fs.existsSync(grantsFile(name)), false);
@@ -128,7 +134,7 @@ describe('reading role-grants.jsonl never stops a node from starting (F3)', () =
     const name = uniq('rg-junk');
     const founder = kp('founder'), evil = kp('evil-peer'), V = kp('v'), W = kp('w');
     let node = boot(name, founder);
-    handshake(node, evil); // pins evil's key, as a 0.13.16 node had
+    handshake(node, evil); // binds evil's key (proven): a self-signed grant still confers nothing
     node.stop();
     const now = Date.now();
     const forged = { ...grant('role-grant', evil, 'anchor', founder, now), sig: Buffer.alloc(64, 7).toString('base64url') };
@@ -153,14 +159,16 @@ describe('reading role-grants.jsonl never stops a node from starting (F3)', () =
     try {
       const about = said.filter((l) => /Role grants/.test(l));
       assert.strictEqual(about.length, 1, 'said once');
-      assert.match(about[0], /loaded 2, skipped 8 that could not be verified \(not-json 1, malformed 5, bad-signature 1, unrooted 1\)/);
+      // 0.14 (design D3): a grant is checked against the keys the chain vouches for its grantor, never
+      // the registry's, so the self-signed grant is skipped as from a grantor no chain reaches.
+      assert.match(about[0], /loaded 2, skipped 8 that could not be verified \(not-json 1, malformed 5, unknown-grantor-key 1, bad-signature 1\)/);
       assert.strictEqual(node.resolveRole(V.nodeId), 'validator');
       assert.strictEqual(node.resolveRole(W.nodeId), 'validator', 'a two-hop chain loads whatever the line order');
       assert.strictEqual(node.resolveRole(evil.nodeId), 'participant');
       const rep = node._roleGrants.loadReport();
       assert.strictEqual(rep.loaded, 2);
       assert.strictEqual(rep.unreadable, null);
-      assert.deepStrictEqual(rep.skipped, { 'not-json': 1, malformed: 5, unrooted: 1, 'bad-signature': 1 });
+      assert.deepStrictEqual(rep.skipped, { 'not-json': 1, malformed: 5, 'unknown-grantor-key': 1, 'bad-signature': 1 });
     } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 

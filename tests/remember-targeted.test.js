@@ -4,6 +4,7 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+const { plantSession } = require('./_core-secure');
 const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
@@ -41,9 +42,9 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       const tA = capturingTransport();
       const tB = capturingTransport();
       const tC = capturingTransport();
-      node._addPeer(node._createPeer(tA, 'peer-AAAAAAAA', 'peer-a', false, 'bonjour'));
-      node._addPeer(node._createPeer(tB, 'peer-BBBBBBBB', 'peer-b', false, 'bonjour'));
-      node._addPeer(node._createPeer(tC, 'peer-CCCCCCCC', 'peer-c', false, 'bonjour'));
+      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
+      plantSession(node, tB, 'peer-BBBBBBBB', 'peer-b', 'bonjour');
+      plantSession(node, tC, 'peer-CCCCCCCC', 'peer-c', 'bonjour');
 
       const entry = node.remember({
         focus: 'broadcast fan-out regression check',
@@ -71,9 +72,9 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       const tA = capturingTransport();
       const tB = capturingTransport();
       const tC = capturingTransport();
-      node._addPeer(node._createPeer(tA, 'peer-AAAAAAAA', 'peer-a', false, 'bonjour'));
-      node._addPeer(node._createPeer(tB, 'peer-BBBBBBBB', 'peer-b', false, 'bonjour'));
-      node._addPeer(node._createPeer(tC, 'peer-CCCCCCCC', 'peer-c', false, 'bonjour'));
+      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
+      plantSession(node, tB, 'peer-BBBBBBBB', 'peer-b', 'bonjour');
+      plantSession(node, tC, 'peer-CCCCCCCC', 'peer-c', 'bonjour');
 
       const entry = node.remember({
         focus: 'targeted send to peer B',
@@ -97,7 +98,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
   it('still writes locally when opts.to names a disconnected peer', async () => {
     await withNode('targeted-disconnected', async (node) => {
       const tA = capturingTransport();
-      node._addPeer(node._createPeer(tA, 'peer-AAAAAAAA', 'peer-a', false, 'bonjour'));
+      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
 
       const entry = node.remember({
         focus: 'targeted send to absent peer',
@@ -128,7 +129,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
 
   it('peers() exposes full peerId alongside truncated id', async () => {
     await withNode('peers-peerid', async (node) => {
-      node._addPeer(node._createPeer(capturingTransport(), 'peer-AAAAAAAA-bcd-1234', 'peer-a', false, 'bonjour'));
+      plantSession(node, capturingTransport(), 'peer-AAAAAAAA-bcd-1234', 'peer-a', 'bonjour');
       const list = node.peers();
       assert.strictEqual(list.length, 1);
       assert.strictEqual(list[0].id, 'peer-AAA', 'id is the truncated display form');
