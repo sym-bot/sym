@@ -31,6 +31,14 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   `createdByNodeId`, so a genuine relay also verifies. A v2.0 record whose carried `assertionId`
   is not the one its preimage yields is refused (B-R6). On other suites a carried `assertionId`,
   which nothing signs, is dropped.
+- **A record signed for another room or another node was stored.** The audience check (§18.3.1)
+  ran only on the older suite's direct path: a verified v2.0 record returned before it, and so did an
+  older-suite record verified against its author on relay, so a record its author addressed to
+  another node, or signed for another room, was stored, remixed and gossiped by every node it
+  reached. Every signed record's `room` and `to` are now checked, on every path, whether or not its
+  signature could be verified here, and a record addressed elsewhere is refused before it is stored
+  or surfaced. Each refusal is counted (`cmb-audience-rejected`, with `verified`) and said once a
+  minute per peer and reason.
 - **Stripping the frame's `directed` flag turned a signed directed CMB into a broadcast (B-R8).**
   A signed addressee could only veto directed treatment. When the author signed one, it now alone
   decides.
@@ -76,6 +84,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 
 ### Fixed — delivery and records
 
+- **An emitter that named no room was admitted and then not heard.** `connect()` and `sym emit`
+  without `--room` make no room claim, and a node in a named room admits them, but their records
+  named no room, which is the room `default` (B-R10), so that node refused every block. An emitter
+  that names no room now authors for the room the node's handshake reply states.
 - **Two copies of one record arriving together could both surface (K1).** A key is held in flight
   from the de-duplication check until its SVAF pass settles.
 - **A broadcast flood could evict directed de-duplication marks (K3).** They have their own map and
@@ -94,12 +106,27 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   minute, timestamps follow the clock again, with a `clock-stepped-back` metric.
 - **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
   must be numbers in [-1, 1], and a mood given only as numbers keeps them.
-- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB, the
-  seven at most 960 KiB, and an agent id at most 64 bytes (§3.1.2). The emitter throws `ECMBSIZE`, and
-  a receiver refuses an oversized record before rendering, verifying or storing it.
-- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
-  metadata whole, as a copy.
+- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB of text
+  and the seven at most 960 KiB, and a record is minted only if the frame it travels in fits the
+  1 MiB frame bound with its categories sealed for a peer. Text bytes are not frame bytes: JSON
+  writes a `"` as two bytes and a control character as six, and the end-to-end seal is base64, a 4/3
+  expansion, so a record within the text bounds could be one no transport would carry. In plain text
+  the frame bound allows about 766 KiB. An agent id is at most 64 bytes (§3.1.2). `createCMB` throws
+  `ECMBSIZE`, and so does `remember()`, before anything is stored or sent, for a record or payload
+  that would not fit. These are minting rules. A receiver applies no record bound beyond the frame a
+  record arrives in: earlier releases minted larger categories and longer agent ids, and refusing
+  them would stop a node hearing such a peer at all.
+- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's two
+  sections exactly as signed, as a copy: the metadata whole, and each category with its `meta`. Text
+  alone dropped the per-category parents the signature commits to, so a record that declared them
+  failed verification at the requester.
 - **A frame written to a destroyed socket counted as sent (B-D6, residual).**
+- **A send that failed for any reason was reported as "not connected".** `sendFrame` and the
+  transports returned one `false` for a frame over the bound, a closed socket and a failed write.
+  `writeFrame` and the transports' `trySend` now say which (`too-large`, `not-connected`,
+  `write-failed`); `sendFrame` and `send` still return a boolean. A directed `remember()` that was not
+  sent carries `delivery.reason`, its log line names the reason, and a frame over the bound is counted
+  (`cmb-frame-too-large`). `shareWithPeers` counts only the peers a frame reached.
 - **Unsigned records are now counted (B-R3, interim).** They are still accepted as unverified for
   interop, but each is counted (`cmb-unsigned-received`) and the sending peer is named once in the
   log, so the emitters a signed-only default would cut off can be found first.
@@ -109,7 +136,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **The root walk trusted unverified records (B-L4).** It walks only through records whose address
   recomputes and that this node wrote or admitted as verified. A remix with no verified ancestor in
   reach resolves to no anchor, instead of being anchored to itself, and the result says whether the
-  walk was `complete`.
+  walk was `complete`. The walk is bounded in work as well as in records: at most 64 hops, 4,096
+  stored records and 16,384 parent keys queued, and it stops at a bound instead of draining its
+  queue. A record can name about 14,700 parents within one frame, and before this the queue grew
+  with every long parent list the walk stepped onto.
 - **A tether could not be reproduced by another node (B-L5).** It is measured on the stored record's
   text, encoded in one kernel, instead of on vectors blended with local memory.
 - **Cold-start admissions had no tether (B-L6).**
@@ -117,13 +147,22 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 
 ### Changed — read these before upgrading
 
-- **A stored record is exactly what its author signed.** The store used to add members to a
-  two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an expanded
-  top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and those
-  annotations live on the store **entry**. Stored files from earlier releases are read as before and
+- **A stored record is what its author sent, and nothing this node computed.** The store used to add
+  members to a two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an
+  expanded top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and
+  those annotations live on the store **entry**. The one other member it can carry is the `payload`
+  its author sent beside the two sections (as the author's own stored record does): no signature or
+  address covers it, so a record that verifies says nothing about its payload, and `cmb-fetch`
+  serves the two sections without it. Stored files from earlier releases are read as before and
   moved on first touch. **Code outside sym that reads `entry.cmb.admission`, `.tether`,
   `.provenance` or `.collapsed`, from stored entries or from `cmb-accepted` / `memory-received`
   events, must read them from the entry.** xmesh 0.10.11 reads both places.
+- **A record that names no room is in the room `default`, from any sender.** Earlier releases read
+  it as addressed to every room. A 0.13.x `connect()` or `sym emit` without `--room` mints exactly
+  such records, so a 0.14.0 node in any other room refuses what it sends (`cmb-audience-rejected`,
+  `wrong-audience`): a receiver cannot tell a room-less record its author just sent from one
+  replayed out of another room. Upgrade the emitter, or pass `--room` (`connect({ room })`) naming
+  the node's room.
 - **SVAF anchors decay with age (§9.2.1).** The gate treated every stored anchor as fresh at full
   weight, because the anchor view carried neither the entry's age nor its weight. Anchors now carry
   both: `storedAt`, and the store's §6.4 `anchorWeight` (2.0 once validated, 0.5 once dismissed, never

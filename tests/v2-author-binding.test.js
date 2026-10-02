@@ -9,6 +9,9 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  *   itself under someone else's id, and a genuine relay verifies against the author.
  * - B-R6 (§8.8.5 step 5): a carried `assertionId` must be the one the preimage yields; on records
  *   of the older suite, where no signature covers it, a carried `assertionId` is dropped.
+ * - 0.14.0 review C-F1 (§18.3.1): the audience a record signs (`room`, `to`) is checked on every
+ *   suite. A verified v2.0 record returned before the check, so one signed for another room or node
+ *   was stored; so did an older-suite record verified against its author on relay.
  */
 
 const { describe, it } = require('node:test');
@@ -29,8 +32,8 @@ function kp() {
 }
 const ALICE = kp(), MALLORY = kp(), RELAY = kp();
 
-function v2Record({ nodeId, createdBy, signWith, focus = 'v2 observation' }) {
-  const cmb = createCMB({ categories: { focus }, createdBy, emitV2: true, createdByNodeId: nodeId, room: 'default' });
+function v2Record({ nodeId, createdBy, signWith, focus = 'v2 observation', room = 'default', to = null }) {
+  const cmb = createCMB({ categories: { focus }, createdBy, emitV2: true, createdByNodeId: nodeId, room, to });
   cmb.metadata.assertionId = assertionIdV2_0(cmb);
   signCMB(cmb, signWith.priv);
   return cmb;
@@ -144,6 +147,87 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
       assert.doesNotThrow(() => node._frameHandler.handle('node-alice', 'alice', { type: 'cmb', cmb: malformed() }));
       node._frameHandler._handleMemoryShare = original;
       assert.ok(metrics.some((m) => m.type === 'frame-handler-error' && /boom/.test(m.error)));
+    });
+  });
+});
+
+describe('the audience a record signs is checked on every suite (0.14.0 review C-F1)', () => {
+  function capture(node) {
+    const metrics = [];
+    const lines = [];
+    node.on('metric', (m) => metrics.push(m));
+    node._log = (l) => lines.push(l);
+    return { metrics, lines, refused: () => metrics.filter((m) => m.type === 'cmb-audience-rejected') };
+  }
+
+  it('a verified v2.0 record addressed to another node is refused, never stored', async () => {
+    const name = `v2aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      node._pinPeerKey('node-alice', ALICE.pub);
+      node._pinPeerKey('node-relay', RELAY.pub);
+      node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
+      const c = capture(node);
+      const got = [];
+      node.on('cmb-accepted', (e) => got.push(e));
+      // Alice signs a record for Bob; a relay hands it to this node, which holds Alice's key.
+      const forBob = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for bob only', to: 'node-bob' });
+      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: forBob });
+      await settle();
+      assert.strictEqual(got.length, 0, 'not surfaced');
+      assert.strictEqual(node._store.get(forBob.metadata.key), null, 'not stored');
+      assert.deepStrictEqual(c.refused().map((m) => [m.reason, m.verified]), [['wrong-recipient', true]]);
+
+      // The same author's record for THIS node is admitted, so the refusal is the audience's.
+      const forMe = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for this node', to: node.nodeId });
+      node._frameHandler.handle('node-relay', 'relay', { type: 'cmb', timestamp: Date.now(), cmb: forMe });
+      await settle();
+      assert.strictEqual(got.length, 1, 'a record addressed here is surfaced');
+    } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  it('a verified v2.0 record signed for another room is refused', () => {
+    withNode((node) => {
+      const c = capture(node);
+      const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, room: 'another-room' }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', msg), true);
+      assert.deepStrictEqual(c.refused().map((m) => m.reason), ['wrong-audience']);
+    });
+  });
+
+  it('an older-suite record verified against its author on relay is checked too', () => {
+    withNode((node) => {
+      node._pinPeerKey('alice', ALICE.pub); // the relayed arm resolves the author by its label
+      const c = capture(node);
+      const cmb = createCMB({ categories: { focus: 'older suite, for bob' }, createdBy: 'alice', room: 'default', to: 'node-bob' });
+      signCMB(cmb, ALICE.priv);
+      const msg = { cmb };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+      assert.strictEqual(msg._cmbVerified, true, 'precondition: it verified against its author');
+      assert.deepStrictEqual(c.refused().map((m) => m.reason), ['wrong-recipient']);
+    });
+  });
+
+  it('a record whose author key is not held is refused for its audience all the same', () => {
+    withNode((node) => {
+      const c = capture(node);
+      const stranger = kp();
+      const msg = { cmb: v2Record({ nodeId: 'node-stranger', createdBy: 'stranger', signWith: stranger, to: 'node-bob' }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+      assert.deepStrictEqual(c.refused().map((m) => [m.reason, m.verified]), [['wrong-recipient', false]]);
+    });
+  });
+
+  it('every refusal is counted, and said once a minute per peer and reason', () => {
+    withNode((node) => {
+      const c = capture(node);
+      for (let i = 0; i < 3; i++) {
+        const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: `for bob ${i}`, to: 'node-bob' }) };
+        assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+      }
+      assert.strictEqual(c.refused().length, 3);
+      assert.strictEqual(c.lines.filter((l) => /wrong-recipient/.test(l)).length, 1);
     });
   });
 });

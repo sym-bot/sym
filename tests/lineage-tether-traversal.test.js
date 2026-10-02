@@ -179,3 +179,41 @@ describe('storedRecordVerifies — what counts as a verified step', () => {
     assert.strictEqual(storedRecordVerifies(e.cmb, e.key), false);
   });
 });
+
+describe('§15.8 anchor resolution — the walk is bounded in work, not only in records visited', () => {
+  // A record may name as many parents as fit in a frame. The walk counted only the stored records
+  // it visited, so long parent lists grew the queue and the lookups without bound, and past its
+  // budget the walk went on draining the queue instead of stopping (0.14.0 review C-F5).
+  const unstored = (tag, n) => Array.from({ length: n }, (_, i) => `cmb-${tag}${String(i).padStart(63 - tag.length, '0')}`);
+  function counting(entries) {
+    const get = store(entries);
+    const counter = { lookups: 0 };
+    counter.getEntry = (key) => { counter.lookups++; return get(key); };
+    return counter;
+  }
+
+  it('a record naming 30,000 parents costs at most 16,384 lookups, and is incomplete', () => {
+    const c = counting([]);
+    const r = resolveTetherAnchor(remixOf(unstored('a', 30000)), c.getEntry);
+    assert.ok(c.lookups <= 4 * 4096, `${c.lookups} lookups`);
+    assert.strictEqual(r.complete, false);
+    assert.strictEqual(r.key, null);
+  });
+
+  it('long parent lists on the verified records it steps onto do not grow the walk', () => {
+    // A verified chain of 40 records, each also naming 2,000 parents this node never stored.
+    const chain = [];
+    let parent = null;
+    for (let i = 0; i < 40; i++) {
+      const e = entry(`chain ${i}`, 1000 + i, parent ? [parent] : [], verifiedAdmission);
+      e.cmb.metadata.lineage = { parents: [...(parent ? [parent] : []), ...unstored(`b${i}x`, 2000)], method: 'SVAF-v2' };
+      chain.push(e);
+      parent = e.key;
+    }
+    const c = counting(chain);
+    const r = resolveTetherAnchor(remixOf([parent]), c.getEntry);
+    assert.ok(c.lookups <= 4 * 4096, `${c.lookups} lookups`);
+    assert.strictEqual(r.complete, false, 'what it could not queue is not proven');
+    assert.strictEqual(r.resolvedFromStore, true, 'the verified records it did reach still anchor it');
+  });
+});
