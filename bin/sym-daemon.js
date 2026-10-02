@@ -65,7 +65,7 @@ require('../lib/core/state-root').assertTestSandbox();
 // ~/.sym. Building it from the home dir sent a rooted daemon's room, tasks and relay.env to the
 // user's real ~/.sym.
 const SYM_DIR = require('../lib/core/state-root').SYM_STATE_DIR;
-const { getSocketPath, getLogDir } = require('../lib/platform');
+const { getSocketPath, getLogDir, listenExclusive, socketAnswers } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or platform-scoped default
 // (not hostname — macOS appends random suffixes to hostname on WiFi,
@@ -221,13 +221,7 @@ const listeners = new Map(); // socketId → socket — real-time event subscrib
  */
 function socketServed() {
   if (process.platform === 'win32' || !fs.existsSync(SOCKET_PATH)) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const c = net.createConnection(SOCKET_PATH);
-    const done = (v) => { c.destroy(); resolve(v); };
-    c.once('connect', () => done(true));
-    c.once('error', () => done(false));
-    setTimeout(() => done(false), 2000).unref();
-  });
+  return socketAnswers(SOCKET_PATH);
 }
 
 /** The socket file this daemon created (its inode), so it never removes another daemon's. */
@@ -237,87 +231,112 @@ function socketIsOurs() {
   try { return fs.statSync(SOCKET_PATH).ino === ownSocketIno; } catch { return false; }
 }
 
+/** The server listening on SOCKET_PATH now. Closing a Unix-socket server removes its path, whoever
+ *  has bound it since, so it is closed only while the path is still its own. */
+let listeningServer = null;
+
+/** One IPC connection: newline-delimited JSON in, results and events out. */
+function onIPCConnection(socket) {
+  const socketId = nextSocketId++;
+  let buffer = '';
+
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (line.trim()) {
+        let msg;
+        try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
+        try {
+          handleIPCMessage(socketId, socket, msg);
+        } catch (err) {
+          log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
+          if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
+        }
+      }
+    }
+  });
+
+  socket.on('close', () => {
+    const vn = virtualNodes.get(socketId);
+    if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
+    const ha = hostedAgents.get(socketId);
+    if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
+    listeners.delete(socketId);
+  });
+
+  socket.on('error', (err) => {
+    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+      log(`IPC socket error: ${err.message}`);
+    }
+    virtualNodes.delete(socketId);
+    hostedAgents.delete(socketId);
+  });
+}
+
+function onListening() {
+  // chmod not applicable on Windows named pipes
+  if (process.platform !== 'win32') {
+    try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
+    try { ownSocketIno = fs.statSync(SOCKET_PATH).ino; } catch { ownSocketIno = null; }
+  }
+  log(`IPC server listening: ${SOCKET_PATH}`);
+}
+
+/** A server that only logs its errors once it is listening: an accept error never ends the daemon. */
+function newIPCServer() {
+  const server = net.createServer(onIPCConnection);
+  return server;
+}
+
+/** @returns {Promise<net.Server|null>} the listening server, or null when another daemon serves the path */
 async function startIPCServer() {
   // Ensure ~/.sym/ exists
   if (!fs.existsSync(SYM_DIR)) {
     fs.mkdirSync(SYM_DIR, { recursive: true });
   }
-  // A socket file is removed only when nothing answers on it. Removing it unconditionally let a
-  // second daemon start take the path from the one already serving: that daemon kept running,
-  // reachable by no client, and every client reported "sym-daemon not running".
-  if (await socketServed()) {
-    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
-    process.exit(1);
-  }
-  if (fs.existsSync(SOCKET_PATH)) {
-    try { fs.unlinkSync(SOCKET_PATH); } catch {}
-  }
-
-  const server = net.createServer((socket) => {
-    const socketId = nextSocketId++;
-    let buffer = '';
-
-    socket.on('data', (data) => {
-      buffer += data.toString();
-      let idx;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        if (line.trim()) {
-          let msg;
-          try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
-          try {
-            handleIPCMessage(socketId, socket, msg);
-          } catch (err) {
-            log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
-            if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
-          }
-        }
-      }
-    });
-
-    socket.on('close', () => {
-      const vn = virtualNodes.get(socketId);
-      if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
-      const ha = hostedAgents.get(socketId);
-      if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
-      listeners.delete(socketId);
-    });
-
-    socket.on('error', (err) => {
-      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-        log(`IPC socket error: ${err.message}`);
-      }
-      virtualNodes.delete(socketId);
-      hostedAgents.delete(socketId);
-    });
-  });
-
-  const onListening = () => {
-    // chmod not applicable on Windows named pipes
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
-      try { ownSocketIno = fs.statSync(SOCKET_PATH).ino; } catch { ownSocketIno = null; }
-    }
-    log(`IPC server listening: ${SOCKET_PATH}`);
-  };
-  server.listen(SOCKET_PATH, onListening);
+  // Bind first, and probe only a path that is taken: a socket file is removed only when nothing
+  // answers on it and it is still the file probed. Probing first and then removing whatever was
+  // there let two daemons starting together each take the path from the other.
+  const server = newIPCServer();
+  if (await listenExclusive(server, SOCKET_PATH) === 'served') return null;
+  server.on('error', (err) => log(`IPC server error: ${err.message}`));
+  listeningServer = server;
+  onListening();
 
   // If the socket file is removed or replaced while this daemon runs, clients can no longer reach
-  // it. It is checked every 30 s and, when gone, listened on again.
+  // it. It is checked every 30 s and, when gone, a fresh server listens on it. That never waits for
+  // the clients already connected: they stay on the connections they have (closing a server stops it
+  // accepting and leaves its connections open). One attempt at a time, and a failure is logged and
+  // retried at the next check, never fatal.
   if (process.platform !== 'win32') {
-    setInterval(() => {
-      if (ownSocketIno === null || socketIsOurs()) return;
+    let relistening = false;
+    setInterval(async () => {
+      if (relistening || ownSocketIno === null || socketIsOurs()) return;
       if (fs.existsSync(SOCKET_PATH)) return; // another process's socket now: leave it alone
-      log(`IPC socket ${SOCKET_PATH} was removed while this daemon was serving; listening again`);
-      server.close(() => server.listen(SOCKET_PATH, onListening));
+      relistening = true;
+      try {
+        log(`IPC socket ${SOCKET_PATH} was removed while this daemon was serving; listening again`);
+        // The old listener goes first: closing it removes the path, which is still empty now.
+        if (listeningServer) { listeningServer.close(); listeningServer = null; }
+        ownSocketIno = null;
+        const fresh = newIPCServer();
+        if (await listenExclusive(fresh, SOCKET_PATH) === 'served') {
+          log(`Another sym-daemon now serves ${SOCKET_PATH}; this one keeps the clients it has`);
+          return;
+        }
+        fresh.on('error', (err) => log(`IPC server error: ${err.message}`));
+        listeningServer = fresh;
+        onListening();
+      } catch (err) {
+        log(`IPC listen again on ${SOCKET_PATH} failed: ${err.message}; retried at the next check`);
+      } finally {
+        relistening = false;
+      }
     }, Number(process.env.SYM_SOCKET_CHECK_MS) || 30_000).unref();
   }
-
-  server.on('error', (err) => {
-    log(`IPC server error: ${err.message}`);
-    process.exit(1);
-  });
 
   return server;
 }
@@ -913,6 +932,12 @@ async function main() {
   log(`  relay: ${relayUrl || 'none'}`);
   log(`  socket: ${SOCKET_PATH}`);
 
+  // A socket another daemon answers on is its: this start stops before its node joins anything.
+  if (await socketServed()) {
+    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
+    process.exit(1);
+  }
+
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
 
@@ -971,7 +996,11 @@ async function main() {
     broadcastToListeners({ type: 'event', event: 'peer-left', data: { name: data.name || 'unknown', peerId: data.peerId } });
   });
 
-  const ipcServer = await startIPCServer();
+  if (!(await startIPCServer())) {
+    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
+    await node.stop();
+    process.exit(1);
+  }
 
   log('sym-daemon ready');
 
@@ -980,11 +1009,9 @@ async function main() {
     log('Shutting down...');
     stopRoomBeacon();
     node.stop();
-    ipcServer.close();
-    // Only our own socket file: a path another daemon now serves is left to it.
-    if (socketIsOurs()) {
-      try { fs.unlinkSync(SOCKET_PATH); } catch {}
-    }
+    // Only our own socket file: closing a server removes its path, so a path another daemon now
+    // serves is not closed over; exiting releases this one's handle without touching it.
+    if (listeningServer && socketIsOurs()) listeningServer.close();
     process.exit(0);
   };
 

@@ -243,10 +243,18 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   Two rooted deployments sharing a home shared one pid file, so `sym stop` for one stopped the other.
 - **A second daemon start took the socket from the one serving it.** The daemon removed any socket
   file at start, assuming it stale, so a second start unlinked a live daemon's socket; that daemon
-  ran on, reachable by no client, and every client reported "sym-daemon not running". A socket file
-  is now removed only when nothing answers on it (otherwise the second start exits), a daemon
-  removes only its own socket at shutdown, and a daemon whose socket file is removed listens on it
-  again within 30 s.
+  ran on, reachable by no client, and every client reported "sym-daemon not running".
+  - A start now exits before its node joins anything when a daemon answers on the path.
+  - It binds first and probes only a path that is taken. A stale file is removed only while it is
+    still the file it probed, so two daemons starting together cannot each take the path from the
+    other.
+  - At shutdown, a daemon closes its server only while the path is its own. Closing a Unix-socket
+    server removes its path, whoever has bound it since.
+  - A daemon whose socket file is removed listens on it again within 30 s, on a fresh server. It no
+    longer waits for its connected clients to leave (closing a server waits for every connection),
+    so a client attached for hours no longer left it unreachable and then exited it with
+    `ERR_SERVER_ALREADY_LISTEN` once the clients left. A failure to listen again is logged and
+    retried, and never ends the daemon.
 - **A daemon IPC request whose handler threw went unanswered.** It is answered with the error, and a
   refused `remember` carries the SDK's code (`ECMBSIZE`, `ESIGN`).
 - **A relay-only daemon still announced its room on the LAN.** It no longer does.
