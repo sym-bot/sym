@@ -102,6 +102,16 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   while it applies, the §16 influence bound does not cover the node. With decay that window recurs
   after every quiet period of about 18.4 × `freshnessSeconds` (about nine hours at the default), not
   only on a fresh node. `freshnessSeconds` is the dial: a larger value keeps older memory gating.
+- **The attestation logs are rotated, and older lines are deleted.** `attestations.jsonl`,
+  `checkpoints.jsonl` and `witnesses.jsonl` (in the node's `attestations/` directory) only ever grew.
+  Now a rotation replaces each live log with the records the store holds and moves the old log, whole,
+  into `attestations/archive/`. `archive/` keeps at most 128 MiB per log, **its newest archive
+  included**: the oldest go first, and an archive larger than 128 MiB on its own is deleted. **What
+  stays on disk is the records the store holds (50,000 attestations, 32 checkpoints for each of 1,024
+  attesters, 50,000 witnesses), the lines appended since the last rotation, and as many of the most
+  recent archived logs as fit in 128 MiB per log. Anything older is deleted.** On the first start, a
+  log already over its budget is rotated at once: the storm's 257 MB `witnesses.jsonl` is archived and,
+  being over 128 MiB, deleted.
 
 ### Fixed — SVAF and the store
 
@@ -122,6 +132,38 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   would then store as its own.
 - The semantic encoder no longer starts a second model load while the first is loading.
   `semanticSettled()` resolves when it is ready or has failed.
+
+### Fixed — the attestation logs
+
+- **The logs are rotated (0.13.15's known limit).** A log is rotated once the bytes in it beyond the
+  records the store holds (appended since its last rotation, then evicted or superseded) exceed the
+  larger of 8 MiB and the bytes of the records it holds. So a rotation always reclaims more than it
+  writes. It is never followed by another until that much more has been appended and dropped: a held
+  set larger than 8 MiB does not make every append rotate. A start applies the same rule to the log as
+  it finds it, so a node does not rotate on every start. Rotating a full attestation log (50,000,
+  ~27 MB) took about 100 ms here.
+- **A rotation cannot lose the live log.** It writes the records held to a temp file, checks every
+  byte reached the file (a write may be short) and fsyncs it. It then hard-links the old log into
+  `archive/` as `<log>.<sequence>.<time>.<pid>.jsonl`, never over an existing name, or copies it where
+  the filesystem has no hard links. Only then does it rename the temp file over the live log, so the
+  live path holds a complete log at every instant. A failure at any step removes what the rotation
+  made (no archive name is left on the live log), leaves the live log as it was, is logged once per
+  distinct error, and is retried after another budget. A start removes what a crashed rotation left
+  behind. Archives are pruned in sequence order, not by file time.
+- **A rotation keeps everything held:** every attestation, checkpoint and witness the store holds;
+  each conflicting checkpoint copy for a held position, so a restart still reports the conflict; and
+  this node's memory of the checkpoints it witnessed itself (one line per attester), so it still signs
+  a witness once across restarts. A witness waiting for its checkpoint stays in memory only, as before.
+- **A start reads all of a checkpoint or witness log.** A held checkpoint or witness can sit at the
+  head of its log while newer ones churn past, so these two logs are read whole: twice what their caps
+  hold, 28 MiB for checkpoints and 47.7 MiB for witnesses. 0.13.16 read only the newest 16 and 32 MiB,
+  which could miss a quiet attester's checkpoints. Attestations are evicted oldest first, so the ones
+  held are always the newest in their log, and 34.3 MiB (50,000 at 720 bytes; measured ~520) reads them
+  all. That is 110 MiB at most in all, against 0.13.16's 112 MiB. On logs over every budget, a start
+  took 0.5–0.6 s here, against 1.0–1.1 s for 0.13.16.
+- **A conflict on a held position is remembered as long as the position is held.** 0.13.16's
+  32,768-entry list also counted positions already dropped, so another attester's conflicts could push
+  out the mark of a position still held.
 
 ### Fixed — dependencies
 
