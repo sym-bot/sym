@@ -22,6 +22,14 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   `createdByNodeId`, so a genuine relay also verifies. A v2.0 record whose carried `assertionId`
   is not the one its preimage yields is refused (B-R6). On other suites a carried `assertionId`,
   which nothing signs, is dropped.
+- **A record signed for another room or another node was stored.** The audience check (§18.3.1)
+  ran only on the older suite's direct path: a verified v2.0 record returned before it, and so did an
+  older-suite record verified against its author on relay, so a record its author addressed to
+  another node, or signed for another room, was stored, remixed and gossiped by every node it
+  reached. Every signed record's `room` and `to` are now checked, on every path, whether or not its
+  signature could be verified here, and a record addressed elsewhere is refused before it is stored
+  or surfaced. Each refusal is counted (`cmb-audience-rejected`, with `verified`) and said once a
+  minute per peer and reason.
 - **Stripping the frame's `directed` flag turned a signed directed CMB into a broadcast (B-R8).**
   A signed addressee could only veto directed treatment. When the author signed one, it now alone
   decides.
