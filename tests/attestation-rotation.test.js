@@ -119,14 +119,29 @@ describe('attestation log rotation — at start', () => {
     assert.deepStrictEqual(again.checkpointsOf('A').map((c) => c.upto_seq), [n - 1, n]);
   });
 
-  it('read budgets: the checkpoint and witness logs whole at their caps, attestations what their cap holds, no more than 0.13.16 read in all', () => {
+  it('read budgets: every log whole at its caps (what the caps hold, and as much again before a rotation)', () => {
     const st = new AttestationStore();
     const b = st._readBudget;
     // Measured lines: an attestation ~520 bytes, a checkpoint ~315, a witness ~380.
-    assert.ok(b[ATT] >= 50000 * 520 * 1.3, `attestations ${b[ATT]}`);
+    assert.ok(b[ATT] >= 2 * 50000 * 520 * 1.3, `attestations ${b[ATT]}`);
     assert.ok(b[CP] >= 2 * 32 * 1024 * 315 * 1.3, `checkpoints ${b[CP]}`);
     assert.ok(b[WIT] >= 2 * (50000 * 380 + 1024 * 2048), `witnesses ${b[WIT]}`);
-    assert.ok(b[ATT] + b[CP] + b[WIT] <= (64 + 16 + 32) * 1024 * 1024, `in all ${b[ATT] + b[CP] + b[WIT]}`);
+  });
+
+  it("a quiet attester's attestations at the head of a rotated log survive a restart", () => {
+    const dir = tmpdir('att-rot-quiet-att-');
+    // What the caps hold (6 attestations) is far less than may sit beyond it before a rotation (8 KiB).
+    const opts = { dir, max: 6, rotateBytes: 8192, log: () => {} };
+    const st = new AttestationStore(opts);
+    for (let i = 1; i <= 2; i++) st.record(att(i, 'Q'));   // a quiet attester
+    let i = 0;
+    while (st._rotations[ATT] === 0) st.record(att(++i, 'F'));
+    // Q is now at the head of the live log; F churns until just before the next rotation.
+    while (fs.statSync(path.join(dir, ATT)).size - st._held[ATT] < 8192 - 200) st.record(att(++i, 'F'));
+    assert.strictEqual(st._rotations[ATT], 1);
+    assert.ok(fs.statSync(path.join(dir, ATT)).size > 6 * 720, 'the live log is longer than what the caps hold');
+    const again = new AttestationStore(opts);
+    assert.deepStrictEqual(again.chainOf('Q').map((a) => a.seq), [1, 2], "the quiet attester's chain is reloaded");
   });
 
   it('a rotation that crashed after linking is tidied at the next start', () => {

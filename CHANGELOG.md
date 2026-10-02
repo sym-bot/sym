@@ -154,14 +154,19 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   each conflicting checkpoint copy for a held position, so a restart still reports the conflict; and
   this node's memory of the checkpoints it witnessed itself (one line per attester), so it still signs
   a witness once across restarts. A witness waiting for its checkpoint stays in memory only, as before.
-- **A start reads all of a checkpoint or witness log.** A held checkpoint or witness can sit at the
-  head of its log while newer ones churn past, so these two logs are read whole: twice what their caps
-  hold, 28 MiB for checkpoints and 47.7 MiB for witnesses. 0.13.16 read only the newest 16 and 32 MiB,
-  which could miss a quiet attester's checkpoints. Attestations are evicted oldest first, so the ones
-  held are always the newest in their log, and 34.3 MiB (50,000 at 720 bytes; measured ~520) reads them
-  all. That is 110 MiB at most in all, against 0.13.16's 112 MiB. On logs over every budget, reading
-  them took 0.5–0.6 s here and a first start that also rotates all three 0.7–0.8 s, against
-  1.0–1.1 s for 0.13.16 reading them; the next start took 0.2 s.
+- **A start reads all of each log.** A record can stay held at the head of its log while newer ones
+  churn past it: a quiet attester's attestations or checkpoints, a quiet position's witnesses. So each
+  log is read whole, up to twice what its caps hold: 68.7 MiB for attestations (50,000 at 720 bytes;
+  measured ~520), 28 MiB for checkpoints and 47.7 MiB for witnesses, 144 MiB in all. 0.13.16 read at
+  most 112 MiB but only the newest part of each log, which could miss a quiet attester. On logs over
+  every budget, reading them took 0.8–0.9 s here against 1.0–1.4 s for 0.13.16. A first start that
+  also rotates all three took 1.0–1.3 s, once; the next start took 0.25 s.
+- **One attester cannot flush another's chain.** The 50,000-attestation cap was one queue across all
+  attesters, so one attester signing many attestations pushed every other attester's chain out, and
+  the omission evidence with it. Now, when the store is full, the attester holding the most loses its
+  oldest. Each attester keeps its newest up to its share (50,000 / attesters held), and never fewer
+  than 48: at most 1,024 chains are held, and a new attester takes the place of the one updated least
+  recently, never this node's own.
 - **A conflict on a held position is remembered as long as the position is held.** 0.13.16's
   32,768-entry list also counted positions already dropped, so another attester's conflicts could push
   out the mark of a position still held.
