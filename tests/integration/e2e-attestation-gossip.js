@@ -46,8 +46,9 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     await sleep(400);
     const announced = [];
     B.on('attestation-received', (e) => announced.push(e));
-    assert.strictEqual(B._roster.get(A.nodeId), A._identity.publicKey, 'B has A\'s identity key, proven by the handshake');
-    assert.strictEqual(B._roster.source(A.nodeId), 'proven');
+    // The handshake binds A's key for the session (security review D): durable only once earned.
+    assert.strictEqual(B._identityKey(A.nodeId), A._identity.publicKey, 'B has A\'s identity key, proven by the handshake');
+    assert.strictEqual(B._keySource(A.nodeId), 'session');
 
     const entry = B.remember({
       focus: 'attestation gossip e2e', issue: 'verify attestation reaches the author',
@@ -72,7 +73,7 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     assert.strictEqual(live[0].from, aName);
     assert.strictEqual(live[0].relayed, false);
     assert.strictEqual(live[0].verified, true);
-    assert.strictEqual(live[0].keySource, 'proven');
+    assert.strictEqual(live[0].keySource, 'session');
     assert.strictEqual(live[0].sig, att.sig);
 
     // A forged attestation (bad signature) must be dropped on ingest.
