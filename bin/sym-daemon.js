@@ -243,20 +243,18 @@ function onIPCConnection(socket) {
 
   socket.on('data', (data) => {
     buffer += data.toString();
+    // One line is at most IPC_MAX_LINE: a client that never sends a newline cannot grow the buffer.
+    if (buffer.length > IPC_MAX_LINE && buffer.indexOf('\n') === -1) {
+      log(`IPC client ${socketId} sent ${buffer.length} bytes without a newline; closing it`);
+      buffer = '';
+      socket.destroy();
+      return;
+    }
     let idx;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx);
       buffer = buffer.slice(idx + 1);
-      if (line.trim()) {
-        let msg;
-        try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
-        try {
-          handleIPCMessage(socketId, socket, msg);
-        } catch (err) {
-          log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
-          if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
-        }
-      }
+      if (line.trim()) takeIPCLine(socketId, socket, line);
     }
   });
 
@@ -338,6 +336,41 @@ async function startIPCServer() {
 }
 
 const NO_INSIGHT_ENGINE = 'this node runs no insight engine';
+/** The longest IPC line taken (a remember with its payload is far below it). */
+const IPC_MAX_LINE = 8 * 1024 * 1024;
+
+/** The text of a thrown value, without trusting it to print. */
+function errorText(err) {
+  return err && typeof err.message === 'string' ? err.message.slice(0, 500) : 'unknown error';
+}
+
+/**
+ * Take one IPC line. An IPC message is typed at the door, as a wire frame is: it is a JSON object
+ * whose `type` is a non-empty string, or it is refused with an error reply and handled no
+ * further. Only then is anything in it printed: the catch below names the message by its type,
+ * and in 0.13.17 as first built it printed `type` unchecked, so one line whose type was an object
+ * that cannot be turned into text made the catch itself throw, and the daemon exited (FATAL).
+ */
+function takeIPCLine(socketId, socket, line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch (err) {
+    log(`IPC parse error: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: null, error: 'not JSON' });
+    return;
+  }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.type !== 'string' || !msg.type) {
+    log('IPC message refused: not an object with a string type');
+    sendIPC(socket, { type: 'result', action: null, error: 'an IPC message is a JSON object with a string type' });
+    return;
+  }
+  const type = msg.type.slice(0, 64);
+  try {
+    handleIPCMessage(socketId, socket, msg);
+  } catch (err) {
+    log(`IPC '${type}' failed: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: type, error: errorText(err), code: err && typeof err.code === 'string' ? err.code : undefined });
+  }
+}
 
 /**
  * Handle a single IPC message from a virtual node.
@@ -623,7 +656,7 @@ function forwardEventsToListeners() {
   });
 
   node.on('mood-delivered', (data) => {
-    // xMesh ingestion happens via cmb → SVAF path, not here.
+    // XMesh ingestion happens via cmb → SVAF path, not here.
     // Wake sleeping local peers so they can receive the mood.
     node._wakeManager?.wakeSleepingPeers('mood', {
       type: 'mood', from: node._identity.nodeId, fromName: node.name,
@@ -636,7 +669,7 @@ function forwardEventsToListeners() {
   });
 
   node.on('memory-received', ({ from, entry, decision }) => {
-    // xMesh ingestion already happens in frame-handler after SVAF evaluation.
+    // XMesh ingestion already happens in frame-handler after SVAF evaluation.
     broadcastToListeners({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
   });
 }

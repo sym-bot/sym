@@ -40,6 +40,8 @@ function pairOver({ room = 'r', clientRoom = room, clientExts = EXTS, serverExts
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 30));
+/** Wait for `side` of pair `p` to close (a handshake under load can take longer than a fixed settle). */
+const closedOn = (p, side) => until(() => p.events[side].some((e) => typeof e === 'string' && e.startsWith('closed:')), 5000);
 
 describe('the v2 handshake over a transport (D2)', () => {
   it('confirms both sides with the proven facts and the extension intersection', async () => {
@@ -68,7 +70,7 @@ describe('the v2 handshake over a transport (D2)', () => {
   it('a bad server proof aborts the client before anything is confirmed', async () => {
     const p = pairOver({ tamper: (f) => (f.type === 'server-hello' ? { ...f, proof: Buffer.alloc(64, 1).toString('base64url') } : f) });
     p.client.start();
-    await settle();
+    await closedOn(p, 'client');
     assert.strictEqual(p.client.confirmed, false);
     assert.match(p.events.client.join(), /closed:error/);
     assert.strictEqual(p.client.nodeId, null, 'no peer fact was kept');
@@ -78,11 +80,11 @@ describe('the v2 handshake over a transport (D2)', () => {
     const flip = (k) => { const b = Buffer.from(k, 'base64url'); b[0] ^= 1; return b.toString('base64url'); };
     const p = pairOver({ tamper: (f) => (f.type === 'server-hello' ? { ...f, keyConfirmation: flip(f.keyConfirmation) } : f) });
     p.client.start();
-    await settle();
+    await closedOn(p, 'client');
     assert.strictEqual(p.client.confirmed, false);
     const q = pairOver({ tamper: (f) => (f.type === 'client-finish' ? { ...f, keyConfirmation: flip(f.keyConfirmation) } : f) });
     q.client.start();
-    await settle();
+    await closedOn(q, 'server');
     assert.strictEqual(q.server.confirmed, false, 'the server never confirms a client whose confirmation is wrong');
     assert.match(q.events.server.join(), /closed:error/);
   });
@@ -90,7 +92,7 @@ describe('the v2 handshake over a transport (D2)', () => {
   it('an unechoed nonce aborts', async () => {
     const p = pairOver({ tamper: (f) => (f.type === 'server-hello' ? { ...f, clientNonce: crypto.randomBytes(32).toString('base64url') } : f) });
     p.client.start();
-    await settle();
+    await closedOn(p, 'client');
     assert.strictEqual(p.client.confirmed, false);
     assert.match(p.events.client.join(), /closed:error/);
   });
@@ -98,11 +100,11 @@ describe('the v2 handshake over a transport (D2)', () => {
   it('a stripped extension aborts as a downgrade, and a session without cmb-encrypted-v2 is never Core Secure', async () => {
     const p = pairOver({ tamper: (f) => (f.type === 'server-hello' ? { ...f, selectedExtensions: f.selectedExtensions.filter((e) => e !== EXT_CMB_ENCRYPTED_V2) } : f) });
     p.client.start();
-    await settle();
+    await closedOn(p, 'client');
     assert.strictEqual(p.client.confirmed, false);
     const q = pairOver({ clientExts: ['sym-attest-v1'] });
     q.client.start();
-    await settle();
+    await closedOn(q, 'server');
     assert.strictEqual(q.server.confirmed, false);
     assert.match(q.events.server.join(), /closed:no-core-secure/, 'no fallback to a weaker session');
   });
@@ -110,7 +112,7 @@ describe('the v2 handshake over a transport (D2)', () => {
   it('a room mismatch closes before admission', async () => {
     const p = pairOver({ room: 'room-a', clientRoom: 'room-b' });
     p.client.start();
-    await settle();
+    await closedOn(p, 'server');
     assert.strictEqual(p.server.confirmed, false);
     assert.match(p.events.server.join(), /closed:room-mismatch/);
     assert.strictEqual(p.wire.filter((w) => w.f.type === 'server-hello').length, 0, 'the server answered nothing');
@@ -119,7 +121,7 @@ describe('the v2 handshake over a transport (D2)', () => {
   it('a data frame before client-finish closes the listener', async () => {
     const p = pairOver({ tamper: (f) => (f.type === 'client-finish' ? { type: 'cmb', cmb: {} } : f) });
     p.client.start();
-    await settle();
+    await closedOn(p, 'server');
     assert.strictEqual(p.server.confirmed, false);
     assert.match(p.events.server.join(), /closed:frame-before-finish/);
   });
@@ -146,7 +148,7 @@ describe('the v2 handshake over a transport (D2)', () => {
     ts.on('message', (f) => server.receiveWire(f));
     tc.on('message', (f) => client.receiveWire(f));
     client.start();
-    await settle();
+    await until(() => closed.length > 0, 5000);
     assert.deepStrictEqual(closed, ['node-id-mismatch'], 'C proves its own key, but over the relay address of another node');
     assert.strictEqual(server.confirmed, false);
   });

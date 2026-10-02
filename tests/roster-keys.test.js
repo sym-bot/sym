@@ -22,7 +22,7 @@ const lines = (dir) => fs.readFileSync(path.join(dir, 'roster-keys.jsonl'), 'utf
 describe('the conflict matrix, row by row', () => {
   it('nodeId unbound, proven session → bind proven', () => {
     const r = new RosterKeyRegistry(); const k = key();
-    assert.deepStrictEqual(r.bind('N', k, 'proven'), { bound: true, source: 'proven' });
+    assert.deepStrictEqual(r.bind('N', k, 'proven'), { bound: true, source: 'proven', created: true }, 'a new binding says so');
     assert.strictEqual(r.get('N'), k);
   });
 

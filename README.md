@@ -102,12 +102,12 @@ Run `sym --help` for the full command surface.
 - **SYM** is the open runtime and CLI. It carries the complete open core in its own tree —
   records, signing, baseline admission, default coupling — with no closed dependency, and the
   admission and coupling engines are injectable.
-- **xMesh** is the agent mesh runtime built on this foundation. The free
+- **XMesh** is the agent mesh runtime built on this foundation. The free
   [Developer Runtime](https://www.npmjs.com/package/@sym-bot/xmesh) runs locally or in any pod,
   and a coding agent drives it through MCP (`xmesh-mcp`): offer a mission, follow the board.
 - **Enterprise:** visit **[xmesh.bot](https://xmesh.bot)**.
 
-The xMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
+The XMesh source is private; its Developer Runtime is a free compiled artifact. SYM and
 mesh-channel are open source.
 
 ## Security, and what the relay can and cannot see
@@ -125,7 +125,9 @@ participant.
 - **One key per nodeId, for life.** The first proven key for a nodeId is bound; a session that
   later proves the same nodeId with a different key is a *conflict*: refused, recorded, and
   shown in `sym status` for you to resolve (`sym keys <name> resolve`). No source overrides a
-  different key.
+  different key. The one exception is churn: a first-contact binding that never verified anything
+  (no record, grant or later session) expires after 30 days unseen, or gives way to a newcomer when
+  the registry is full; a binding that ever verified something never does.
 - **Every record is signed, and verified by its author's node id.** A record is accepted only
   if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
   `createdByNodeId` — a key it proved, pinned from an invite, or holds from an anchor-rooted
@@ -138,6 +140,8 @@ participant.
   grant chain is checked with the keys each grant vouches, from the anchor down.
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
   evaluation on every record it hears and stores only what it admits.
+- **Bounded.** Every store a peer can feed — key bindings, grants, wake channels, gossip, relay
+  candidates, per-peer state — has a fixed bound; [SECURITY.md](SECURITY.md) lists each one.
 
 What this does not solve, said plainly:
 

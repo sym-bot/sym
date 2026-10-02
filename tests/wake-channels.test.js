@@ -322,8 +322,8 @@ describe('0.14.0 release review B: every store and list is bounded', () => {
       wm.learnWakeChannel('sleeper', apns('t'), { source: 'relay' });
       for (let i = 0; i < 500; i++) wm.wakeSleepingPeers('message', { type: 'message', n: i });
       const q = node._pendingFrames.get('sleeper');
-      assert.strictEqual(q.length, 64);
-      assert.strictEqual(q[0].n, 436, 'the newest are kept');
+      assert.strictEqual(q.length, 16, 'at most 16 (0.13.17\'s bound; it was 64)');
+      assert.strictEqual(q[0].n, 484, 'the newest are kept');
       wm.learnWakeChannel('sleeper', { platform: 'none' }, { source: 'relay' });
       assert.strictEqual(node._pendingFrames.has('sleeper'), false);
     });

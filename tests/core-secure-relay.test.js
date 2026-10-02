@@ -59,6 +59,25 @@ describe('relay sessions (D2)', () => {
     } finally { await stopAll(a, b); await relay.close(); }
   });
 
+  it('a repeated announcement of a peer with a live relay session reuses it: no new handshake (A2)', async () => {
+    const relay = fakeRelay();
+    const a = relayNode('rs-a2', relay); const b = relayNode('rs-b2', relay);
+    try {
+      await a.start(); await b.start();
+      await until(() => paired(a, b), 8000);
+      const [lo, hi] = [a, b].sort((x, y) => (x.nodeId < y.nodeId ? -1 : 1));
+      const before = relaySession(lo, hi);
+      const confirmed = lo._sessionStats.confirmed;
+      const ws = relay.conns.get(lo.nodeId).ws;
+      for (let i = 0; i < 5; i++) ws.send(JSON.stringify({ type: 'relay-peer-joined', nodeId: hi.nodeId, name: hi.name }));
+      ws.send(JSON.stringify({ type: 'relay-peers', peers: [{ nodeId: hi.nodeId, name: hi.name }] }));
+      await new Promise((r) => setTimeout(r, 300));
+      assert.strictEqual(relaySession(lo, hi), before, 'the same session carries the peer');
+      assert.strictEqual(lo._sessionStats.confirmed, confirmed, 'no new handshake');
+      assert.strictEqual(before.closed, false);
+    } finally { await stopAll(a, b); await relay.close(); }
+  });
+
   it('frame loss leads to a re-handshake, and records flow again', async () => {
     let dropOne = false;
     const relay = fakeRelay({ tap: (e) => { if (dropOne && e.payload.type === 'control-encrypted') { dropOne = false; return false; } return undefined; } });

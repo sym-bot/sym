@@ -7,7 +7,11 @@
 wire with 0.13 and older: a 0.13 node is reached only through an explicit Legacy Import route
 (below). It also breaks readers outside sym: the store's annotations moved from the stored record
 to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and its
-follow-ups) and 0.13.17 (the inbound-frame security hotfix).
+follow-ups). **0.13.17 was never released:** its fixes and their tests ship in 0.14.0 (no more
+0.13.x releases), except two mechanisms 0.14's design replaces — the cap of 16,384 never-evicted
+key bindings (a lockout anyone on the LAN could fill) by the binding lifetime below, and the
+in-memory pending set for grants that arrive before their root (which could be flooded) by
+`role-chain-fetch`.
 
 ### Core Secure — breaking
 
@@ -79,7 +83,7 @@ follow-ups) and 0.13.17 (the inbound-frame security hotfix).
   and send sealed records. The room is explicit: an emitter that names none is in `default`, and
   a node in another room refuses it at the handshake.
 
-### Core Secure — new API (for hosts: xmesh, mesh-channel)
+### Core Secure — new API (for hosts: XMesh, mesh-channel)
 
 - `node.on('verified-record', ({ record, session, verification }) => …)`: every record that
   passed §8.8.5, with the proven session facts (`nodeId`, `name`, `identityKey`, `sessionId`,
@@ -107,6 +111,30 @@ follow-ups) and 0.13.17 (the inbound-frame security hotfix).
   the host provides; `node.inviteURL()` and `node.acceptInvite(url)` (invites carry the issuer's
   `node` and `key`; accepting pins the issuer only where that nodeId is unbound); `lib/invite.js`.
 - `sym keys <name> [conflicts | resolve | reset-floor]`.
+
+### From the 0.13.17 re-review (0.14 requirements)
+
+- **Binding lifetime (design D3).** A first-contact `proven` key binding that verified nothing
+  since — no record, grant, attestation or later session — and was not seen for 30 days expires;
+  when the registry is full (65,536) the least recently seen such binding makes room. One that ever
+  verified something, or is pinned, grant-vouched, anchored or a legacy claim, never expires. The
+  `seen` / `verified` facts are persisted with the binding. If every binding protects history, a
+  newcomer's live session still verifies what it signs.
+- **role-chain-fetch.** A grant or revoke that arrives before the grant rooting its grantor makes
+  the node ask the delivering session for the chain (`role-chain-fetch` naming the grantor; answered
+  with `role-chain`, ordinary signed grants verified top-down). The record is held only for that
+  fetch: at most 64 per session, 10 s. Spec text for the two frames is still to be drafted.
+- **A grant or revoke is stored, persisted and relayed as one canonical object of its signed
+  fields** (A5): an unsigned field a frame carried is never kept or passed on.
+- **A peer with a live relay session reuses it** (A2): a repeated announcement probes the session
+  with a ping instead of re-handshaking; a restarted peer's new process answers a ping, or a sealed
+  frame, for a session it does not hold with an `error`, and the session re-handshakes. Close
+  handlers compare against the peer's own current session.
+- **Wake channels cannot be locked by many identities** (A4): learned only from a confirmed
+  session's own nodeId, and a full table makes room by staleness.
+- **Every peer-fed store is bounded, and SECURITY.md lists each bound** (A6). New in 0.14: at most
+  256 relay handshakes in flight; a relay `from` that never confirms leaves no state; an IPC line
+  is at most 8 MiB; the nesting bound also covers sealed control frames and interior requests.
 
 ### Legacy Import (temporary: network Legacy Import is removed in 0.15.0)
 
@@ -236,7 +264,7 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
 - **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
   before anything is stored or dispatched (§18.3.1). A `MeshAgent` whose node cannot sign says so
-  once and stops remixing and observing. The xMesh synthesis loop says a record it could not sign as
+  once and stops remixing and observing. The XMesh synthesis loop says a record it could not sign as
   the node failing to sign, not as an error of its delegate.
 
 ### Fixed — delivery and records
@@ -576,7 +604,11 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
 - Tests wait on what they test instead of fixed sleeps: in-flight frames, and the encoder's own load.
 
-## 0.13.17 (2026-10-02)
+## 0.13.17 (never released — its fixes ship in 0.14.0)
+
+This entry is kept as the record of what the 0.13.17 review found and fixed. Two of its mechanisms
+do not ship: the 16,384-binding cap on the key registry (replaced by the binding lifetime) and the
+pending set for grants that arrive before their root (replaced by `role-chain-fetch`); see 0.14.0.
 
 A security hotfix. In 0.13.16 a peer could stop a node from ever starting again, and crash a
 running node or the daemon, with one frame. Every node and every daemon should take it.
@@ -594,6 +626,13 @@ running node or the daemon, with one frame. Every node and every daemon should t
     signed, the rank the record needs, by the chain the node already holds. A record that is not
     rooted has no effect on any role, so it is not stored, not written and not relayed (and costs no
     signature check). A node without an anchor (the daemon, by default) keeps none;
+  - gossip has no order, so a grant or a revoke can arrive before the grant that roots its grantor,
+    and there is no grant sync to ask for it again. Such a record (refused only because its
+    grantor's key or grant has not arrived yet) waits in memory, at most 1,024 of them, the oldest
+    dropped first. It is never written or relayed while it waits and changes no role; when a record
+    that roots it is stored, it is stored, written and relayed too. So a node resolves the roles
+    0.13.16 did, whatever order the records arrive in (an early revoke still takes effect). What
+    waits is not kept across a restart;
   - the store looks grantor keys up through the roster's own lookup, on receipt and on reload alike;
   - reading the file never stops a node from starting. A record that cannot be verified (not JSON,
     malformed, unknown grantor key, bad signature, unrooted) is skipped and counted, and the node says
@@ -628,7 +667,71 @@ running node or the daemon, with one frame. Every node and every daemon should t
   not take left its connection open with no deadline, so a peer could hold sockets without limit. A
   nodeId is now a non-empty string or the announcement or connection is refused, a name is a string
   or `'unknown'`, a key is text or it is not pinned, and a wake channel is kept only as text
-  (`{ platform, token, environment }`), before anything stores, prints or passes them on.
+  (`{ platform, token, environment }`), before anything stores, prints or passes them on. A
+  `message`, `mood` or `xmesh-insight` frame's own `fromName` is taken the same way (it falls back to
+  the name the transport took); it was printed and passed on to listeners as given.
+- **A deeply nested frame crashed a node over the relay.** The relay measured a peer's payload by
+  serialising it again before the frame reached the guard. Serialising recurses once per level, so
+  a payload about 10,000 levels deep (24 KB, under every size bound) threw a RangeError out of the
+  socket callback, and the daemon exits on that. A `relay-error`'s message was printed as given, so
+  one that could not be turned into text threw the same way. Now:
+  - JSON a peer wrote that nests deeper than 128 levels is dropped before it is parsed, as malformed
+    JSON is: a LAN frame, a relay message, and the plaintext of an encrypted CMB. A frame that
+    parses can then always be serialised again, wherever the node keeps, relays, persists or
+    measures it;
+  - a `relay-error` is printed field by field (`kind`, `code`, `message`), each only when it has the
+    right type;
+  - every message off the relay socket goes through the inbound guard, the relay's own join notices
+    and peer list included (they carry what each joiner put in its relay-auth).
+- **The daemon checks each IPC message at the door, like a wire frame.** It must be a JSON object
+  with a string `type`, or it gets an error reply and goes no further, and nothing in it is printed
+  before that. A request that fails is answered with the error instead of only logged. (Naming a
+  failed request by a `type` that cannot be turned into text would make the error path itself throw
+  and stop the daemon.)
+- **A room peer could make a node keep more and more.** Each store a peer feeds now has one bound:
+  - wake channels: at most 1,024 in all, and at most 512 that one peer taught for nodes other than
+    itself. A node's own channel always has room, displacing the oldest gossiped one. Twenty
+    `peer-info` frames kept 5,120 channels before. `wake-channels.json` is written at most once a
+    second (and when the node stops), not once per frame. It is read back as a frame is: typed, and
+    within the same bound;
+  - wakes: the cooldown runs from the last attempt, so a failed wake is not tried again on the next
+    message. Every message and mood the daemon relays wakes every sleeping channel, and a node
+    without APNs keys fails every one, so each message logged a line per channel. At most 16 frames
+    wait for one sleeping peer, the oldest dropped first;
+  - per-peer state (room verdicts, the anchor debounce, E2E secrets and the key each was derived
+    from, identity keys, declared lifecycle roles): what is learned again from each connection's
+    handshake goes when the peer leaves. That is the lifecycle role, the derived-key cache, and an
+    admit verdict; a refusal verdict stays, since over the relay a refused peer can keep speaking.
+    Every such map holds at most 4,096 entries for peers that are not connected, the oldest dropped
+    first. A connected peer's entry is never dropped for room. The derived-key cache is one entry per
+    peer: one link re-sending its handshake with a new key each time had added one per handshake. A
+    lifecycle role is one of the named roles or it is not kept (it was kept as any JSON value);
+  - the roster's list of refused key rebindings: at most 256, each one kept once;
+  - key bindings: the roster key registry added a binding, and a line to its file, for every new
+    nodeId a handshake named. It now holds at most 16,384. Past that a new binding is refused and
+    none is ever evicted, since forgetting one would let its nodeId be pinned again with another
+    key. The refusal is said once and counted (`status().roster.refusedFull`), and a record signed
+    by a key that could not be pinned fails verification;
+  - peers added by relay announcements: the relay's join notices and peer list added a peer for
+    every nodeId they named. At most 4,096 peers that only an announcement introduced are now held;
+    an announcement for another unknown nodeId is ignored, said once and counted
+    (`status().relayState.announcementsIgnored`). Peers the node already knows, including any with
+    a live LAN connection, are not affected, and a peer that leaves the relay frees its place.
+- **The loopback scan threw on a registry file it could not use.** It runs in a timer and did
+  arithmetic and comparisons on registry file fields as read. Any process of the same user can write
+  that directory. A registration is now typed when it is read, or skipped.
+- **A refused LAN handshake could cost a connected peer its connection.** An inbound connection's
+  dedup ran before its admission was decided, so it could close the existing connection for the same
+  nodeId (as stale, or by the dual-dial tie-break), and only then refuse the new one. Admission is
+  now decided first. Nothing is learned from a refused handshake: no secret is derived, no key is
+  pinned, and nothing is read from its connection.
+
+### Known limit
+
+- **A handshake that claims a connected peer's nodeId can reset that peer's room verdict** until
+  the peer handshakes again. The cause is unproven identity: in 0.13 a peer's identity is trust on
+  first use, and the handshake proves nothing. 0.14.0 removes the cause by proving identity before
+  it keeps any per-peer state. This and the bounds above are described in the new `SECURITY.md`.
 
 ## 0.13.16 (2026-10-02)
 
