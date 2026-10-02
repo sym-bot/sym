@@ -284,13 +284,14 @@ describe('SymNode', () => {
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
 
-    // No domain data yet — remix should be rejected
-    const rejected = node.remember(
+    // No domain data yet — the REMIX PATH is refused, and says so (draft spec PR #35: §15.7 gates
+    // only the node's integration of a peer record, never remember()).
+    const rejected = node.remix(
       { focus: 'remix attempt', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
     );
-    assert.strictEqual(rejected, null, 'remix without domain data should return null');
+    assert.deepStrictEqual(rejected, { refused: 'remix-without-new-domain-data' }, 'a remix without domain data is refused, by name');
 
     // Produce domain observation — this sets canRemix = true
     node.remember({
@@ -300,7 +301,7 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true);
 
     // Now remix should succeed
-    const accepted = node.remember(
+    const accepted = node.remix(
       { focus: 'valid remix', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
@@ -310,6 +311,30 @@ describe('SymNode', () => {
 
     await node.stop();
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('remember(fields, parents) is never gated (draft spec PR #35): two cited replies in a row both mint; a duplicate says so', async () => {
+    const name = `test-cited-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      const cats = (focus) => ({ focus, issue: 'none', intent: 'reply', motivation: 'm', commitment: 'c', perspective: 'p', mood: { text: 'neutral' } });
+      node._hasNewDomainData = false;
+      const peer = { key: 'cmb-' + 'a'.repeat(64) };
+      const r1 = node.remember(cats('a cited reply'), { parents: [peer] });
+      const r2 = node.remember(cats('a second cited reply'), { parents: [peer] });
+      assert.ok(r1 && r1.key && !r1.refused, 'the first cited reply mints');
+      assert.ok(r2 && r2.key && !r2.refused, 'and so does the second: a reply is not a remix');
+      assert.strictEqual(node.canRemix(), true, 'an authored record is new domain data, with or without parents');
+      const dup = node.remember(cats('a second cited reply'), { parents: [peer] });
+      assert.deepStrictEqual({ key: dup.key, duplicate: dup.duplicate }, { key: r2.key, duplicate: true }, 'a re-assertion of HEAD is told apart from a refusal');
+      node.remember(cats('something else'));
+      const again = node.remember(cats('a cited reply'), { parents: [peer] });
+      assert.deepStrictEqual(again, { key: r1.key, duplicate: true }, 'and so is a record already stored');
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
   });
 
   it('should emit cmb-accepted when receiveFromPeer stores a CMB', async () => {
@@ -367,19 +392,19 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true, 'domain observation should enable remix');
 
     // Remix should succeed and RESET canRemix
-    const remix = node.remember(
+    const remix = node.remix(
       { ...categories, focus: 'remix of peer signal' },
       { parents: [{ key: 'cmb-parent-123', lineage: { ancestors: [] } }] }
     );
-    assert.ok(remix, 'remix should succeed');
+    assert.ok(remix && remix.key, 'remix should succeed');
     assert.strictEqual(node.canRemix(), false, 'remix should reset hasNewDomainData');
 
     // Second remix without new domain data should be rejected
-    const rejected = node.remember(
+    const rejected = node.remix(
       { ...categories, focus: 'second remix attempt' },
       { parents: [{ key: 'cmb-parent-456', lineage: { ancestors: [] } }] }
     );
-    assert.strictEqual(rejected, null, 'second remix without new domain data should be rejected');
+    assert.deepStrictEqual(rejected, { refused: 'remix-without-new-domain-data' }, 'second remix without new domain data should be rejected');
 
     // New domain observation re-enables remix
     node.remember({ ...categories, focus: 'fresh observation' });

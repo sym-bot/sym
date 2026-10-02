@@ -144,11 +144,14 @@ describe('aggregateAttestations — weighted by earned authority (EA6)', () => {
       // anchor (self, weight 4) + validator (weight 2) admit; participant (weight 1) rejects;
       // an over-claimer asserts anchor but resolves participant (weight 1, mismatch); and an
       // attestation whose key we don't have (excluded entirely).
-      node._attestations.record(att(node.nodeId, 'anchor', 'aligned', { focus: 'admit' }, node._identity.privateKey));
-      node._attestations.record(att(V.nodeId, 'validator', 'aligned', { focus: 'admit' }, V.priv));
-      node._attestations.record(att(P.nodeId, 'participant', 'rejected', { focus: 'reject' }, P.priv));
-      node._attestations.record(att(O.nodeId, 'anchor', 'rejected', { focus: 'reject' }, O.priv));
-      node._attestations.record(att(U.nodeId, 'participant', 'aligned', { focus: 'admit' }, U.priv));
+      // Recorded as the ingest records them: with the time they were received (draft spec PR #33 —
+      // an attestation counts by its signer's role at its signed time AND at its receipt).
+      const now = { receivedAt: Date.now() };
+      node._attestations.record(att(node.nodeId, 'anchor', 'aligned', { focus: 'admit' }, node._identity.privateKey), now);
+      node._attestations.record(att(V.nodeId, 'validator', 'aligned', { focus: 'admit' }, V.priv), now);
+      node._attestations.record(att(P.nodeId, 'participant', 'rejected', { focus: 'reject' }, P.priv), now);
+      node._attestations.record(att(O.nodeId, 'anchor', 'rejected', { focus: 'reject' }, O.priv), now);
+      node._attestations.record(att(U.nodeId, 'participant', 'aligned', { focus: 'admit' }, U.priv), now);
 
       const agg = node.aggregateAttestations('cmb-agg');
       assert.strictEqual(agg.total, 4, 'four verifiable attestations');

@@ -164,6 +164,7 @@ describe('MeshAgent when its node cannot sign', () => {
       shouldRemix: () => true,
     });
     agent.node.canRemix = () => true;
+    agent.node._hasNewDomainData = true; // the remix path is gated on it (§15.7)
     agent.node.remember = () => { const e = new Error('CMB signing failed: key unreadable'); e.code = 'ESIGN'; throw e; };
     const errors = [];
     const origError = console.error, origLog = console.log;

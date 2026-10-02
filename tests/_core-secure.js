@@ -137,7 +137,13 @@ function admitAs(node, id, { extensions = ['cmb-encrypted-v2', 'sym-attest-v1', 
     trySend(f) { sent.push(f); return { ok: true }; },
     close() { this.closed = true; this._closed = true; },
   };
-  if (id.publicKey) node._roster.bind(id.nodeId, id.publicKey, 'proven');
+  // As _admitSession holds it (security review D): a session-scoped binding for the proven key; the
+  // durable registry binds it only once it is earned (or the test binds it itself).
+  if (id.publicKey && node._sessionKeys) {
+    let held = node._sessionKeys.get(id.nodeId);
+    if (!held || held.key !== id.publicKey) { held = { key: id.publicKey, sessions: new Set() }; node._sessionKeys.set(id.nodeId, held); }
+    held.sessions.add(session);
+  }
   node._peers.set(id.nodeId, { peerId: id.nodeId, name: session.name, identityKey: id.publicKey || null, transports: new Map([[kind, session]]), transport: session, isOutbound: false, source: kind, lastSeen: Date.now() });
   return session;
 }

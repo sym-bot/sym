@@ -33,8 +33,9 @@ const { until, identity } = require('./_core-secure');
 const uniq = (b) => `${b}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
 /** A fake 0.13 node's TCP endpoint: answers a legacy hello with its own, and speaks legacy cmb. */
-async function fake013({ id = identity('legacy'), room = 'lg-room', presentKey } = {}) {
-  const e2e = e2eGenerateKeyPair();
+async function fake013({ id = identity('legacy'), room = 'lg-room', presentKey, presentE2E } = {}) {
+  const e2e = e2eGenerateKeyPair(); // the 0.13 node's persistent X25519 key (its e2e-keypair.json)
+  const squatE2E = presentE2E ? e2eGenerateKeyPair() : null;
   const seen = { frames: [], records: [], secret: null, peer: null };
   const server = net.createServer((sock) => {
     sock.on('error', () => {});
@@ -44,8 +45,9 @@ async function fake013({ id = identity('legacy'), room = 'lg-room', presentKey }
       seen.frames.push(f);
       if (f.type === 'handshake') {
         seen.peer = f;
-        seen.secret = e2eDeriveSharedSecret(e2e.privateKey, Buffer.from(f.e2ePublicKey, 'base64'));
-        t.send({ type: 'handshake', nodeId: id.nodeId, name: id.name, version: '0.2.3', extensions: [], room, publicKey: presentKey || id.publicKey, e2ePublicKey: e2e.publicKey.toString('base64'), lifecycleRole: 'participant' });
+        const mine = squatE2E || e2e;
+        seen.secret = e2eDeriveSharedSecret(mine.privateKey, Buffer.from(f.e2ePublicKey, 'base64'));
+        t.send({ type: 'handshake', nodeId: id.nodeId, name: id.name, version: '0.2.3', extensions: [], room, publicKey: presentKey || id.publicKey, e2ePublicKey: mine.publicKey.toString('base64'), lifecycleRole: 'participant' });
       } else if (f.type === 'cmb' && f.cmb && typeof f.cmb.categories === 'string') {
         seen.records.push({ frame: f, categories: decryptCategories(f.cmb.categories, f.cmb._e2e.nonce, seen.secret) });
       }
@@ -59,21 +61,24 @@ async function fake013({ id = identity('legacy'), room = 'lg-room', presentKey }
     const { ciphertext, nonce } = encryptCategories(cmb.categories, seen.secret);
     seen.transport.send({ type: 'cmb', timestamp: Date.now(), cmb: { ...cmb, categories: ciphertext, _e2e: { nonce } }, ...(to ? { to, directed: true } : {}) });
   };
-  return { id, port: server.address().port, seen, sendRecord, close: () => new Promise((r) => server.close(() => r())) };
+  return { id, e2eKey: e2e.publicKey.toString('base64'), port: server.address().port, seen, sendRecord, close: () => new Promise((r) => server.close(() => r())) };
 }
 
-function routeTo(fake) { return { nodeId: fake.id.nodeId, endpoint: `127.0.0.1:${fake.port}`, key: fake.id.publicKey, name: 'legacy' }; }
+function routeTo(fake) { return { nodeId: fake.id.nodeId, endpoint: `127.0.0.1:${fake.port}`, key: fake.id.publicKey, e2eKey: fake.e2eKey, name: 'legacy' }; }
 async function stopAll(...nodes) {
   for (const n of nodes) { try { await n.stop(); } catch { /* */ } try { fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } catch { /* */ } }
 }
 
 describe('Legacy Import routes (D7)', () => {
-  it('the identity key fingerprint is mandatory; a route without one is refused', () => {
+  it('the identity key fingerprint and the X25519 key are mandatory; a route without either is refused', () => {
     const id = identity('x');
-    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: '127.0.0.1:1' }), /fingerprint is mandatory/);
-    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: 'nowhere', key: id.publicKey }), /endpoint/);
-    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: 'relay', key: id.publicKey, fingerprint: keyFingerprint(identity().publicKey) }), /disagree/);
-    assert.strictEqual(checkRoute({ nodeId: id.nodeId, endpoint: 'relay', fingerprint: keyFingerprint(id.publicKey) }).fingerprint, keyFingerprint(id.publicKey));
+    const e2eKey = e2eGenerateKeyPair().publicKey.toString('base64');
+    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: '127.0.0.1:1', e2eKey }), /fingerprint is mandatory/);
+    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: 'nowhere', key: id.publicKey, e2eKey }), /endpoint/);
+    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: 'relay', key: id.publicKey, fingerprint: keyFingerprint(identity().publicKey), e2eKey }), /disagree/);
+    assert.throws(() => checkRoute({ nodeId: id.nodeId, endpoint: 'relay', key: id.publicKey }), /e2eKey .* is mandatory/, 'security review E: the X25519 key is pinned too');
+    assert.throws(() => checkRoute({ nodeId: id.nodeId.toUpperCase(), endpoint: 'relay', key: id.publicKey, e2eKey }), /lowercase/);
+    assert.strictEqual(checkRoute({ nodeId: id.nodeId, endpoint: 'relay', fingerprint: keyFingerprint(id.publicKey), e2eKey }).fingerprint, keyFingerprint(id.publicKey));
   });
 
   for (const order of ['smaller', 'larger']) {
@@ -90,14 +95,19 @@ describe('Legacy Import routes (D7)', () => {
         assert.match(st.sessions[0].encryption, /no forward secrecy, no transcript proof/);
         assert.strictEqual(node._roster.source(lid.nodeId), 'pinned', 'the route\'s key is pinned');
         assert.strictEqual(node.peers().find((p) => p.peerId === lid.nodeId).profile, 'legacy-import');
-        // In: a directed 0.13 record is delivered, quarantined.
+        // In: a directed 0.13 record is delivered, quarantined — as `legacy-record`, never on the
+        // Core Secure path a host reads (cmb-accepted, the inbox).
         const got = [];
-        node.on('cmb-accepted', (e) => got.push(e));
+        const coreSecure = [];
+        node.on('legacy-record', (e) => got.push(e));
+        node.on('cmb-accepted', (e) => coreSecure.push(e));
         fake.sendRecord({ focus: 'from the 0.13 side', to: node.nodeId });
         await until(() => got.length > 0, 5000);
         assert.strictEqual(got[0].verified, false);
         assert.strictEqual(got[0].profile, 'legacy-import');
         assert.strictEqual(got[0].author?.nodeId ?? null, null, 'no verified author');
+        assert.strictEqual(coreSecure.length, 0, 'not a Core Secure delivery');
+        assert.strictEqual(node.inbox({ peek: true }).messages.length, 0, 'not in the inbox');
         // A record signed by another key on the route is refused.
         const metrics = [];
         node.on('metric', (m) => metrics.push(m));
@@ -126,7 +136,101 @@ describe('Legacy Import routes (D7)', () => {
     } finally { await stopAll(node); await fake.close(); }
   });
 
-  it('the sticky floor is the persisted proven binding: the route is refused, across a restart', async () => {
+  it('a hello presenting an X25519 key other than the pinned one is refused (a relay squatter with the public keys)', async () => {
+    const lid = identity('legacy');
+    const fake = await fake013({ id: lid, presentE2E: true });
+    const node = new SymNode({ name: uniq('lg'), silent: true, discovery: new NullDiscovery(), room: 'lg-room', legacyRoutes: [routeTo(fake)] });
+    try {
+      await node.start();
+      await until(() => node.status().legacyImport.refused.some((r) => /e2e-key-mismatch/.test(r.why)), 5000);
+      assert.strictEqual(node._peers.has(lid.nodeId), false);
+      node.remember({ focus: 'never to the squatter', issue: 'i', intent: 'x', motivation: 'y', commitment: 'z', perspective: 'p', mood: { text: 'calm' } }, { to: lid.nodeId });
+      await new Promise((r) => setTimeout(r, 200));
+      assert.strictEqual(fake.seen.records.length, 0, 'nothing was sent to it');
+    } finally { await stopAll(node); await fake.close(); }
+  });
+
+  it('a Legacy Import peer never passes a gated room door, and no peer-joined is raised for one', async () => {
+    const lid = identity('legacy');
+    const owner = identity('owner');
+    const fake = await fake013({ id: lid });
+    const node = new SymNode({ name: uniq('lg-gated'), silent: true, discovery: new NullDiscovery(), room: 'lg-room', legacyRoutes: [routeTo(fake)] });
+    node._roomOwners.pin('lg-room', owner.nodeId, owner.publicKey, 'config');
+    const joined = [];
+    node.on('peer-joined', (e) => joined.push(e));
+    try {
+      await node.start();
+      await until(() => node.status().legacyImport.refused.some((r) => /gated/.test(r.why)), 5000);
+      assert.strictEqual(node._peers.has(lid.nodeId), false, 'not dialled into a gated room');
+      assert.strictEqual(node._roomDoor(lid.nodeId).pass, false);
+      assert.strictEqual(joined.length, 0);
+    } finally { await stopAll(node); await fake.close(); }
+    // Ungated: the legacy peer joins, and says so with its own event.
+    const fake2 = await fake013({ id: identity('legacy2') });
+    const n2 = new SymNode({ name: uniq('lg-open'), silent: true, discovery: new NullDiscovery(), room: 'lg-room', legacyRoutes: [routeTo(fake2)] });
+    const legacyJoined = [];
+    const coreJoined = [];
+    n2.on('legacy-peer-joined', (e) => legacyJoined.push(e));
+    n2.on('peer-joined', (e) => coreJoined.push(e));
+    try {
+      await n2.start();
+      await until(() => legacyJoined.length > 0, 5000);
+      assert.strictEqual(legacyJoined[0].legacy, true);
+      assert.strictEqual(coreJoined.length, 0, 'peer-joined means a proven Core Secure session only');
+    } finally { await stopAll(n2); await fake2.close(); }
+  });
+
+  it('a v2.0-suite record on a legacy route is refused, a record naming another author is refused, and no assertionId passes as authenticated', async () => {
+    const lid = identity('legacy');
+    const fake = await fake013({ id: lid });
+    const node = new SymNode({ name: uniq('lg-suite'), silent: true, discovery: new NullDiscovery(), room: 'lg-room', legacyRoutes: [routeTo(fake)] });
+    try {
+      await node.start();
+      await until(() => node._peers.has(lid.nodeId), 5000);
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      const got = [];
+      node.on('legacy-record', (e) => got.push(e));
+      const { signedRecord } = require('./_core-secure');
+      const send = (cmb) => {
+        const { ciphertext, nonce } = encryptCategories(cmb.categories, fake.seen.secret);
+        fake.seen.transport.send({ type: 'cmb', timestamp: Date.now(), content: 'FORGED frame content', cmb: { ...cmb, categories: ciphertext, _e2e: { nonce } }, to: node.nodeId, directed: true });
+      };
+      send(signedRecord(lid, { categories: { focus: 'a v2.0 record on the legacy route' }, room: 'lg-room', to: node.nodeId }));
+      await until(() => metrics.some((m) => m.reason === 'v2.0-suite-on-legacy-route'), 3000);
+      const victim = identity('victim');
+      const other = createCMB({ categories: { focus: 'signed words' }, createdBy: 'alice', createdByNodeId: victim.nodeId, room: 'lg-room', to: node.nodeId });
+      other.metadata.createdByNodeId = victim.nodeId;
+      signCMB(other, lid.privateKey);
+      send(other);
+      await until(() => metrics.some((m) => m.reason === 'not-the-routed-author'), 3000);
+      fake.sendRecord({ focus: 'a genuine 0.13 record', to: node.nodeId });
+      await until(() => got.length > 0, 3000);
+      assert.strictEqual(got[0].assertionId, null, 'no assertion identity from a quarantined record');
+      assert.ok(!('assertionId' in (got[0].cmb.metadata || {})), 'nor on its record');
+      assert.ok(!String(got[0].content).includes('FORGED'), 'content is rendered from the categories, never the frame');
+    } finally { await stopAll(node); await fake.close(); }
+  });
+
+  it('the legacy session has a heartbeat: a peer that goes silent is closed', async () => {
+    const { LegacySession } = require('../lib/legacy-import');
+    const src = fs.readFileSync(require.resolve('../lib/legacy-import'), 'utf8');
+    assert.match(src, /LEGACY_DEAD_MS = 45_000/);
+    const lid = identity('legacy');
+    const e2e = e2eGenerateKeyPair();
+    const sent = [];
+    const s = new LegacySession({ route: { nodeId: lid.nodeId, fingerprint: keyFingerprint(lid.publicKey), e2eKey: e2e.publicKey.toString('base64'), endpoint: 'relay' }, kind: 'relay', transport: { trySend: (f) => { sent.push(f); return { ok: true }; } }, local: identity('me'), room: 'r' });
+    s.receiveWire({ type: 'handshake', nodeId: lid.nodeId, publicKey: lid.publicKey, e2ePublicKey: e2e.publicKey.toString('base64') });
+    assert.strictEqual(s.confirmed, true);
+    assert.ok(s._beat, 'a heartbeat runs');
+    s.lastSeen = Date.now() - 60_000;
+    let closed = null;
+    s.on('closed', (i) => { closed = i; });
+    s._beat._onTimeout();
+    assert.strictEqual(closed && closed.reason, 'heartbeat-timeout');
+  });
+
+  it('the sticky floor is its own persisted fact: the route is refused, across a restart and after the binding is gone', async () => {
     const lid = identity('legacy');
     const fake = await fake013({ id: lid });
     const name = uniq('lg-floor');
@@ -143,6 +247,9 @@ describe('Legacy Import routes (D7)', () => {
       await node.start();
       await new Promise((r) => setTimeout(r, 300));
       assert.strictEqual(node._peers.has(lid.nodeId), false, 'still refused after the restart');
+      // The floor does not end with the binding (security review: floor-probe): it is its own fact.
+      node._roster._drop(lid.nodeId);
+      assert.strictEqual(node._roster.floor(lid.nodeId), true, 'the floor outlives the binding');
       // An operator reset lifts it.
       node._roster.resetFloor(lid.nodeId);
       await node.stop();

@@ -144,7 +144,9 @@ describe('admission annotations live on the store entry', () => {
         assert.deepStrictEqual(Object.keys(entry.cmb).sort(), ['categories', 'metadata', 'payload'], 'the two sections and the payload decoded from the signed section, nothing this node computed');
         assert.deepStrictEqual(entry.cmb.payload, payload, 'the payload as sent');
         const { payload: _p, ...sections } = entry.cmb;
-        assert.deepStrictEqual(sections, recordAsSigned(record), 'the signed sections exactly as signed');
+        // What is stored is the signed projection (security review B; draft spec PR #34): exactly what
+        // the signature and the content address cover, the unsigned valence/arousal/lineage.method gone.
+        assert.deepStrictEqual(sections, require('../lib/core/record-canonical').signedProjection(recordAsSigned(record)), 'the signed sections exactly as signed');
         assert.strictEqual(verifyCMB(entry.cmb, PEER.publicKey).valid, true, 'and they verify');
         assert.deepStrictEqual(node.inboxGet(entry.inboxId)?.payload, payload, 'the inbox delivers it');
 

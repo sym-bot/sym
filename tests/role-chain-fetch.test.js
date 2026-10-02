@@ -45,7 +45,11 @@ const gAX = grant('role-grant', X, 'validator', A, t - 5000);
 const RECS = { AV: gAV, VX: gVX, rVX, AX: gAX };
 
 function boot(base, extra = {}) {
-  return new SymNode({ name: uniq(base), silent: true, discovery: new NullDiscovery(), room: 'chain', anchor: { nodeId: A.nodeId, publicKey: A.pub }, ...extra });
+  const n = new SymNode({ name: uniq(base), silent: true, discovery: new NullDiscovery(), room: 'chain', anchor: { nodeId: A.nodeId, publicKey: A.pub }, ...extra });
+  // These tests are about role-chain-fetch: the admission-time sync (anti-entropy, tested on its
+  // own below) is left out, so a record reaches the store only by the order the test delivers it.
+  if (!extra.sync) n._onRoleDigest = () => {};
+  return n;
 }
 async function stopAll(...nodes) {
   for (const n of nodes) { try { await n.stop(); } catch { /* */ } try { fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } catch { /* */ } }
@@ -142,6 +146,42 @@ describe('a grant or revoke that arrives before its root is resolved by role-cha
   });
 });
 
+describe('anti-entropy for grants and revokes (security review D, p7-ceiling)', () => {
+  it('a revoke this node missed reaches it at the next admission: the digests differ, the store syncs', async () => {
+    const P = boot('ae-p', { sync: true }); const N = boot('ae-n', { sync: true });
+    try {
+      await P.start(); await N.start();
+      // N knows V as validator and V's grant of X; P also holds the revoke N never got.
+      for (const r of [gAV, gVX]) { P._roleGrants.record(r); N._roleGrants.record(r); }
+      P._roleGrants.record(rVX);
+      assert.strictEqual(N.resolveRole(X.nodeId, Date.now(), { key: X.pub }), 'validator', 'before: the revoke was lost on the way');
+      await connectNodes(P, N);
+      await until(() => N._roleGrants.size() === 3, 4000);
+      assert.strictEqual(N.resolveRole(X.nodeId, Date.now(), { key: X.pub }), 'participant', 'after: the revoke arrived by the sync');
+      assert.ok(N._chainStats.synced >= 1);
+      assert.strictEqual(N._roleGrants.digest().digest, P._roleGrants.digest().digest, 'the stores agree');
+    } finally { await stopAll(P, N); }
+  });
+
+  it('a sync is paged in sync order (each record after its chain), and the pages are bounded', async () => {
+    const N = boot('ae-serve');
+    try {
+      await N.start();
+      const ys = Array.from({ length: 70 }, (_, i) => kp(`ae-y${i}`));
+      for (const [i, y] of ys.entries()) N._roleGrants.record(grant('role-grant', y, 'validator', A, t - 500 + i));
+      const asker = admitAs(N, { nodeId: 'ae-asker', name: 'a', publicKey: kp('ae-q').pub });
+      deliver(N, asker, { type: 'role-chain-fetch', reqId: 'rs-1', sync: true, after: 0 });
+      const first = asker.sent.find((f) => f.type === 'role-chain');
+      assert.strictEqual(first.grants.length, 64, 'a page holds at most 64');
+      assert.strictEqual(first.next, 64, 'and says where the next starts');
+      deliver(N, asker, { type: 'role-chain-fetch', reqId: 'rs-2', sync: true, after: first.next });
+      const second = asker.sent.filter((f) => f.type === 'role-chain')[1];
+      assert.strictEqual(second.grants.length, 6);
+      assert.strictEqual(second.next, undefined, 'the last page');
+    } finally { await stopAll(N); }
+  });
+});
+
 describe('role-chain-fetch cannot be flooded (port of pending-abuse.js)', () => {
   const junk = (i) => signGrant({ type: 'role-grant', grantee: `g${i}`, granteeKey: kp('j').pub, role: 'validator', grantedBy: `nobody-${i}`, grantedAt: t }, kp('j').priv);
 
@@ -162,16 +202,19 @@ describe('role-chain-fetch cannot be flooded (port of pending-abuse.js)', () => 
     } finally { await stopAll(N); }
   });
 
-  it('(b) a forged copy sent ahead of the genuine record does not keep it out', async () => {
+  it('(b) a forged copy sent ahead of the genuine record does not keep it out, and the session that sent it ends', async () => {
     const N = boot('chain-forged');
     try {
       await N.start();
       const s = admitAs(N, { nodeId: 'relayer', name: 'r', publicKey: kp('r').pub });
+      const h = admitAs(N, { nodeId: 'honest-relayer', name: 'h', publicKey: kp('h2').pub });
       deliver(N, s, { type: 'role-grant', grant: { ...gVX, grantedAt: gVX.grantedAt + 1 } }); // the genuine sig on altered fields
-      deliver(N, s, { type: 'role-grant', grant: gVX });
-      assert.strictEqual(s._chainHold.grants.size, 2, 'two records, held apart');
-      const reqId = s.sent.find((f) => f.type === 'role-chain-fetch').reqId;
-      deliver(N, s, { type: 'role-chain', reqId, grants: [gAV] });
+      deliver(N, h, { type: 'role-grant', grant: gVX });
+      assert.strictEqual(s._chainHold.grants.size, 1, 'held apart: the forgery on its session');
+      assert.strictEqual(h._chainHold.grants.size, 1, 'the genuine record on its own');
+      deliver(N, s, { type: 'role-chain', reqId: s.sent.find((f) => f.type === 'role-chain-fetch').reqId, grants: [gAV] });
+      assert.strictEqual(s.closed, true, 'the forgery is attributable to the session that relayed it: closed (security review D)');
+      deliver(N, h, { type: 'role-chain', reqId: h.sent.find((f) => f.type === 'role-chain-fetch').reqId, grants: [gAV] });
       assert.strictEqual(N.resolveRole(X.nodeId, Date.now(), { key: X.pub }), 'validator', 'the genuine one stored, the forgery dropped');
       assert.strictEqual(N._roleGrants.size(), 2);
     } finally { await stopAll(N); }

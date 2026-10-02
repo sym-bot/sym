@@ -179,7 +179,7 @@ describe('on receipt', () => {
     return cmb;
   }
 
-  it('accepts a record with a category over 256 KiB, which this release would not mint (0.14.0 review C-F4)', async () => {
+  it('refuses a record with a category over 256 KiB, which this release would not mint, before anything encodes it (security review D, record-flood; reverses C-F4)', async () => {
     const name = `bounds-bigcat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
@@ -196,12 +196,17 @@ describe('on receipt', () => {
       assert.throws(() => createCMB({ categories: texts, createdBy: 'peer-old' }), (e) => e.code === 'ECMBSIZE', 'this release does not mint it');
 
       const accepted = [];
+      const metrics = [];
       node.on('cmb-accepted', (e) => accepted.push(e));
+      node.on('metric', (m) => metrics.push(m));
+      let encoded = 0;
+      node._svafEvaluator.evaluate = async () => { encoded++; return null; };
       await node._frameHandler.handle(session, { type: 'cmb', timestamp: Date.now(), cmb });
       await settle();
-      assert.strictEqual(accepted.length, 1, 'admitted');
-      assert.strictEqual(accepted[0]._cmbVerified, true, 'and verified');
-      assert.strictEqual(node._store.get(cmb.metadata.key)?.cmb.categories.focus.text.length, texts.focus.length, 'stored whole');
+      assert.strictEqual(accepted.length, 0, 'refused');
+      assert.strictEqual(encoded, 0, 'before SVAF encoded anything');
+      assert.ok(metrics.some((m) => m.type === 'cmb-signature-rejected' && /too long/.test(m.error)), 'refused as malformed (too long)');
+      assert.strictEqual(node._store.get(cmb.metadata.key), null, 'not stored');
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 

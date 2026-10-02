@@ -120,7 +120,7 @@ describe('the decision is made for every session before anything per-peer exists
   it('a frame from a session the door has not admitted is refused, except its room-join grant', () => {
     const frame = src.slice(src.indexOf('  _onSessionFrame(session, frame) {'), src.indexOf('  _onSessionClosed(session, info) {'));
     assert.match(frame, /state !== 'admitted'/);
-    assert.match(frame, /mesh-room-join/);
+    assert.match(frame, /'room-join'/, 'the room-join frame (draft spec PR #31; mesh-room-join until the rename)');
     assert.match(frame, /not-admitted/);
   });
 });

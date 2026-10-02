@@ -40,28 +40,29 @@ function v2Record({ nodeId, createdBy, signWith, focus = 'v2 observation', room 
   return cmb;
 }
 
+// Lowercase UUIDs: a v2.0 record's createdByNodeId and to are nothing else (security review B).
 function withNode(fn) {
   const name = `v2bind-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-  node._roster.bind('node-alice', ALICE.pub, 'proven');
-  node._roster.bind('node-mallory', MALLORY.pub, 'proven');
-  node._roster.bind('node-relay', RELAY.pub, 'proven');
+  node._roster.bind('01a0fd00-0000-7000-8000-0000000a11ce', ALICE.pub, 'proven');
+  node._roster.bind('01a0fd00-0000-7000-8000-0000000bad00', MALLORY.pub, 'proven');
+  node._roster.bind('01a0fd00-0000-7000-8000-000000e1a700', RELAY.pub, 'proven');
   try { return fn(node); } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
 }
 
 describe('v2.0 author binding (B-R4)', () => {
   it('a v2.0 record relayed by another peer verifies against its author\'s key', () => {
     withNode((node) => {
-      const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), false);
+      const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-000000e1a700', 'relay', msg), false);
       assert.strictEqual(msg._cmbVerified, true);
     });
   });
 
   it('a peer that signs a record under another node\'s id is refused, even delivering it itself', () => {
     withNode((node) => {
-      const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: MALLORY }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-mallory', 'mallory', msg), true);
+      const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: MALLORY }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-0000000bad00', 'mallory', msg), true);
     });
   });
 
@@ -70,10 +71,10 @@ describe('v2.0 author binding (B-R4)', () => {
       const stranger = kp();
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
-      const msg = { cmb: v2Record({ nodeId: 'node-stranger', createdBy: 'stranger', signWith: stranger }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+      const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-00000057a000', createdBy: 'stranger', signWith: stranger }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-000000e1a700', 'relay', msg), true);
       assert.strictEqual(msg._cmbVerified, false);
-      assert.ok(metrics.some((m) => m.type === 'cmb-author-unresolvable' && m.author === 'node-stranger'));
+      assert.ok(metrics.some((m) => m.type === 'cmb-author-unresolvable' && m.author === '01a0fd00-0000-7000-8000-00000057a000'));
     });
   });
 });
@@ -81,9 +82,9 @@ describe('v2.0 author binding (B-R4)', () => {
 describe('assertionId (B-R6)', () => {
   it('a v2.0 record whose carried assertionId is not the preimage\'s is refused', () => {
     withNode((node) => {
-      const cmb = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE });
+      const cmb = v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE });
       cmb.metadata.assertionId = 'asrt-' + '0'.repeat(64);
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', { cmb }), true);
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-0000000a11ce', 'alice', { cmb }), true);
     });
   });
 
@@ -94,7 +95,7 @@ describe('assertionId (B-R6)', () => {
       const cmb = createCMB({ categories: { focus: 'old suite' }, createdBy: 'alice', room: 'default' });
       signCMB(cmb, ALICE.priv);
       cmb.metadata.assertionId = 'asrt-' + '1'.repeat(64);
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', { cmb }), true);
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-0000000a11ce', 'alice', { cmb }), true);
       assert.ok(metrics.some((m) => m.type === 'cmb-legacy-suite-refused'), 'counted on its own metric');
       assert.ok(!metrics.some((m) => m.type === 'cmb-signature-rejected'), 'and never as a forgery (P-6)');
     });
@@ -107,15 +108,15 @@ describe('the inbox names a proven author (K5)', () => {
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      node._roster.bind('node-alice', ALICE.pub, 'proven');
-      const relay = admitAs(node, { nodeId: 'node-relay', name: 'relay', publicKey: RELAY.pub });
+      node._roster.bind('01a0fd00-0000-7000-8000-0000000a11ce', ALICE.pub, 'proven');
+      const relay = admitAs(node, { nodeId: '01a0fd00-0000-7000-8000-000000e1a700', name: 'relay', publicKey: RELAY.pub });
       node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
       const got = [];
       node.on('cmb-accepted', (e) => got.push(e));
-      node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
+      node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE, focus: 'relayed but proven' }) });
       await settle();
       assert.strictEqual(got.length, 1);
-      assert.strictEqual(got[0].author.nodeId, 'node-alice');
+      assert.strictEqual(got[0].author.nodeId, '01a0fd00-0000-7000-8000-0000000a11ce');
       assert.strictEqual(node.inboxGet(got[0].inboxId).from, 'alice');
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
@@ -125,7 +126,7 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
   // Declares the v2.0 suite but carries no room and no signature: it has no preimage, and building
   // one throws. On the relay path that throw reached the process and ended the daemon.
   function malformed() {
-    const cmb = createCMB({ categories: { focus: 'x' }, createdBy: 'alice', emitV2: true, createdByNodeId: 'node-alice', room: 'default' });
+    const cmb = createCMB({ categories: { focus: 'x' }, createdBy: 'alice', emitV2: true, createdByNodeId: '01a0fd00-0000-7000-8000-0000000a11ce', room: 'default' });
     cmb.metadata.assertionId = 'asrt-0';
     delete cmb.metadata.room;
     return cmb;
@@ -136,7 +137,7 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
       const msg = { cmb: malformed() };
-      assert.doesNotThrow(() => assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', msg), true));
+      assert.doesNotThrow(() => assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-0000000a11ce', 'alice', msg), true));
       assert.ok(metrics.some((m) => m.type === 'cmb-signature-rejected'), 'rejected through the ordinary path, with its metric');
     });
   });
@@ -147,7 +148,7 @@ describe('a malformed v2.0 frame is refused, never thrown (0.14.0 review F1)', (
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
       // Through the node's one guarded dispatch (0.13.17), which every transport calls.
-      const alice = admitAs(node, { nodeId: 'node-alice', name: 'alice', publicKey: ALICE.pub });
+      const alice = admitAs(node, { nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', name: 'alice', publicKey: ALICE.pub });
       assert.doesNotThrow(() => node._receiveSessionFrame(alice, { type: 'cmb', cmb: malformed() }));
       const original = node._frameHandler._handleMemoryShare;
       node._frameHandler._handleMemoryShare = () => { throw new Error('boom'); };
@@ -172,14 +173,14 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
-      node._roster.bind('node-alice', ALICE.pub, 'proven');
-      const relay = admitAs(node, { nodeId: 'node-relay', name: 'relay', publicKey: RELAY.pub });
+      node._roster.bind('01a0fd00-0000-7000-8000-0000000a11ce', ALICE.pub, 'proven');
+      const relay = admitAs(node, { nodeId: '01a0fd00-0000-7000-8000-000000e1a700', name: 'relay', publicKey: RELAY.pub });
       node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
       const c = capture(node);
       const got = [];
       node.on('cmb-accepted', (e) => got.push(e));
       // Alice signs a record for Bob; a relay hands it to this node, which holds Alice's key.
-      const forBob = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for bob only', to: 'node-bob' });
+      const forBob = v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE, focus: 'meant for bob only', to: '01a0fd00-0000-7000-8000-000000000b0b' });
       node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: forBob });
       await settle();
       assert.strictEqual(got.length, 0, 'not surfaced');
@@ -187,7 +188,7 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
       assert.deepStrictEqual(c.refused().map((m) => [m.reason, m.verified]), [['wrong-recipient', true]]);
 
       // The same author's record for THIS node is admitted, so the refusal is the audience's.
-      const forMe = v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: 'meant for this node', to: node.nodeId });
+      const forMe = v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE, focus: 'meant for this node', to: node.nodeId });
       node._frameHandler.handle(relay, { type: 'cmb', timestamp: Date.now(), cmb: forMe });
       await settle();
       assert.strictEqual(got.length, 1, 'a record addressed here is surfaced');
@@ -197,8 +198,8 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
   it('a verified v2.0 record signed for another room is refused', () => {
     withNode((node) => {
       const c = capture(node);
-      const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, room: 'another-room' }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-alice', 'alice', msg), true);
+      const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE, room: 'another-room' }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-0000000a11ce', 'alice', msg), true);
       assert.deepStrictEqual(c.refused().map((m) => m.reason), ['wrong-audience']);
     });
   });
@@ -207,8 +208,8 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
     withNode((node) => {
       const c = capture(node);
       const stranger = kp();
-      const msg = { cmb: v2Record({ nodeId: 'node-stranger', createdBy: 'stranger', signWith: stranger, to: 'node-bob' }) };
-      assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+      const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-00000057a000', createdBy: 'stranger', signWith: stranger, to: '01a0fd00-0000-7000-8000-000000000b0b' }) };
+      assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-000000e1a700', 'relay', msg), true);
       assert.ok(c.metrics.some((m) => m.type === 'cmb-signature-rejected' && m.reason === 'unresolvable-author'));
     });
   });
@@ -217,8 +218,8 @@ describe('the audience a record signs is checked on every suite (0.14.0 review C
     withNode((node) => {
       const c = capture(node);
       for (let i = 0; i < 3; i++) {
-        const msg = { cmb: v2Record({ nodeId: 'node-alice', createdBy: 'alice', signWith: ALICE, focus: `for bob ${i}`, to: 'node-bob' }) };
-        assert.strictEqual(node._frameHandler._rejectOnBadSignature('node-relay', 'relay', msg), true);
+        const msg = { cmb: v2Record({ nodeId: '01a0fd00-0000-7000-8000-0000000a11ce', createdBy: 'alice', signWith: ALICE, focus: `for bob ${i}`, to: '01a0fd00-0000-7000-8000-000000000b0b' }) };
+        assert.strictEqual(node._frameHandler._rejectOnBadSignature('01a0fd00-0000-7000-8000-000000e1a700', 'relay', msg), true);
       }
       assert.strictEqual(c.refused().length, 3);
       assert.strictEqual(c.lines.filter((l) => /wrong-recipient/.test(l)).length, 1);

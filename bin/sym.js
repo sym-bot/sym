@@ -136,7 +136,8 @@ function cmdKeys() {
     console.error(`${name} is running (PID ${lock.pid}): stop it before changing its key registry`);
     process.exit(1);
   }
-  const reg = new RosterKeyRegistry({ dir: path.join(dir, 'roster-keys') });
+  // Listing reads the file and changes nothing in it (the node may be running): read-only.
+  const reg = new RosterKeyRegistry({ dir: path.join(dir, 'roster-keys'), readOnly: sub !== 'resolve' && sub !== 'reset-floor' });
   if (sub === 'resolve') {
     const r = reg.resolveConflict(args[3], args[4]);
     if (!r.resolved) { console.error(`not resolved: ${r.reason}`); process.exit(1); }
@@ -458,7 +459,7 @@ function parseObserveFlags(argv) {
  * `sym publish`, which speaks AS this machine's resident node via IPC.
  */
 async function cmdEmit() {
-  const flags = { server: null, room: 'default', name: 'emitter', to: null, parents: [] };
+  const flags = { server: null, room: 'default', name: 'emitter', to: null, parents: [], receiver: null, receiverKey: null };
   const positional = [];
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -466,12 +467,15 @@ async function cmdEmit() {
     else if (a === '--room') flags.room = args[++i];
     else if (a === '--name') flags.name = args[++i];
     else if (a === '--to') flags.to = args[++i];
+    else if (a === '--receiver') flags.receiver = args[++i];
+    else if (a === '--receiver-key') flags.receiverKey = args[++i];
     else if (a === '--parents') flags.parents = String(args[++i] || '').split(',').filter(Boolean);
     else positional.push(a);
   }
   const content = positional.join(' ');
-  if (!flags.server || !content) {
-    console.error('Usage: sym emit --server <host:port> [--room <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+  if (!flags.server || !content || !flags.receiver || !flags.receiverKey) {
+    console.error('Usage: sym emit --server <host:port> --receiver <nodeId> --receiver-key <key|sha256:fingerprint> [--room <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+    console.error('  The receiver is pinned: the endpoint must prove that nodeId under that key, or nothing is sent.');
     console.error('  Emits ONE signed v1 block to a remote mesh node and exits (MMP §17.1 Class 1).');
     console.error('  Grounding from CI: --parents <cmb-key> with categories {"intent":"ground","commitment":"verified: ..."}');
     process.exit(1);
@@ -482,8 +486,9 @@ async function cmdEmit() {
     process.exit(1);
   }
   const { emitOnce } = require('../lib/emit');
+  const receiver = /^sha256:/.test(flags.receiverKey) ? { nodeId: flags.receiver, fingerprint: flags.receiverKey } : { nodeId: flags.receiver, key: flags.receiverKey };
   const { key } = await emitOnce(
-    { server: flags.server, room: flags.room, name: flags.name },
+    { server: flags.server, receiver, room: flags.room, name: flags.name },
     categories,
     { to: flags.to || undefined, parents: flags.parents },
   );
@@ -673,7 +678,12 @@ async function standaloneObserve(categories, opts) {
 
   if (!entry) {
     await node.stop().catch(() => {});
-    throw new Error('node.remember() returned null — remix rejected or store write failed');
+    throw new Error('node.remember() returned null — the store write failed');
+  }
+  if (entry.duplicate) {
+    await node.stop().catch(() => {});
+    console.log(`Already stored: ${entry.key}`);
+    return;
   }
 
   // Give the relay a moment to broadcast the CMB to peers before we

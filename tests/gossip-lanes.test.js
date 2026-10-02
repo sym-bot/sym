@@ -42,7 +42,8 @@ const { admitAs } = require('./_core-secure');
 const ROOM = 'g';
 const kp = (id) => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
-  return { id, pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  // nodeIds are canonical lowercase at every door, a grant's included (security review B).
+  return { id: id.toLowerCase(), pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
 };
 const signed = (fields, priv, sign) => { const o = { ...fields }; sign(o, priv); return o; };
 const forgedSig = () => crypto.randomBytes(64).toString('base64url');
@@ -80,7 +81,7 @@ describe('role grants are gossip under the budget (F1)', () => {
   it('a captured grant re-spelled is refused or a repeat: never stored, written or relayed again, and nothing is spent', () => {
     const A = kp('anchor-A');
     withNode({ anchor: { nodeId: A.id, publicKey: A.pub } }, ({ node, sent }) => {
-      const g = signGrant({ type: 'role-grant', grantee: 'node-V', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
+      const g = signGrant({ type: 'role-grant', grantee: 'node-v', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
       assert.strictEqual(node._ingestRoleGrant(g, 'p').ok, true);
       assert.strictEqual(sent.length, 1, 'relayed once');
       const tokens = node._gossipBuckets.get('p').tokens;
@@ -96,7 +97,7 @@ describe('role grants are gossip under the budget (F1)', () => {
       for (let i = 0; i < 1000; i++) reasons.add(node._ingestRoleGrant({ ...g }, 'q').reason);
       assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'non-canonical-signature']);
       assert.strictEqual(node._roleGrants.size(), 1, 'one grant held');
-      assert.strictEqual(node._roleGrants.grantsFor('node-V').length, 1);
+      assert.strictEqual(node._roleGrants.grantsFor('node-v').length, 1);
       const file = path.join(node._dir, 'role-grants', 'role-grants.jsonl');
       assert.strictEqual(fs.readFileSync(file, 'utf8').trim().split('\n').length, 1, 'one line written');
       assert.strictEqual(sent.length, 1, 'and nothing relayed again');
@@ -131,13 +132,13 @@ describe('role grants are gossip under the budget (F1)', () => {
       // Genuine grants from one grantor to one grantee: kept up to the pair's bound, and only those relayed.
       let kept = 0;
       for (let i = 0; i < 70; i++) {
-        const r = node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-X', granteeKey: SOME_KEY, role: 'validator', grantedBy: P.id, grantedAt: i }, P.priv), 'p2');
+        const r = node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: P.id, grantedAt: i }, P.priv), 'p2');
         if (r.ok) kept++; else assert.strictEqual(r.reason, 'pair-full');
       }
-      assert.strictEqual(kept, 64);
-      assert.strictEqual(sent.length, 64);
+      assert.strictEqual(kept, 16, 'the pair bound (16 since the security review: role-resolve-cost)');
+      assert.strictEqual(sent.length, 16);
       // Another grantor's grant to the same grantee is not kept out by the first one's.
-      assert.strictEqual(node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-X', granteeKey: SOME_KEY, role: 'validator', grantedBy: Q.id, grantedAt: 1 }, Q.priv), 'p3').ok, true);
+      assert.strictEqual(node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: Q.id, grantedAt: 1 }, Q.priv), 'p3').ok, true);
     });
   });
 
@@ -153,25 +154,25 @@ describe('role grants are gossip under the budget (F1)', () => {
       const st = new RoleGrantStore(opts);
       const keyOf = (grantee) => ({ [P.id]: P.pub, [Q.id]: Q.pub })[grantee] || SOME_KEY;
       const grant = (by, grantee, at) => signGrant({ type: 'role-grant', grantee, granteeKey: keyOf(grantee), role: 'validator', grantedBy: by.id, grantedAt: at }, by.priv);
-      const g = grant(A, 'V', 1);
+      const g = grant(A, 'v', 1);
       assert.strictEqual(st.record({ ...g, sig: `${g.sig}=` }).stored, true, 'a direct caller may hand over another spelling');
-      assert.strictEqual(st.grantsFor('V')[0].sig, g.sig, 'it is kept as its signer wrote it');
+      assert.strictEqual(st.grantsFor('v')[0].sig, g.sig, 'it is kept as its signer wrote it');
       for (const sig of [g.sig, ...respell(g.sig)]) assert.strictEqual(st.record({ ...g, sig }).reason, 'duplicate');
       assert.strictEqual(st.has(` ${g.sig}`), true);
       assert.strictEqual(st.size(), 1);
       for (const G of [P, Q]) assert.strictEqual(st.record(grant(A, G.id, 0)).stored, true);
 
       const r = (by, grantee, at) => st.record(grant(by, grantee, at)).reason ?? 'stored';
-      assert.deepStrictEqual([r(P, 'X', 1), r(P, 'X', 2), r(P, 'X', 3)], ['stored', 'stored', 'pair-full']);
-      assert.deepStrictEqual([r(P, 'Y', 4), r(P, 'Z', 5)], ['stored', 'grantor-full']);
-      assert.strictEqual(st.record(forgedGrant(P.id, 'W')).reason, 'grantor-full', 'refused before its signature is checked');
-      assert.deepStrictEqual([r(Q, 'X', 6), r(Q, 'Y', 7)], ['stored', 'store-full']);
+      assert.deepStrictEqual([r(P, 'x', 1), r(P, 'x', 2), r(P, 'x', 3)], ['stored', 'stored', 'pair-full']);
+      assert.deepStrictEqual([r(P, 'y', 4), r(P, 'z', 5)], ['stored', 'grantor-full']);
+      assert.strictEqual(st.record(forgedGrant(P.id, 'w')).reason, 'grantor-full', 'refused before its signature is checked');
+      assert.deepStrictEqual([r(Q, 'x', 6), r(Q, 'y', 7)], ['stored', 'store-full']);
       assert.strictEqual(st.size(), 7);
-      assert.deepStrictEqual([r(A, 'X', 8), r(A, 'Z', 9)], ['stored', 'stored'], "the anchor's own are never refused");
-      assert.deepStrictEqual(st.grantsFor('X').map((x) => x.grantedAt), [1, 2, 6, 8], 'nothing kept was evicted');
+      assert.deepStrictEqual([r(A, 'x', 8), r(A, 'z', 9)], ['stored', 'stored'], "the anchor's own are never refused");
+      assert.deepStrictEqual(st.grantsFor('x').map((x) => x.grantedAt), [1, 2, 6, 8], 'nothing kept was evicted');
       const again = new RoleGrantStore(opts);
       assert.strictEqual(again.size(), 9, 'and a restart reads back what was kept');
-      assert.strictEqual(again.resolveRole('X', 100), 'validator');
+      assert.strictEqual(again.resolveRole('x', 100), 'validator');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
@@ -217,31 +218,35 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
     });
   });
 
-  it('many proven peers have 100 each, and all of them together stay under the ceiling', () => {
-    withNode({}, ({ node, clock, metrics }) => {
+  it('forgeries spend only their own peer\'s lane, never the shared ceiling, and a forgery on a session ends it (security review D, p7-ceiling)', () => {
+    withNode({}, ({ node, metrics }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
       let badSig = 0;
       const ingest = (peer) => { if (node._ingestAttestation(forged(A), peer, peer).reason === 'bad-signature') badSig++; };
-      const checked = () => badSig;   // a signature checked (and found forged)
-      // 300 peers, 101 forgeries each.
+      // 300 peers, 101 forgeries each: each peer's own 100, and the ceiling untouched.
       for (let i = 0; i < 300; i++) for (let j = 0; j < 101; j++) ingest(`id-${i}`);
-      assert.strictEqual(checked(), 20_000, 'the ceiling: a burst of 20,000, however many peers');
-      assert.strictEqual(node._gossipBuckets.get('id-0').tokens, 0, 'each peer has 100');
-      assert.strictEqual(node._gossipBuckets.get('id-299').tokens, 100, 'those past the ceiling checked nothing');
-      const ceiling = () => metrics.filter((m) => m.type === 'gossip-over-ceiling');
-      assert.strictEqual(ceiling().length, 1, 'said once, at the first drop');
-      node._sayDrops(node._dropReports.get('gossip-over-ceiling|*'));
-      assert.strictEqual(ceiling().length, 2);
-      assert.strictEqual(ceiling().reduce((s, m) => s + m.dropped, 0), 100 * 101, 'every drop counted');
-      assert.strictEqual(ceiling()[0].perSecond, 4000);
-      assert.strictEqual(ceiling()[1].fromPeerIds.length, 16, 'naming up to 16 peers');
-      assert.strictEqual(node.metrics().gossipOverBudget, 300 * 101 - 20_000);
-      // The ceiling refills at 4,000 a second.
-      clock.t += 1000;
-      const before = checked();
-      for (let i = 0; i < 50; i++) for (let j = 0; j < 100; j++) ingest(`next-${i}`);
-      assert.strictEqual(checked() - before, 4000);
+      assert.strictEqual(badSig, 300 * 100, 'each peer checks its own 100');
+      assert.strictEqual(node._gossipGlobal.tokens, node._gossipGlobalBurst, 'no forgery spent the shared ceiling');
+      assert.strictEqual(metrics.filter((m) => m.type === 'gossip-over-ceiling').length, 0);
+      // On a session, the first forgery is attributable: the session ends and its id waits out a penalty.
+      const s = admitAs(node, { nodeId: 'forger-1' });
+      assert.strictEqual(node._ingestAttestation(forged(A), 'forger-1', 'forger-1', s).reason, 'bad-signature');
+      assert.strictEqual(s.closed, true, 'a forged signature on a proven session closes it');
+      assert.strictEqual(node._penalised('forger-1'), true, 'and its nodeId is not admitted again for a while');
+      assert.ok(metrics.some((m) => m.type === 'forged-signature' && m.peer === 'forger-1'));
+    });
+  });
+
+  it('the ceiling bounds VERIFIED statements, spent after the signature checks out', () => {
+    withNode({ gossipBudget: { globalBurst: 5, globalPerSecond: 1 } }, ({ node, metrics }) => {
+      const A = kp('att-A');
+      node._roster.bind(A.id, A.pub, 'proven');
+      const real = (i) => signed({ of: `cmb-${crypto.randomBytes(32).toString('hex')}`, by: A.id, at: 1, roster: ROOM, verdict: 'aligned', categories: {}, seq: 1000 + i, prev: 'p' }, A.priv, signAttestation);
+      const reasons = {};
+      for (let i = 0; i < 8; i++) { const r = node._ingestAttestation(real(i), `peer-${i}`, `peer-${i}`); reasons[r.reason || 'stored'] = (reasons[r.reason || 'stored'] || 0) + 1; }
+      assert.strictEqual(reasons['over-ceiling'], 3, 'past the ceiling, verified statements are dropped unstored');
+      assert.ok(metrics.some((m) => m.type === 'gossip-over-ceiling'));
     });
   });
 
@@ -331,7 +336,7 @@ describe('an over-long signature (F5)', () => {
       const att = signed({ of: 'cmb-1', by: A.id, at: 1, roster: ROOM, method: 'heuristic', verdict: 'aligned', categories: {}, role: 'participant', seq: 1, prev: 'p' }, A.priv, signAttestation);
       const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
       const w = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
-      const g = signGrant({ type: 'role-grant', grantee: 'V', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
+      const g = signGrant({ type: 'role-grant', grantee: 'v', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
       const ingest = (sig) => [
         node._ingestAttestation({ ...att, sig }, 'p', 'p').reason,
         node._ingestCheckpoint({ ...cp, sig }, 'p').reason,
@@ -406,11 +411,15 @@ describe('part A2 review suggestions', () => {
       const logs = [];
       node._log = (m) => logs.push(m);
       node._synthesisDelegate = () => ({ focus: 'a synthesis' });
+      node._hasNewDomainData = true; // the synthesis is the remix path (§15.7): it needs new domain data
       node.remember = () => { const e = new Error('CMB signing failed: no key'); e.code = 'ESIGN'; throw e; };
       node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
       assert.ok(logs.includes('Synthesis not shared: this node cannot sign its records'), logs.join('\n'));
       assert.ok(!logs.some((l) => l.startsWith('Synthesis delegate error')));
       node._synthesisDelegate = () => { throw new Error('the delegate broke'); };
+      node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
+      assert.ok(!logs.includes('Synthesis delegate error: the delegate broke'), 'a second insight within 10 s is paced: no synthesis (security review)');
+      node._frameHandler._lastSynthesisAt = 0;
       node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
       assert.ok(logs.includes('Synthesis delegate error: the delegate broke'), 'a delegate error is still said as one');
     });

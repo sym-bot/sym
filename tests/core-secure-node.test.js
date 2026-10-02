@@ -32,7 +32,7 @@ async function stopAll(...nodes) {
 }
 
 describe('a peer is a proven session (D1)', () => {
-  it('nothing per-peer exists before confirmation; after it, the peer is keyed by the proven nodeId and bound proven', async () => {
+  it('nothing per-peer exists before confirmation; after it, the peer is keyed by the proven nodeId, held for its session, and bound proven once it earns it', async () => {
     const a = mk('cs-a'); const b = mk('cs-b');
     try {
       await a.start(); await b.start();
@@ -42,13 +42,22 @@ describe('a peer is a proven session (D1)', () => {
       a.connectTransport(ta, { role: 'client', expectNodeId: b.nodeId });
       assert.strictEqual(a._peers.size, 0, 'a dial is not a peer');
       await until(() => a._peers.has(b.nodeId) && b._peers.has(a.nodeId));
-      assert.strictEqual(a._roster.source(b.nodeId), 'proven');
-      assert.strictEqual(a._roster.get(b.nodeId), b._identity.publicKey);
+      // Security review D (binding-squat): a confirmed session runs with a session-scoped binding; the
+      // durable registry takes the binding only once it is earned (an admitted verified record).
+      assert.strictEqual(a._roster.source(b.nodeId), undefined, 'a handshake alone is not a durable binding');
+      assert.strictEqual(a._keySource(b.nodeId), 'session');
+      assert.strictEqual(a._identityKey(b.nodeId), b._identity.publicKey);
       const p = a.peers().find((x) => x.peerId === b.nodeId);
       assert.strictEqual(p.profile, 'core-secure');
-      assert.strictEqual(p.keySource, 'proven');
+      assert.strictEqual(p.keySource, 'session');
       assert.strictEqual(p.sessions.length, 1);
       assert.match(p.sessions[0].sessionId, /^[0-9a-f]{32}$/);
+      assert.deepStrictEqual(a.keyBindings().find((x) => x.nodeId === b.nodeId), { nodeId: b.nodeId, key: b._identity.publicKey, source: 'session' });
+      // b's record admitted at a: the binding is earned, durable and proven.
+      a._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
+      b.remember(CATS('an observation a admits'));
+      await until(() => a._roster.source(b.nodeId) === 'proven', 4000);
+      assert.strictEqual(a._roster.get(b.nodeId), b._identity.publicKey);
     } finally { await stopAll(a, b); }
   });
 
@@ -93,10 +102,14 @@ describe('a peer is a proven session (D1)', () => {
       b.on('metric', (m) => metrics.push(m));
       const accepted = [];
       b.on('cmb-accepted', (x) => accepted.push(x));
-      // A record a signed to some other node, sent on the session to b.
+      // A record a signed to some other node is never sealed to b (review finding A: the one seal point
+      // refuses it) ...
       const elsewhere = identity('elsewhere');
       const cmb = signedRecord({ nodeId: a.nodeId, name: a.name, privateKey: a._identity.privateKey }, { categories: { focus: 'not for b' }, room: 'cs-room', to: elsewhere.nodeId });
-      a._peers.get(b.nodeId).transport.send({ type: 'cmb', cmb });
+      assert.strictEqual(a._peers.get(b.nodeId).transport.trySend({ type: 'cmb', cmb }).reason, 'not-addressed');
+      // ... and one that reaches b's handler anyway (a sender that seals it) is refused there.
+      const s = b._peers.get(a.nodeId).transport;
+      await b._frameHandler.handle(s, { type: 'cmb', cmb });
       await until(() => metrics.some((m) => m.type === 'cmb-audience-rejected'));
       assert.ok(metrics.some((m) => m.type === 'cmb-audience-rejected'), 'the signed to names another node: refused');
       a.remember(CATS('directed to b'), { to: b.nodeId });

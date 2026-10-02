@@ -78,7 +78,7 @@ describe('relay sessions (D2)', () => {
     } finally { await stopAll(a, b); await relay.close(); }
   });
 
-  it('an error 1009 IDENTITY_CONFLICT from the peer ends the session, is said, and is not retried (draft spec PR #21)', async () => {
+  it('an error 1009 IDENTITY_CONFLICT from the peer ends the session, is said, and is not retried (draft spec PR #21); a clear one is ignored', async () => {
     const relay = fakeRelay();
     const a = relayNode('rs-a3', relay); const b = relayNode('rs-b3', relay);
     try {
@@ -87,7 +87,15 @@ describe('relay sessions (D2)', () => {
       const [lo, hi] = [a, b].sort((x, y) => (x.nodeId < y.nodeId ? -1 : 1));
       const metrics = [];
       lo.on('metric', (m) => metrics.push(m));
-      relay.inject(hi.nodeId, lo.nodeId, { type: 'error', code: 1009, message: 'IDENTITY_CONFLICT', detail: `session:${relaySession(lo, hi).sessionId}` });
+      // A CLEAR error is anyone's to write (security review F): ignored, the session stays.
+      const before = relaySession(lo, hi);
+      relay.inject(hi.nodeId, lo.nodeId, { type: 'error', code: 1009, message: 'IDENTITY_CONFLICT', detail: `session:${before.sessionId}` });
+      relay.inject(hi.nodeId, lo.nodeId, { type: 'error', code: 1010, message: 'session closed' });
+      await new Promise((r) => setTimeout(r, 300));
+      assert.strictEqual(relaySession(lo, hi), before, 'a clear error is not a command');
+      assert.strictEqual(before.closed, false);
+      // The peer's own 1009 travels sealed on the session.
+      assert.strictEqual(relaySession(hi, lo).trySend({ type: 'error', code: 1009, message: 'IDENTITY_CONFLICT' }).ok, true);
       await until(() => !lo._peers.has(hi.nodeId), 3000);
       await new Promise((r) => setTimeout(r, 1500)); // past the first retry backoff
       assert.strictEqual(lo._peers.has(hi.nodeId), false, 'no re-handshake after an identity conflict');
@@ -195,7 +203,14 @@ describe('relay sessions (D2)', () => {
       b.on('metric', (m) => metrics.push(m));
       const someone = identity('someone');
       const cmb = signedRecord({ nodeId: a.nodeId, name: a.name, privateKey: a._identity.privateKey }, { room: 'relay-room', to: someone.nodeId, categories: { focus: 'for someone else' } });
-      relaySession(a, b).send({ type: 'cmb', cmb });  // the envelope is addressed to b
+      const s = relaySession(a, b);
+      // The seal point refuses it (security review A) ...
+      assert.strictEqual(s.trySend({ type: 'cmb', cmb }).reason, 'not-addressed');
+      // ... and a sender that seals it anyway, in an envelope addressed to b, is refused by b.
+      const { signedProjection } = require('../lib/core/record-canonical');
+      const rec = signedProjection(cmb);
+      const pos = s._mmp.nextSend();
+      s._wire(buildEncryptedFrame({ cmb: { categories: rec.categories, metadata: { ...rec.metadata } }, applicationBytes: null, sessionId: s.sessionId, direction: pos.direction, sequence: pos.sequence, trafficKey: pos.trafficKey }));
       await until(() => metrics.some((m) => m.type === 'cmb-audience-rejected'), 5000);
       assert.ok(metrics.some((m) => m.type === 'cmb-audience-rejected'));
     } finally { await stopAll(a, b); await relay.close(); }

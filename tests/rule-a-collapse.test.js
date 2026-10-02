@@ -118,16 +118,18 @@ test('B-2: parenting to your OWN head does not trip or consume the anti-paraphra
       { parents: [child.cmb] },
     );
     assert.ok(grandchild, 'two self-parented blocks in a row — the alternation is gone');
-    assert.equal(node._hasNewDomainData, false, 'and self-parenting never consumed the flag');
+    assert.equal(node._hasNewDomainData, true, 'an authored record is new domain data, with or without parents (draft spec PR #35)');
   });
 });
 
-test('B-2: parenting to a PEER still requires new domain data', async () => {
-  // The half of the guard that was right, kept intact.
+test('B-2: the REMIX PATH still requires new domain data; remember() citing a peer does not (draft spec PR #35)', async () => {
+  // The half of the guard that was right, kept intact — on the path that remixes.
   await withNode('rule-a-peerparent', async (node) => {
     node._hasNewDomainData = false;
     const peerBlock = { metadata: { key: 'cmb-' + 'f'.repeat(64) } };   // not ours
-    const res = node.remember({ ...FIELDS }, { parents: [peerBlock] });
-    assert.equal(res, null, 'remixing a peer without new domain data is still refused');
+    const res = node.remix({ ...FIELDS }, { parents: [peerBlock] });
+    assert.deepStrictEqual(res, { refused: 'remix-without-new-domain-data' }, 'remixing a peer without new domain data is still refused');
+    const reply = node.remember({ ...FIELDS, focus: 'a reply citing the peer' }, { parents: [peerBlock] });
+    assert.ok(reply && reply.key && !reply.refused, 'a record the agent authors, citing a peer, is not a remix');
   });
 });

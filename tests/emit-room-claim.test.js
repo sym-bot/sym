@@ -26,7 +26,7 @@ describe('emit room claims (Core Secure)', () => {
     await node.start();
     try {
       await assert.rejects(
-        () => connect({ server: `127.0.0.1:${node._port}`, timeoutMs: 4000 }),
+        () => connect({ server: `127.0.0.1:${node._port}`, receiver: { nodeId: node.nodeId, key: node.publicKey }, timeoutMs: 4000 }),
         /did not complete the Core Secure handshake/i,
       );
       assert.ok((node._sessionStats.failedByReason['room-mismatch'] || 0) >= 1, 'refused as a room mismatch');
@@ -42,7 +42,7 @@ describe('emit room claims (Core Secure)', () => {
     node.on('metric', (m) => { if (m.type === 'cmb-audience-rejected' || m.type === 'cmb-signature-rejected') refused.push(m); });
     try {
       const accepted = new Promise((resolve) => node.once('verified-record', resolve));
-      const e = await connect({ server: `127.0.0.1:${node._port}`, room: 'acme', timeoutMs: 4000 });
+      const e = await connect({ server: `127.0.0.1:${node._port}`, receiver: { nodeId: node.nodeId, key: node.publicKey }, room: 'acme', timeoutMs: 4000 });
       assert.strictEqual(e.peer.nodeId, node.nodeId, 'the handshake proved the node');
       const { cmb } = e.emit({ focus: 'a block from an emitter in acme' });
       assert.strictEqual(cmb.metadata.room, 'acme', 'it authors for the room the handshake proved');
@@ -71,7 +71,7 @@ describe('emit room claims (Core Secure)', () => {
     const node = lanNode('default-node', 'default');
     await node.start();
     try {
-      const e = await connect({ server: `127.0.0.1:${node._port}`, room: 'default', timeoutMs: 4000 });
+      const e = await connect({ server: `127.0.0.1:${node._port}`, receiver: { nodeId: node.nodeId, key: node.publicKey }, room: 'default', timeoutMs: 4000 });
       assert.ok(e);
       await e.close();
     } finally {

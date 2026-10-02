@@ -26,7 +26,8 @@ const { signGrant } = require('../lib/core');
 function kp(nodeId) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   return {
-    nodeId,
+    // nodeIds are canonical lowercase at every door, a grant's included (security review B).
+    nodeId: nodeId.toLowerCase(),
     priv: privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(16).toString('base64url'),
     pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
   };

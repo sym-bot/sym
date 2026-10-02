@@ -3,12 +3,12 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * Design D3, binding lifetime (0.13.17 re-review): new keypairs are free, so a key registry that only
- * grows can be filled by identity churn — 0.13.17's cap of 16,384 never-evicted bindings was a
- * lockout anyone on the LAN could fill in seconds. A first-contact `proven` binding that verified
- * nothing since (no record, grant, attestation or later session) and was not seen for 30 days
- * expires; one that ever verified something, or is pinned, grant-vouched, anchored or a legacy
- * claim, never does. The facts are persisted with the binding.
+ * Design D3, binding lifetime (0.13.17 re-review), as the security review changed it: new keypairs
+ * are free, so a key registry that only grows can be filled by identity churn. A confirmed session
+ * runs with a SESSION-SCOPED binding; the durable registry takes a binding only when it is EARNED —
+ * an admitted verified record, a pin, or a grant in effect (a view) — and a re-handshake earns
+ * nothing. A `proven` binding that verified nothing (one made by a path that binds without earning)
+ * expires after 30 days unseen; nothing is ever evicted before it expires. The facts are persisted.
  */
 
 const { describe, it } = require('node:test');
@@ -46,12 +46,13 @@ describe('binding lifetime (D3)', () => {
     assert.strictEqual(r.expiredCount(), 20_000);
   });
 
-  it('pinned, grant-vouched, grant, legacy-claim and live bindings never expire; one seen recently does not', () => {
+  it('pinned, grant-vouched (a view), grant, legacy-claim and live bindings never expire; one seen recently does not', () => {
     let t = 0;
     const live = new Set(['live']);
-    const r = new RosterKeyRegistry({ now: () => t, isLive: (id) => live.has(id) });
+    const view = new Map([['grant', key(2)], ['vouched', key(4)]]); // the grants in effect now
+    const r = new RosterKeyRegistry({ now: () => t, isLive: (id) => live.has(id), grantView: (id) => view.get(id) });
     r.bind('pinned', key(1), 'pinned');
-    r.bind('grant', key(2), 'grant');
+    assert.strictEqual(r.bind('grant', key(2), 'grant').bound, true, 'a grant in effect binds as a view');
     r.bind('claim', key(3), 'legacy-claim');
     r.bind('vouched', key(4), 'proven'); r.bind('vouched', key(4), 'grant');
     r.bind('live', key(5), 'proven');
@@ -62,9 +63,36 @@ describe('binding lifetime (D3)', () => {
     t += 11 * DAY;
     r.noteVerified('record');
     assert.strictEqual(r.expire(), 1);
-    assert.deepStrictEqual(r.entries().map((e) => e.nodeId).sort(), ['claim', 'grant', 'live', 'pinned', 'record', 'seen', 'vouched']);
+    assert.deepStrictEqual(r.entries().map((e) => e.nodeId).sort(), ['claim', 'live', 'pinned', 'record', 'seen', 'vouched'], 'a grant binding is never stored');
+    assert.strictEqual(r.get('grant'), key(2), 'it verifies while the grant is in effect');
+    assert.strictEqual(r.source('grant'), 'grant');
+    view.delete('grant');
+    assert.strictEqual(r.get('grant'), undefined, 'and the binding ends with the grant (security review C)');
     assert.strictEqual(r.expected('gone'), undefined, 'the expired id is unbound: a later session binds it afresh');
     assert.strictEqual(r.bind('gone', key(9), 'proven').created, true);
+    // The vouch ends: the proven binding it kept alive is expirable again.
+    view.delete('vouched');
+    t += 31 * DAY;
+    r.expire();
+    assert.strictEqual(r.get('vouched'), undefined, 'no grant in effect keeps it any more');
+  });
+
+  it('a full registry evicts nothing before it expires: a newcomer is refused a durable binding, and re-handshakes earn nothing', () => {
+    let t = 0;
+    const r = new RosterKeyRegistry({ now: () => t, maxBindings: 4 });
+    const H = 'honest-once-seen';
+    r.bind(H, key('h'), 'proven');
+    for (let i = 0; i < 3; i++) r.bind(`fill-${i}`, key(i), 'proven');
+    // p8-evict: fresh identities used to evict the honest binding and let a squatter take its id.
+    for (let i = 0; i < 100; i++) assert.strictEqual(r.bind(`churn-${i}`, key(100 + i), 'proven').reason, 'full');
+    assert.strictEqual(r.get(H), key('h'), 'the honest binding is still there');
+    assert.strictEqual(r.bind(H, key('squatter'), 'proven').reason, 'conflict', 'a squatter is a conflict, not a newcomer');
+    assert.strictEqual(r.evictedCount(), 0);
+    assert.strictEqual(r.refusedFullCount(), 100);
+    // Expiry is what frees room: 30 days unseen.
+    t += 31 * DAY;
+    assert.ok(r.expire() >= 1);
+    assert.strictEqual(r.bind('newcomer', key('n'), 'proven').created, true);
   });
 
   it('the facts persist: after a restart 31 days on, the flood expires at load and the file is compacted', () => {
@@ -88,15 +116,53 @@ describe('binding lifetime (D3)', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('at the node: a verified record, or a second session, makes a binding permanent', async () => {
+  it('at the node: only an ADMITTED verified record earns a durable binding; one refused for its room, or a second session, earns nothing', async () => {
     const node = new SymNode({ name: `life-${Date.now()}`, silent: true, discovery: new NullDiscovery(), room: 'life' });
     try {
       const author = identity('author');
       const session = admitAs(node, author);
       const entry = () => node._roster.entries().find((e) => e.nodeId === author.nodeId);
-      assert.strictEqual(entry().verified, null, 'first contact: proven, nothing verified yet');
-      await deliver(node, session, { type: 'cmb', cmb: signedRecord(author, { room: 'life', categories: { focus: 'a record that verifies' } }) });
-      assert.ok(entry().verified, 'a record verified under it');
+      assert.strictEqual(entry(), undefined, 'first contact: a session-scoped binding, nothing durable');
+      assert.strictEqual(node._identityKey(author.nodeId), author.publicKey, 'the session still verifies under its proven key');
+      // binding-squat (1): a signed record refused for its room earns nothing.
+      await deliver(node, session, { type: 'cmb', cmb: signedRecord(author, { room: 'some-other-room', categories: { focus: 'refused for its room' } }) });
+      assert.strictEqual(entry(), undefined, 'a record refused for its room protects no history');
+      // An admitted one earns it.
+      node._svafEvaluator.evaluate = async () => ({ decision: 'aligned', total_drift: 0.1, category_drifts: { focus: 0.1 }, gate_values: { g: 1 } });
+      await deliver(node, session, { type: 'cmb', cmb: signedRecord(author, { room: 'life', categories: { focus: 'a record that is admitted' } }) });
+      const { until } = require('./_core-secure');
+      await until(() => entry() && entry().verified, 3000);
+      assert.strictEqual(entry().source, 'proven');
+      assert.ok(entry().verified, 'an admitted record verified under it');
+    } finally { await node.stop(); }
+  });
+
+  it('at the node: a second key for a nodeId with a live session-scoped binding is a 1009 conflict, even with the registry full', async () => {
+    const node = new SymNode({ name: `life-full-${Date.now()}`, silent: true, discovery: new NullDiscovery(), room: 'life', maxKeyBindings: 1 });
+    try {
+      await node.start();
+      node._roster.bind(identity('filler').nodeId, identity('filler').publicKey, 'pinned');
+      const { memoryPipe, until } = require('./_core-secure');
+      const { PeerSession } = require('../lib/session');
+      const sessionAs = async (id) => {
+        const [tc, ts] = memoryPipe();
+        node.connectTransport(ts, { role: 'server' });
+        const s = new PeerSession({ role: 'client', transport: tc, local: id, room: 'life', extensions: ['cmb-encrypted-v2'], implementation: { name: 'x', version: '1' }, expectNodeId: node.nodeId });
+        tc.on('message', (f) => s.receiveWire(f));
+        s.start();
+        await until(() => s.closed || (s.confirmed && node._peers.has(id.nodeId)), 3000);
+        return s;
+      };
+      const honest = identity('honest');
+      const h = await sessionAs(honest);
+      assert.ok(node._peers.has(honest.nodeId), 'the honest newcomer is admitted with a session-scoped binding');
+      const squat = { ...identity('squatter'), nodeId: honest.nodeId };
+      const sq = await sessionAs(squat);
+      await until(() => sq.closed, 3000);
+      assert.strictEqual(sq.closedReason, 'identity-conflict', 'the squatter is refused with 1009');
+      assert.strictEqual(node._peers.get(honest.nodeId).identityKey, honest.publicKey);
+      assert.ok(node._roster.conflicts().some((c) => c.nodeId === honest.nodeId && c.hadSource === 'session'), 'recorded');
+      h.close('done');
     } finally { await node.stop(); }
   });
 });

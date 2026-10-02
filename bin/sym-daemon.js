@@ -491,10 +491,12 @@ function handleIPCMessage(socketId, socket, msg) {
       if (msg.categories) {
         try {
           const entry = node.remember(msg.categories, { tags: msg.tags, parents: msg.parents });
-          if (entry) {
+          if (entry && !entry.duplicate) {
             sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
+          } else if (entry) {
+            sendIPC(socket, { type: 'result', action: 'remember', key: entry.key, duplicate: true });
           } else {
-            sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
+            sendIPC(socket, { type: 'result', action: 'remember', error: 'not stored', code: 'ESTORE' });
           }
         } catch (err) {
           log(`remember failed: ${err.message}`);
@@ -645,24 +647,12 @@ function forwardEventsToListeners() {
     // took the daemon down in 0.13.16.
     if (node._xmesh) node._xmesh.ingestSignal({ type: 'message', from, content });
 
-    // Wake sleeping peers that might need this message.
-    // The daemon acts as wake proxy — it has APNs keys and gossiped wake channels.
-    // When a remote peer (Telegram bot) sends a message, and a local peer (MeloTune)
-    // is sleeping, the daemon wakes it so the relay can deliver the message.
-    node._wakeManager?.wakeSleepingPeers('message', {
-      type: 'message', from: node._identity.nodeId, fromName: node.name,
-      content, timestamp: Date.now(),
-    });
+    // A peer's message is not re-sent under this node's name to sleeping peers (security review):
+    // it was the peer's, signed to this node. A message for another node is that node's to send.
   });
 
-  node.on('mood-delivered', (data) => {
-    // XMesh ingestion happens via cmb → SVAF path, not here.
-    // Wake sleeping local peers so they can receive the mood.
-    node._wakeManager?.wakeSleepingPeers('mood', {
-      type: 'mood', from: node._identity.nodeId, fromName: node.name,
-      mood: data.mood, timestamp: Date.now(),
-    });
-  });
+  // A peer's mood is not re-broadcast under this node's name either (security review): before
+  // 0.14 the daemon queued every delivered mood for sleeping peers as its own `mood` frame.
 
   node.on('xmesh-insight', (data) => {
     broadcastToListeners({ type: 'event', event: 'xmesh-insight', data });

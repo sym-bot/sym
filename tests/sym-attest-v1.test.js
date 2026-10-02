@@ -119,8 +119,10 @@ describe('the wire form (sym-attest-v1 §5, §6 step 1)', () => {
       a._buildAdmissionAttestation(`cmb-${hex('7')}`, 'aligned', verdicts, 'heuristic', `asrt-${hex('8')}`);
       a._buildAdmissionAttestation(`cmb-${hex('9')}`, 'rejected', verdicts, 'neural', `asrt-${hex('6')}`);
       await until(() => got.length === 2 && b._attestations.checkpointAt(a.nodeId, 2), 3000);
-      assert.deepStrictEqual([...new Set(sent.map((f) => f.type))].sort(), ['sym-attest-attestation', 'sym-attest-checkpoint']);
-      assert.ok(sent.every((f) => !('roster' in (f.attestation || f.checkpoint)) && !('upto_seq' in (f.attestation || f.checkpoint))));
+      const types = new Set(sent.map((f) => f.type));
+      assert.ok(types.has('sym-attest-attestation') && types.has('sym-attest-checkpoint'), [...types].join(','));
+      assert.ok([...types].every((t) => t.startsWith('sym-attest-')), 'only the extension\'s frames (a peer\'s witness, relayed once, among them)');
+      assert.ok(sent.every((f) => { const o = f.attestation || f.checkpoint || f.witness; return !('roster' in o) && !('upto_seq' in o); }));
       assert.deepStrictEqual(got.map((e) => [e.method, e.assertionId, e.room]), [['heuristic', `asrt-${hex('8')}`, 'sa-room'], ['neural', `asrt-${hex('6')}`, 'sa-room']]);
       assert.strictEqual(got[1].prev, core.chainLink(a._attestations.chainOf(a.nodeId)[0].sig));
       assert.strictEqual(b._attestations.checkpointAt(a.nodeId, 2).root, core.attestMerkleRoot(a._attestations.chainOf(a.nodeId).map((x) => x.sig)));

@@ -54,7 +54,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     await withReceiver('emit-rx', async (node, port) => {
       const accepted = once(node, 'cmb-accepted');
       const { key, cmb } = await emitOnce(
-        { server: `127.0.0.1:${port}`, room: 'emit-g', name: 'ci-emitter' },
+        { server: `127.0.0.1:${port}`, receiver: { nodeId: node.nodeId, key: node.publicKey }, room: 'emit-g', name: 'ci-emitter' },
         { focus: 'build 4821 green', intent: 'ground', commitment: 'verified: test suite passed' },
       );
 
@@ -73,9 +73,18 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     });
   });
 
+  it('the receiver is pinned: none given is refused, an endpoint proving another key is refused (security review)', async () => {
+    await withReceiver('emit-pin', async (node, port) => {
+      await assert.rejects(() => connect({ server: `127.0.0.1:${port}`, room: 'emit-g', name: 'pin-a' }), (e) => e.code === 'EEMITPIN');
+      const other = require('./_core-secure').identity('someone-else');
+      await assert.rejects(() => connect({ server: `127.0.0.1:${port}`, receiver: { nodeId: node.nodeId, key: other.publicKey }, room: 'emit-g', name: 'pin-b' }), (e) => e.code === 'EEMITPIN');
+      await assert.rejects(() => connect({ server: `127.0.0.1:${port}`, receiver: { nodeId: other.nodeId, key: node.publicKey }, room: 'emit-g', name: 'pin-c', timeoutMs: 3000 }), /did not complete the Core Secure handshake/);
+    });
+  });
+
   it('the emitted signature verifies against the emitter identity key (Class 1 §17.1)', async () => {
     await withReceiver('emit-rx2', async (node, port) => {
-      const emitter = await connect({ server: `127.0.0.1:${port}`, room: 'emit-g', name: 'sensor-a' });
+      const emitter = await connect({ server: `127.0.0.1:${port}`, receiver: { nodeId: node.nodeId, key: node.publicKey }, room: 'emit-g', name: 'sensor-a' });
       try {
         assert.ok(emitter.peer && emitter.peer.nodeId, 'receiver handshake surfaced');
         const { cmb } = emitter.emit({ focus: 'temperature nominal' });
@@ -92,7 +101,7 @@ describe('sym/emit — MMP Class 1 emitter over real TCP', () => {
     await withReceiver('emit-rx3', async (node, port) => {
       const seen = [];
       node.on('cmb-accepted', (s) => seen.push(s));
-      const emitter = await connect({ server: `127.0.0.1:${port}`, room: 'emit-g', name: 'ci-emitter' });
+      const emitter = await connect({ server: `127.0.0.1:${port}`, receiver: { nodeId: node.nodeId, fingerprint: node.fingerprint }, room: 'emit-g', name: 'ci-emitter' });
       try {
         const first = emitter.emit({ focus: 'deploy started' });
         const second = emitter.emit(

@@ -118,8 +118,13 @@ describe('wakes have a cooldown on failure and a bounded queue (R4)', () => {
     const lines = [];
     node._log = (l) => lines.push(l);
     try {
-      for (let i = 0; i < 300; i++) node._wakeManager.learnWakeChannel(`phone-${i}`, ch(`t${i}`), { source: 'direct' });
-      for (let m = 0; m < 50; m++) node._wakeManager.wakeSleepingPeers('message', { type: 'message', content: `m${m}` });
+      for (let i = 0; i < 300; i++) {
+        node._wakeManager.learnWakeChannel(`phone-${i}`, ch(`t${i}`), { source: 'direct' });
+        node._roster.bind(`phone-${i}`, identity(`phone-${i}`).publicKey, 'pinned'); // a queued frame goes to this key only
+      }
+      for (let m = 0; m < 50; m++) node._wakeManager.wakeSleepingPeers('mood', { type: 'mood', mood: `m${m}` });
+      // The retired `message` frame is never queued (security review): it wakes, and waits for nothing.
+      node._wakeManager.wakeSleepingPeers('message', { type: 'message', content: 'retired' });
       await new Promise((r) => setTimeout(r, 300));
       const failed = lines.filter((l) => /^Wake failed/.test(l));
       assert.strictEqual(failed.length, 300, 'one attempt per channel per cooldown, not one per message (no APNs keys here, so each fails)');
@@ -127,7 +132,9 @@ describe('wakes have a cooldown on failure and a bounded queue (R4)', () => {
       for (const [, q] of node._pendingFrames) most = Math.max(most, q.length);
       assert.strictEqual(most, PENDING_FRAMES_MAX);
       assert.strictEqual(PENDING_FRAMES_MAX, 16);
-      assert.deepStrictEqual(node._pendingFrames.get('phone-0').map((f) => f.content), Array.from({ length: 16 }, (_, i) => `m${34 + i}`), 'the newest are kept');
+      assert.deepStrictEqual(node._pendingFrames.get('phone-0').map((e) => e.frame.mood), Array.from({ length: 16 }, (_, i) => `m${34 + i}`), 'the newest are kept');
+      assert.ok(node._pendingFrames.get('phone-0').every((e) => e.key === node._roster.get('phone-0')), 'each kept with the key it may be delivered to');
+      assert.ok(![...node._pendingFrames.values()].some((q) => q.some((e) => e.frame.type === 'message')), 'no message frame queued');
     } finally { await done(node); }
   });
 });
@@ -177,8 +184,10 @@ describe('per-peer maps are pruned when the peer leaves and bounded otherwise (R
         void tc;
       }
       for (const { from, f } of hellos) node._relayEnvelope(from, 'x', f);
-      assert.strictEqual(node._relayHandshakesInFlight(), 256, 'bounded');
-      assert.ok(node._sessionStats.refusedByReason['too-many-handshakes'] >= 144);
+      // Unknown froms share RELAY_UNKNOWN_MAX (32) of the 256 slots, the oldest going first for a
+      // newer hello (security review D, relay-slots / announce-starve).
+      assert.strictEqual(node._relayHandshakesInFlight(), 32, 'unknown froms: bounded at their share');
+      assert.ok((node._sessionStats.failedByReason['handshake-evicted'] || 0) >= 368, 'the oldest unknown handshakes made room');
       for (const s of [...node._sessions]) if (s.kind === 'relay') s.close('timeout', { notify: false });
       assert.strictEqual(node._relaySessions.size, 0, 'nothing kept per relay from');
     } finally { await done(node); }

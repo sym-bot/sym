@@ -44,32 +44,36 @@ async function dial(node, local, room) {
 }
 
 describe('the key registry cannot be locked out by identity churn (roster-fill.js, D3)', () => {
-  it('a full registry of first-contact bindings makes room for a newcomer; one that protects history stays', () => {
+  it('a full registry evicts nothing before it expires: a once-seen honest binding stays, and a squatter of it is a conflict (security review D, p8-evict)', () => {
     let t = 1;
     const r = new RosterKeyRegistry({ now: () => t, maxBindings: 1000 });
     const honest = identity('honest');
-    r.bind(honest.nodeId, honest.publicKey, 'proven'); r.noteVerified(honest.nodeId);
-    for (let i = 0; i < 5000; i++) { t++; assert.strictEqual(r.bind(`fill-${i}`, identity().publicKey, 'proven').bound, true, `fill ${i} bound`); }
+    r.bind(honest.nodeId, honest.publicKey, 'proven'); r.noteSeen(honest.nodeId); // seen once, verified nothing
+    let full = 0;
+    for (let i = 0; i < 5000; i++) { t++; if (r.bind(`fill-${i}`, identity().publicKey, 'proven').reason === 'full') full++; }
     assert.strictEqual(r.size(), 1000, 'bounded');
-    assert.strictEqual(r.get(honest.nodeId), honest.publicKey, 'the binding that verified something was never displaced');
-    const genuine = identity('genuine');
-    assert.strictEqual(r.bind(genuine.nodeId, genuine.publicKey, 'proven').bound, true, 'a genuine newcomer is bound (0.13.17 refused it)');
-    assert.ok(r.evictedCount() >= 4000);
+    assert.strictEqual(full, 4001, 'past the bound a newcomer is refused a durable binding (held for its session only)');
+    assert.strictEqual(r.get(honest.nodeId), honest.publicKey, 'the honest binding was never displaced');
+    assert.strictEqual(r.bind(honest.nodeId, identity('squatter').publicKey, 'proven').reason, 'conflict', 'and its nodeId cannot be squatted');
+    assert.strictEqual(r.evictedCount(), 0, 'nothing is evicted before it expires');
   });
 
-  it('on a node: 300 throwaway Core Secure identities, then a genuine newcomer is bound; the registry stays bounded', async () => {
+  it('on a node: 300 throwaway identities, each handshaking twice, fill nothing durable; a genuine newcomer runs with its session binding (roster-fill-014)', async () => {
     const node = new SymNode({ name: uniq('roster-fill'), silent: true, discovery: new NullDiscovery(), room: 'g', maxKeyBindings: 100 });
     try {
       await node.start();
-      for (let i = 0; i < 300; i++) { const { c } = await dial(node, identity(`throwaway-${i}`), 'g'); c.close('done'); }
+      for (let i = 0; i < 300; i++) {
+        const id = identity(`throwaway-${i}`);
+        for (let k = 0; k < 2; k++) { const { c } = await dial(node, id, 'g'); c.close('done'); }
+      }
       await until(() => node._peers.size === 0, 3000);
-      assert.ok(node._roster.size() <= 100, `bounded: ${node._roster.size()}`);
+      assert.strictEqual(node._roster.size(), 0, 'a handshake, or two, earns no durable binding (security review D)');
       const genuine = identity('genuine');
       const { c } = await dial(node, genuine, 'g');
       assert.strictEqual(c.confirmed, true);
       await until(() => node._peers.has(genuine.nodeId), 2000);
-      assert.strictEqual(node._roster.get(genuine.nodeId), genuine.publicKey, 'bound proven');
-      assert.strictEqual(node._roster.source(genuine.nodeId), 'proven');
+      assert.strictEqual(node._keySource(genuine.nodeId), 'session', 'held for its session');
+      assert.strictEqual(node._identityKey(genuine.nodeId), genuine.publicKey);
     } finally { await node.stop(); fs.rmSync(nodeDirById(node.nodeId), { recursive: true, force: true }); }
   });
 

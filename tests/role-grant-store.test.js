@@ -20,7 +20,8 @@ const { signGrant } = require('../lib/core');
 function kp(nodeId) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   return {
-    nodeId,
+    // nodeIds are canonical lowercase at every door, a grant's included (security review B).
+    nodeId: nodeId.toLowerCase(),
     priv: privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(16).toString('base64url'),
     pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
   };
@@ -121,8 +122,10 @@ describe('RoleGrantStore — revocation actually contains a compromised grantor'
     const st = storeWith(A, [B, X]);
     st.record(grant('role-grant', B, 'validator', A, T));
     st.record(grant('role-revoke', B, undefined, A, T + 300));
-    assert.strictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)).stored, true, 'backdated grant is stored (signature is valid)');
-    assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'but it confers nothing — backdating cannot bypass revocation');
+    // Since the security review (C; draft spec PR #33) the grantor must also be authorised when the
+    // grant is RECEIVED: B is revoked by then, so the backdated grant is not even kept.
+    assert.deepStrictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)), { stored: false, reason: 'unrooted' }, 'a backdated grant from a revoked grantor is refused at receipt');
+    assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'and it confers nothing — backdating cannot bypass revocation');
   });
 
   it('revoking a grantor cascades to everything it granted', () => {
@@ -205,6 +208,7 @@ describe('RoleGrantStore — relayed key learning (grant vouches for grantee key
     const A = kp('A'), V = kp('V'), X = kp('X'), Y = kp('Y');
     const reg = new RosterKeyRegistry({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
     const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, keys: reg });
+    reg.setGrantView((id) => store.vouchedKey(id)); // a grant binding is a view (security review C)
 
     // anchor → V validator, vouching V's key. C never met V.
     assert.strictEqual(reg.has(V.nodeId), false);

@@ -405,7 +405,8 @@ describe('author and inbox id on surfaced entries', () => {
       node._frameHandler.handle(from(node, B_ID), frame(signed(mkCmb('authorship check', { by: 'claude-sym-agent-a' }))));
       await settle();
       const e = seen.accepted[0];
-      assert.deepStrictEqual(e.author, { name: 'claude-sym-agent-a', nodeId: A_ID.nodeId, via: { name: 'peerB', nodeId: B_ID.nodeId } });
+      // The author carries the public key its signature verified under (mesh-channel 0.11.0).
+      assert.deepStrictEqual(e.author, { name: 'claude-sym-agent-a', nodeId: A_ID.nodeId, key: PEER_A.pub, via: { name: 'peerB', nodeId: B_ID.nodeId } });
       assert.ok(!String(e.author.name).includes('+'));
       const item = node.inboxGet(e.inboxId);
       assert.ok(item, 'the surfaced entry names its inbox id');
