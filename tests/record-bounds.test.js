@@ -9,19 +9,26 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * - B-R11: mood valence and arousal are measurements in [-1, 1]: absent ones are omitted, not
  *   invented as 0, out-of-range ones are refused, and numbers given without text are kept.
  * - B-R13: a category is at most 256 KiB, the seven together at most 960 KiB, an agent id at most
- *   64 bytes (§3.1.2), so every record fits a 1 MiB frame. Receivers refuse what emitters may not mint.
+ *   64 bytes (§3.1.2). Receivers refuse a record over the text bounds.
+ * - 0.14.0 review C-F3: text bytes are not frame bytes (JSON escaping, and the E2E seal's base64), so
+ *   a record is minted only when the frame it travels in, sealed, fits MAX_FRAME_SIZE.
+ * - 0.14.0 review C-F4: the agent-id bound is a minting rule. A record an earlier release minted
+ *   with a longer agent id is not refused on receipt.
  * - B-R3 (interim): an unsigned record is accepted as unverified, counted, and named once per peer.
  */
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
-const { createCMB, checkAudience, signCMB } = require('../lib/core');
-const { MAX_CATEGORY_BYTES, MAX_RECORD_TEXT_BYTES } = require('../lib/core/cmb-encoder');
+const crypto = require('crypto');
+const { createCMB, checkAudience, signCMB, encryptCategories, assertionIdV2_0 } = require('../lib/core');
+const { MAX_CATEGORY_BYTES, MAX_RECORD_TEXT_BYTES, recordFrameBytes } = require('../lib/core/cmb-encoder');
+const { MAX_FRAME_SIZE, writeFrame } = require('../lib/frame-parser');
 const { signingPayloadV2_0 } = require('../lib/core/cmb-signing');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
+const { settle } = require('./_settle'); // waits for every in-flight frame, not a fixed guess
 
 describe('room (B-R10)', () => {
   it('a record minted without a room is in the room "default"', () => {
@@ -70,7 +77,7 @@ describe('size (B-R13)', () => {
     assert.throws(() => createCMB({ categories: { focus: big(MAX_CATEGORY_BYTES + 1) }, createdBy: 'a' }), (e) => e.code === 'ECMBSIZE');
     const near = big(MAX_CATEGORY_BYTES);
     assert.throws(() => createCMB({ categories: { focus: near, issue: near, intent: near, motivation: near }, createdBy: 'a' }), (e) => e.code === 'ECMBSIZE' && /total/.test(e.message));
-    assert.ok(MAX_RECORD_TEXT_BYTES < 1024 * 1024);
+    assert.ok(MAX_RECORD_TEXT_BYTES < MAX_FRAME_SIZE);
   });
   it('counts bytes, not characters', () => {
     const emoji = '😀'.repeat(MAX_CATEGORY_BYTES / 4 + 1); // 4 bytes each
@@ -79,6 +86,70 @@ describe('size (B-R13)', () => {
   it('refuses an agent id over 64 bytes', () => {
     assert.throws(() => createCMB({ categories: { focus: 'x' }, createdBy: 'n'.repeat(65) }), (e) => e.code === 'ECMBSIZE');
     assert.ok(createCMB({ categories: { focus: 'x' }, createdBy: 'n'.repeat(64) }));
+  });
+});
+
+describe('a record is minted only if its frame can be sent (0.14.0 review C-F3)', () => {
+  const ID = 'n'.repeat(64); // a 64-byte node id, the longest `to` a frame names
+  const cats4 = (t) => ({ focus: t, issue: t, intent: t, motivation: t });
+  /** The frames a record travels in: plain over TCP, and sealed for a peer inside the relay envelope. */
+  function frames(record) {
+    const plain = { type: 'cmb', timestamp: Date.now(), cmb: record, to: ID, directed: true, _anchor: true };
+    const { ciphertext, nonce } = encryptCategories(record.categories, crypto.randomBytes(32));
+    const sealed = { type: 'cmb', timestamp: Date.now(), cmb: { ...record, categories: ciphertext, _e2e: { nonce } }, to: ID, directed: true, _anchor: true };
+    return { plain, relayed: { to: ID, payload: sealed } };
+  }
+  const live = { destroyed: false, writable: true, write: () => true };
+  // The longest metadata a record of this node's carries: a 64-byte author, node id, addressee and
+  // room, under the v2.0 suite (its extra fields, and an assertionId once signed).
+  const mint = (t) => createCMB({ categories: cats4(t), createdBy: 'a'.repeat(64), to: ID, room: 'r'.repeat(64), emitV2: true, createdByNodeId: ID });
+  /** The longest run of `ch` per category (four categories) that still mints, by bisection. */
+  function largestMintable(ch) {
+    let lo = 0, hi = MAX_CATEGORY_BYTES;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      try { mint(ch.repeat(mid)); lo = mid; } catch (e) {
+        if (e.code !== 'ECMBSIZE') throw e;
+        hi = mid - 1;
+      }
+    }
+    return lo;
+  }
+
+  it('text that JSON escapes is bounded by the frame, not by its text bytes', () => {
+    // 500 KiB of `"`, well inside the text bounds, is a 1 MB frame once each one is written `\"`.
+    const quotes = '"'.repeat(250 * 1024);
+    assert.throws(() => createCMB({ categories: { focus: quotes, issue: quotes }, createdBy: 'a' }), (e) => e.code === 'ECMBSIZE' && /frame/.test(e.message));
+  });
+
+  it('a record sealed for a peer is bounded with the seal\'s base64 counted', () => {
+    // 900 KiB of plain text is inside the 960 KiB text bound, and about 1.2 MB once sealed.
+    assert.throws(() => createCMB({ categories: cats4('a'.repeat(225 * 1024)), createdBy: 'a' }), (e) => e.code === 'ECMBSIZE' && /frame/.test(e.message));
+  });
+
+  for (const [label, ch] of [['plain text', 'a'], ['text JSON escapes', '"'], ['control characters', '\u0001']]) {
+    it(`the largest record that mints is sendable on every transport (${label})`, () => {
+      const n = largestMintable(ch);
+      assert.ok(n > 0 && n < MAX_CATEGORY_BYTES, `bisection found ${n}`);
+      const record = mint(ch.repeat(n));
+      record.metadata.assertionId = assertionIdV2_0(record);
+      signCMB(record, crypto.randomBytes(32).toString('base64url'));
+      const { plain, relayed } = frames(record);
+      assert.strictEqual(writeFrame(live, plain).ok, true, 'over TCP in the clear');
+      assert.ok(Buffer.byteLength(JSON.stringify(relayed), 'utf8') <= MAX_FRAME_SIZE, 'sealed, inside the relay envelope');
+      assert.ok(recordFrameBytes(record) <= MAX_FRAME_SIZE);
+    });
+  }
+
+  it('remember() refuses a payload that would make the frame too large, before storing it', async () => {
+    const name = `bounds-payload-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      assert.throws(() => node.remember({ focus: 'a small record with a large payload' }, { payload: 'x'.repeat(MAX_FRAME_SIZE) }), (e) => e.code === 'ECMBSIZE');
+      assert.strictEqual(node._store.allEntries().length, 0, 'nothing stored');
+      assert.ok(node.remember({ focus: 'the same record with a payload that fits' }, { payload: 'x'.repeat(1024) }));
+    } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });
 
@@ -103,6 +174,35 @@ describe('on receipt', () => {
       assert.ok(metrics.some((m) => m.type === 'cmb-oversize-rejected'));
       assert.strictEqual(surfaced, 0);
     });
+  });
+
+  it('accepts a record an earlier release minted with an agent id over 64 bytes (0.14.0 review C-F4)', async () => {
+    // Shaped as 0.13.16 mints it: the two-section record, signed under mmp-sig-v2, with no bound on
+    // createdBy. Its address does not cover the author, so only the signature is redone here.
+    const name = `bounds-longid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+      const peer = { pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+      node._pinPeerKey('peer-long', peer.pub);
+      const longId = 'claude-' + 'host-qualified-session-label-'.repeat(4); // 123 bytes
+      const cmb = createCMB({ categories: { focus: 'a record from a peer with a long agent id' }, createdBy: 'short', room: node._room });
+      cmb.metadata.createdBy = longId;
+      signCMB(cmb, peer.priv);
+      assert.throws(() => createCMB({ categories: { focus: 'x' }, createdBy: longId }), (e) => e.code === 'ECMBSIZE', 'this release does not mint one');
+
+      const metrics = [];
+      node.on('metric', (m) => metrics.push(m));
+      const accepted = [];
+      node.on('cmb-accepted', (e) => accepted.push(e));
+      await node._frameHandler.handle('peer-long', 'peer-long', { type: 'cmb', timestamp: Date.now(), cmb });
+      await settle();
+      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-oversize-rejected').length, 0, 'not refused as oversized');
+      assert.strictEqual(accepted.length, 1, 'admitted');
+      assert.strictEqual(accepted[0].author.name, longId);
+      assert.strictEqual(accepted[0]._cmbVerified, true, 'and verified');
+    } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
   it('counts every unsigned record and names the peer once', () => {

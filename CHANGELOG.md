@@ -63,9 +63,16 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   minute, timestamps follow the clock again, with a `clock-stepped-back` metric.
 - **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
   must be numbers in [-1, 1], and a mood given only as numbers keeps them.
-- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB, the
-  seven at most 960 KiB, and an agent id at most 64 bytes (§3.1.2). The emitter throws `ECMBSIZE`, and
-  a receiver refuses an oversized record before rendering, verifying or storing it.
+- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB of text
+  and the seven at most 960 KiB, and a record is minted only if the frame it travels in fits the
+  1 MiB frame bound with its categories sealed for a peer. Text bytes are not frame bytes: JSON
+  writes a `"` as two bytes and a control character as six, and the end-to-end seal is base64, a 4/3
+  expansion, so a record within the text bounds could be one no transport would carry. In plain text
+  the frame bound allows about 766 KiB. An agent id is at most 64 bytes (§3.1.2). `createCMB` throws
+  `ECMBSIZE`, and so does `remember()`, before anything is stored or sent, for a record or payload
+  that would not fit. A receiver refuses a record over the text bounds before rendering, verifying or
+  storing it. It does not refuse a longer agent id: earlier releases minted those, and refusing them
+  would stop a node hearing such a peer at all.
 - **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
   metadata whole, as a copy.
 - **A frame written to a destroyed socket counted as sent (B-D6, residual).**
