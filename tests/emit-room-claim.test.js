@@ -9,6 +9,11 @@
  * default of a first-class API was therefore refused by every named room, and the
  * caller saw only "closed before handshake" with no mention of rooms: the node
  * logged the reason, the client did not.
+ *
+ * Admitted is not heard (0.14.0 review C-F2): the emitter then minted its records
+ * with no room, a record with no room is in 'default' (B-R10), and the node that
+ * had admitted it refused every block. It now authors for the room it was
+ * admitted into.
  */
 
 require('./_isolate-home');
@@ -29,6 +34,42 @@ describe('emit room claims', () => {
     } finally {
       await node.stop();
     }
+  });
+
+  it('and the node that admitted it hears what it sends', async () => {
+    const node = new SymNode({ name: 'acme-node4', room: 'acme', silent: true });
+    await node.start();
+    const refused = [];
+    node.on('metric', (m) => { if (m.type === 'cmb-audience-rejected') refused.push(m); });
+    try {
+      const accepted = new Promise((resolve) => node.once('cmb-accepted', resolve));
+      const e = await connect({ server: `127.0.0.1:${node._port}`, timeoutMs: 4000 });
+      const { cmb } = e.emit({ focus: 'a block from an emitter that named no room' });
+      assert.strictEqual(cmb.metadata.room, 'acme', 'it authors for the room it was admitted into');
+      const entry = await Promise.race([accepted, new Promise((_, reject) => setTimeout(() => reject(new Error(`not heard; refused: ${JSON.stringify(refused)}`)), 8000))]);
+      assert.strictEqual(entry.cmb.metadata.key, cmb.metadata.key);
+      assert.strictEqual(refused.length, 0);
+      await e.close();
+    } finally {
+      await node.stop();
+    }
+  });
+
+  it('a record that names no room is still refused outside "default", even from its own author', () => {
+    // As a 0.13.x emitter mints it. The emitter fix is on the minting side: a receiver cannot tell a
+    // room-less record its author just sent from one replayed out of another room (B-R10).
+    const crypto = require('crypto');
+    const { createCMB, signCMB } = require('../lib/core');
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+    const node = new SymNode({ name: 'acme-node5', room: 'acme', silent: true });
+    node._pinPeerKey('emitter-0133', publicKey.slice(-32).toString('base64url'));
+    const cmb = createCMB({ categories: { focus: 'room-less, from an older emitter' }, createdBy: 'emitter' });
+    cmb.metadata.room = null;
+    signCMB(cmb, privateKey.slice(-32).toString('base64url'));
+    const metrics = [];
+    node.on('metric', (m) => metrics.push(m));
+    assert.strictEqual(node._frameHandler._rejectOnBadSignature('emitter-0133', 'emitter', { cmb }), true);
+    assert.ok(metrics.some((m) => m.type === 'cmb-audience-rejected' && m.reason === 'wrong-audience'));
   });
 
   it('still CLAIMS default when the caller asks for it, and a named room refuses that', async () => {

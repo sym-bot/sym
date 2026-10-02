@@ -53,6 +53,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 
 ### Fixed — delivery and records
 
+- **An emitter that named no room was admitted and then not heard.** `connect()` and `sym emit`
+  without `--room` make no room claim, and a node in a named room admits them, but their records
+  named no room, which is the room `default` (B-R10), so that node refused every block. An emitter
+  that names no room now authors for the room the node's handshake reply states.
 - **Two copies of one record arriving together could both surface (K1).** A key is held in flight
   from the de-duplication check until its SVAF pass settles.
 - **A broadcast flood could evict directed de-duplication marks (K3).** They have their own map and
@@ -117,6 +121,12 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   moved on first touch. **Code outside sym that reads `entry.cmb.admission`, `.tether`,
   `.provenance` or `.collapsed`, from stored entries or from `cmb-accepted` / `memory-received`
   events, must read them from the entry.** xmesh 0.10.11 reads both places.
+- **A record that names no room is in the room `default`, from any sender.** Earlier releases read
+  it as addressed to every room. A 0.13.x `connect()` or `sym emit` without `--room` mints exactly
+  such records, so a 0.14.0 node in any other room refuses what it sends (`cmb-audience-rejected`,
+  `wrong-audience`): a receiver cannot tell a room-less record its author just sent from one
+  replayed out of another room. Upgrade the emitter, or pass `--room` (`connect({ room })`) naming
+  the node's room.
 - **SVAF anchors decay with age (§9.2.1).** The gate treated every stored anchor as fresh at full
   weight, because the anchor view carried neither the entry's age nor its weight. Anchors now carry
   both: `storedAt`, and the store's §6.4 `anchorWeight` (2.0 once validated, 0.5 once dismissed, never
