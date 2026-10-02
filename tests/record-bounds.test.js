@@ -3,17 +3,17 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * What a record may carry, on the emitting side and the receiving side alike:
+ * What a record may carry when it is minted, and what a receiver accepts:
  * - B-R10: a record names its room; one that names none is in the literal room 'default' (§7),
  *   not "every room", and a v2.0 record without a room is not signed.
  * - B-R11: mood valence and arousal are measurements in [-1, 1]: absent ones are omitted, not
  *   invented as 0, out-of-range ones are refused, and numbers given without text are kept.
  * - B-R13: a category is at most 256 KiB, the seven together at most 960 KiB, an agent id at most
- *   64 bytes (§3.1.2). Receivers refuse a record over the text bounds.
+ *   64 bytes (§3.1.2), when a record is minted.
  * - 0.14.0 review C-F3: text bytes are not frame bytes (JSON escaping, and the E2E seal's base64), so
  *   a record is minted only when the frame it travels in, sealed, fits MAX_FRAME_SIZE.
- * - 0.14.0 review C-F4: the agent-id bound is a minting rule. A record an earlier release minted
- *   with a longer agent id is not refused on receipt.
+ * - 0.14.0 review C-F4: the record bounds are minting rules. A record an earlier release minted
+ *   with a longer agent id or a larger category is not refused on receipt: the frame bounds it.
  * - B-R3 (interim): an unsigned record is accepted as unverified, counted, and named once per peer.
  */
 
@@ -22,7 +22,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const crypto = require('crypto');
 const { createCMB, checkAudience, signCMB, encryptCategories, assertionIdV2_0 } = require('../lib/core');
-const { MAX_CATEGORY_BYTES, MAX_RECORD_TEXT_BYTES, recordFrameBytes } = require('../lib/core/cmb-encoder');
+const { MAX_CATEGORY_BYTES, MAX_RECORD_TEXT_BYTES, recordFrameBytes, categoryKeyV1, blockKeyV2, CAT7_CATEGORIES } = require('../lib/core/cmb-encoder');
 const { MAX_FRAME_SIZE, writeFrame } = require('../lib/frame-parser');
 const { signingPayloadV2_0 } = require('../lib/core/cmb-signing');
 const { SymNode } = require('../lib/node');
@@ -164,16 +164,33 @@ describe('on receipt', () => {
     try { return fn(node, metrics, lines); } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   }
 
-  it('refuses an oversized record before it is verified, stored or surfaced', () => {
-    withNode((node, metrics) => {
-      const cmb = createCMB({ categories: { focus: 'fine' }, createdBy: 'peer-a' });
-      cmb.categories.focus.text = 'a'.repeat(MAX_CATEGORY_BYTES + 1); // a peer that skipped the bound
-      let surfaced = 0;
-      node.on('cmb-accepted', () => surfaced++);
-      node._frameHandler.handle('peer-a', 'peer-a', { type: 'cmb', cmb, timestamp: Date.now() });
-      assert.ok(metrics.some((m) => m.type === 'cmb-oversize-rejected'));
-      assert.strictEqual(surfaced, 0);
-    });
+  it('accepts a record an earlier release minted with a category over 256 KiB (0.14.0 review C-F4)', async () => {
+    // Exactly the record 0.13.16's createCMB mints for these categories (checked against it): no
+    // text bound but the frame, signed under mmp-sig-v2. This release would not mint it.
+    const name = `bounds-bigcat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
+      node._pinPeerKey('peer-old', publicKey.slice(-32).toString('base64url'));
+      const texts = { focus: 'b'.repeat(MAX_CATEGORY_BYTES + 40 * 1024), issue: 'a large category from an older peer' };
+      const categories = {};
+      for (const f of CAT7_CATEGORIES) {
+        const text = texts[f] || 'neutral';
+        categories[f] = { text, meta: { key: categoryKeyV1(f, text), parents: [] } };
+      }
+      const cmb = { categories, metadata: { key: blockKeyV2(categories), createdBy: 'peer-old', createdTimestamp: Date.now(), lineage: null, room: node._room, to: null } };
+      signCMB(cmb, privateKey.slice(-32).toString('base64url'));
+      assert.throws(() => createCMB({ categories: texts, createdBy: 'peer-old' }), (e) => e.code === 'ECMBSIZE', 'this release does not mint it');
+
+      const accepted = [];
+      node.on('cmb-accepted', (e) => accepted.push(e));
+      await node._frameHandler.handle('peer-old', 'peer-old', { type: 'cmb', timestamp: Date.now(), cmb });
+      await settle();
+      assert.strictEqual(accepted.length, 1, 'admitted');
+      assert.strictEqual(accepted[0]._cmbVerified, true, 'and verified');
+      assert.strictEqual(node._store.get(cmb.metadata.key)?.cmb.categories.focus.text.length, texts.focus.length, 'stored whole');
+    } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 
   it('accepts a record an earlier release minted with an agent id over 64 bytes (0.14.0 review C-F4)', async () => {
@@ -192,13 +209,10 @@ describe('on receipt', () => {
       signCMB(cmb, peer.priv);
       assert.throws(() => createCMB({ categories: { focus: 'x' }, createdBy: longId }), (e) => e.code === 'ECMBSIZE', 'this release does not mint one');
 
-      const metrics = [];
-      node.on('metric', (m) => metrics.push(m));
       const accepted = [];
       node.on('cmb-accepted', (e) => accepted.push(e));
       await node._frameHandler.handle('peer-long', 'peer-long', { type: 'cmb', timestamp: Date.now(), cmb });
       await settle();
-      assert.strictEqual(metrics.filter((m) => m.type === 'cmb-oversize-rejected').length, 0, 'not refused as oversized');
       assert.strictEqual(accepted.length, 1, 'admitted');
       assert.strictEqual(accepted[0].author.name, longId);
       assert.strictEqual(accepted[0]._cmbVerified, true, 'and verified');

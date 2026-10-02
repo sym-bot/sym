@@ -82,9 +82,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   expansion, so a record within the text bounds could be one no transport would carry. In plain text
   the frame bound allows about 766 KiB. An agent id is at most 64 bytes (§3.1.2). `createCMB` throws
   `ECMBSIZE`, and so does `remember()`, before anything is stored or sent, for a record or payload
-  that would not fit. A receiver refuses a record over the text bounds before rendering, verifying or
-  storing it. It does not refuse a longer agent id: earlier releases minted those, and refusing them
-  would stop a node hearing such a peer at all.
+  that would not fit. These are minting rules. A receiver applies no record bound beyond the frame a
+  record arrives in: earlier releases minted larger categories and longer agent ids, and refusing
+  them would stop a node hearing such a peer at all.
 - **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
   metadata whole, as a copy.
 - **A frame written to a destroyed socket counted as sent (B-D6, residual).**
