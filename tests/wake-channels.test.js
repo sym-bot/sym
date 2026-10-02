@@ -109,8 +109,11 @@ describe('gossip sent and expiry', () => {
       const out = wm.gossipEntries('peer-x');
       assert.deepStrictEqual(out.map((e) => [e.nodeId, e.lastSeen]).sort(), [['phone-1', now - 3 * DAY], ['phone-2', now - 1000]]);
       t = now + WAKE_CHANNEL_TTL_MS - 2 * DAY; // phone-1 is now past the TTL, phone-2 is not
+      let saves = 0;
+      wm.saveWakeChannels = () => { saves++; };
       assert.deepStrictEqual(wm.gossipEntries('peer-x').map((e) => e.nodeId), ['phone-2']);
       assert.strictEqual(node._peerWakeChannels.has('phone-1'), false, 'the expired channel is gone from memory too');
+      assert.strictEqual(saves, 0, 'and nothing is written on the connection path (0.14.0 part A2 review)');
     });
   });
 

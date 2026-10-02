@@ -67,6 +67,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
     relay's peer list is read for 256 too. An over-long frame from an older sender is said once a
     minute per peer.
   - At most 64 frames wait for one sleeping peer, and they go with its channel.
+  - Building a `peer-info` frame on a connection drops expired channels without writing the file
+    there (a synchronous write); the next save writes it, and a load drops them again.
   - A node id, platform, token and environment are short strings, and a token is one path segment
     (it is put in the push provider's request path).
 - **A peer could claim to have proven its key.** `provenPublicKey`, which only this node's own
@@ -85,7 +87,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
 - **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
   before anything is stored or dispatched (§18.3.1). A `MeshAgent` whose node cannot sign says so
-  once and stops remixing and observing.
+  once and stops remixing and observing. The xMesh synthesis loop says a record it could not sign as
+  the node failing to sign, not as an error of its delegate.
 
 ### Fixed — delivery and records
 
@@ -100,7 +103,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   recomputed on receipt, not by the signature bytes: a hedged Ed25519 signer (WebKit) signs one
   assertion differently each time, and its re-signed copy surfaced twice.
 - **`inbox()`'s limit counted acked items (K4).** It counts unread deliveries. Acked ones still come
-  back, marked, up to the same limit, and are passed over beyond it, so the limit bounds the reply.
+  back, marked, up to the same limit, and are passed over beyond it, so a reply holds at most `limit`
+  unread and `limit` acked items: 2 × `limit` in all.
 - **The inbox `from` was the author's label whether or not anything proved it (K5).** It is now the
   author when the signature proved who that is, and otherwise the peer that delivered it. The claim
   stays in `author.name`. A v2.0 record verified against its signed node id carries `author.nodeId`,
@@ -361,7 +365,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A dropped attestation is logged once a minute per connection and reason, with a count.** It was
   logged once per frame, and one naming a signer whose key is not held is dropped before any budget.
   Per connection, not per peer: over the relay the id is the sender's to choose, and a fresh one per
-  frame bought a line per frame.
+  frame bought a line per frame. A frame the room's door refuses is said the same way; it was said
+  once per frame.
 
 ### Fixed — dependencies
 

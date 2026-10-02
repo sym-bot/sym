@@ -18,6 +18,8 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * - F5: an over-long signature was decoded and hashed by the repeat check before it was refused.
  * - F6: a further conflicting root for a position already conflicted was verified at the peer's
  *   budget, where the attester's rate was meant to bound it.
+ * - Its suggestions: the door's refusal was logged once per frame; an ESIGN from the synthesis loop
+ *   was blamed on the delegate; the checkpoint-over-rate line named the attester only.
  *
  * Deterministic: the budget's clock is injected (node._gossipClock).
  */
@@ -410,6 +412,62 @@ describe('equivocation at one position (F6)', () => {
       assert.strictEqual(node._gossipBuckets.get('tcp:1').tokens, tokens, 'a third root spends nothing: no signature is checked');
       assert.strictEqual(node._attestations.conflictAt(A.id, 8).root, 'forked', 'and changes nothing');
       assert.strictEqual(sent.length, relayed, 'nor is relayed');
+    });
+  });
+});
+
+describe('part A2 review suggestions', () => {
+  it("the door's refusal is said once a minute per connection and reason, with a count, not once per frame", () => {
+    const { RoomOwnershipRegistry } = require('../lib/room-ownership');
+    const { FrameHandler } = require('../lib/frame-handler');
+    const GATED = 'x-review--team-02779b950c3d8d7378fd11d6';
+    const owners = new RoomOwnershipRegistry();
+    owners.pin(GATED, 'owner-node', 'ownerkey', 'config');
+    const logged = [];
+    const node = { _room: GATED, _roomOwners: owners, _log: (m) => logged.push(m), _peers: new Map(), emit() {} };
+    node._roomDoor = (peerId) => SymNode.prototype._roomDoor.call(node, peerId);
+    const fh = new FrameHandler(node);
+    const realNow = Date.now;
+    let now = realNow();
+    Date.now = () => now;
+    try {
+      const refused = () => logged.filter((l) => l.startsWith('Door refused'));
+      for (let i = 0; i < 1000; i++) fh.handle(`m-${i}`, `m-${i}`, { type: 'cmb', cmb: {} }, `relay:1:m-${i}`);
+      assert.strictEqual(refused().length, 1, 'fresh ids over one relay connection: one line');
+      for (let i = 0; i < 500; i++) fh.handle('mallory', 'mallory', { type: 'cmb', cmb: {} }, 'tcp:9');
+      assert.strictEqual(refused().length, 2, 'another connection: one more');
+      now += 61_000;
+      fh.handle('m-0', 'm-0', { type: 'mood', mood: {} }, 'relay:1:m-0');
+      assert.strictEqual(refused().length, 3);
+      assert.match(refused()[2], /and 999 more since it was last said/);
+    } finally { Date.now = realNow; }
+  });
+
+  it('an ESIGN from the synthesis loop is said as the node failing to sign, not as a delegate error', () => {
+    withNode({}, ({ node }) => {
+      const logs = [];
+      node._log = (m) => logs.push(m);
+      node._synthesisDelegate = () => ({ focus: 'a synthesis' });
+      node.remember = () => { const e = new Error('CMB signing failed: no key'); e.code = 'ESIGN'; throw e; };
+      node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
+      assert.ok(logs.includes('Synthesis not shared: this node cannot sign its records'), logs.join('\n'));
+      assert.ok(!logs.some((l) => l.startsWith('Synthesis delegate error')));
+      node._synthesisDelegate = () => { throw new Error('the delegate broke'); };
+      node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
+      assert.ok(logs.includes('Synthesis delegate error: the delegate broke'), 'a delegate error is still said as one');
+    });
+  });
+
+  it('the checkpoint-over-rate line names the peers that brought the checkpoints', () => {
+    withNode({ checkpointRate: { perSecond: 4, burst: 1 } }, ({ node }) => {
+      const logs = [];
+      node._log = (m) => logs.push(m);
+      const A = kp('att-A');
+      node._pinPeerKey(A.id, A.pub);
+      const cp = (seq) => signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: seq, root: `r${seq}`, at: seq }, A.priv, signCheckpoint);
+      assert.strictEqual(node._ingestCheckpoint(cp(8), 'peer-one-xyz').ok, true);
+      assert.strictEqual(node._ingestCheckpoint(cp(16), 'peer-two-xyz').reason, 'over-rate');
+      assert.ok(logs.some((l) => /over their rate .* brought by peer-two/.test(l)), logs.join('\n'));
     });
   });
 });
