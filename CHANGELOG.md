@@ -687,7 +687,7 @@ disconnected.
 ### Changed
 
 - **Tenant-suffixed room names are legal.** The room grammar accepts a double hyphen as a
-  segment separator (`x-review--team-02779b…`) — the shape xMesh scopes recipe rooms with.
+  segment separator (`x-review--team-02779b…`) — the shape xmesh scopes recipe rooms with.
   Before this, `sym join`, the daemon, and `sym_invite_create` all refused the very rooms
   the product creates, and only a direct service-type bypass made them work. Triple hyphens,
   leading/trailing hyphens and bare suffixes stay invalid.
