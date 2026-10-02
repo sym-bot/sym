@@ -198,11 +198,18 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A drop is attributable.** A `gossip-over-budget` metric (`fromPeerId`, `from`, `dropped`,
   `frames` by type, and up to 16 `authors` whose statements were dropped) and one log line name the
   peer, at most once per 10 s per peer: the first drop at once, the rest when the 10 s close, so every
-  drop is counted. A gap it leaves is told apart from an omission by the attester. Budgets are kept for
-  at most 4,096 peers, the least recently active evicted in O(1), without scanning.
-- **An attestation is de-duplicated by its signature's bytes.** Base64url decoding ignores padding,
-  whitespace and stray characters. One signature could be spelled any number of ways that all verify,
-  and each spelling was stored and relayed as a new attestation.
+  drop is counted (`gossipOverBudget` in `metrics()` keeps the total). A gap it leaves is told apart
+  from an omission by the attester. Budgets are kept for at most 4,096 peers, the least recently active
+  evicted in O(1), without scanning.
+- **Only the spelling a signer writes is stored.** Base64url decoding ignores padding, whitespace and
+  stray characters, so one signature could be spelled any number of ways that all verify. Each spelling
+  was stored and relayed as a new attestation. The chain hash and the Merkle root are computed over the
+  signature as written, so a re-spelling that arrived first made its attester's chain look broken. A
+  gossiped attestation, checkpoint or witness whose signature is not 64 bytes in unpadded base64url is
+  now refused before anything is spent on it. It is counted (`signaturesNotCanonical` in `metrics()`)
+  and said like a budget drop (`signature-not-canonical`). A re-spelling of an attestation already
+  held is a repeat. Every signer sym knows writes the canonical spelling, and this node checks its own
+  before recording one.
 - **A dropped attestation is logged once a minute per peer and reason, with a count.** It was logged
   once per frame, and one naming a signer whose key is not held is dropped before any budget.
 

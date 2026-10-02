@@ -486,7 +486,9 @@ describe('the witness storm', () => {
       const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');
       assert.strictEqual(node._ingestCheckpoint({ ...cp, sig: 'not-a-signature' }, 'node-att').reason, 'duplicate', 'not even verified');
-      assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: 'garbage' }, 'node-att').reason, 'bad-signature', 'a different root is verified first');
+      const forgedSig = crypto.randomBytes(64).toString('base64url');
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: forgedSig }, 'node-att').reason, 'bad-signature', 'a different root is verified first');
+      assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: 'garbage' }, 'node-att').reason, 'non-canonical-signature', 'one not spelled as a signature is not even verified');
       assert.strictEqual(node._attestations.hasConflict('node-att', 8), false, 'and an unverified one marks nothing');
       const w = signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 }, WIT.priv, signWitness);
       node._ingestWitness(w, 'node-wit');
