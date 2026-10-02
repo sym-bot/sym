@@ -227,10 +227,10 @@ Removed in Core Secure:
 - its `agent-cmb` path, which broadcasts a plain `cmb` with a client-supplied `from`
   (`sym-daemon.js` 354-411).
 
-`register-agent` has no consumer outside the daemon. xmesh's `mesh-bridge.ts` virtual nodes are
-ported under the xmesh design: each becomes a real node or goes.
+`register-agent` has no consumer outside the daemon. XMesh's `mesh-bridge.ts` virtual nodes are
+ported under the XMesh design: each becomes a real node or goes.
 
-### D9. What sym gives cognitive nodes (reworked with xmesh C2/C5; review H11, H13, M4)
+### D9. What sym gives cognitive nodes (reworked with XMesh C2/C5; review H11, H13, M4)
 
 1. **Identity addressed by nodeId, loaded without minting.**
    - Identities live at `nodes/by-id/<nodeId>/`, with the name as an index.
@@ -308,12 +308,12 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
   1. sym 0.14.0, with 0.13.17 merged in.
   2. sym-relay 0.6.0 (fan-out) in the same window.
   3. mesh-channel on `^0.14.0`.
-  4. xmesh on `^0.14.0`.
+  4. XMesh on `^0.14.0`.
   5. Upgrade my nodes and :8790.
   6. Upgrade :8787, with Legacy Import routes for every seat still on 0.13, and with the user's
      confirmation.
   7. The other seats, coordinated with them; dev-team-3 restarts on its own timing.
-- Mesh-channel and xmesh pin `^0.13.15` today, and a caret on 0.x does not take 0.14. Their
+- Mesh-channel and XMesh pin `^0.13.15` today, and a caret on 0.x does not take 0.14. Their
   releases are steps 3 and 4, not later.
 - Identity files keep the nodeId and key. Their location moves to `by-id/` with the name index
   (D9.1) through a one-time, idempotent move. A 0.13 rollback reads the old path, which is kept
@@ -355,8 +355,8 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
   - import with a re-signed key refused;
   - an interior submission without a capability refused;
   - a second concurrent mind refused.
-- **The host hook:** xmesh's control plane on 0.14 sees verified records through
-  `verified-record` (a test in xmesh's suite).
+- **The host hook:** XMesh's control plane on 0.14 sees verified records through
+  `verified-record` (a test in XMesh's suite).
 - **0.13.17's tests** stay green throughout.
 
 ## 8. Decisions (ruled 2026-10-02: follow the recommendations)
@@ -381,7 +381,7 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
   between two diallers.
 - §3.4 rejects a duplicate nodeId, while §4.4.7 replaces it.
 - §17.3 names no wire format, selection or window for Legacy Import.
-- §14.12 "one member per session" against reused cognitive nodes (xmesh design).
+- §14.12 "one member per session" against reused cognitive nodes (XMesh design).
 
 ## 10. Spec pull requests to draft (meshcognition-website; none merged without the user)
 
