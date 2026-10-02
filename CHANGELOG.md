@@ -13,6 +13,95 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### The independent security review (BLOCK at 341dafb) — what changed
+
+Seven design assumptions, each changed where it was made, not patched where it showed:
+
+- **The signed audience governs every send (A).** The one seal point refuses a record whose signed
+  `metadata.to` names anyone but the session's proven peer (`not-addressed`), whichever path offered
+  it; anchors replay room-bound records only, and `cmb-fetch` serves a directed record only to its
+  addressee. A Legacy Import session applies the same rule.
+- **A record is its signed projection (B; draft spec PR #34).** One strict constructor at ingress
+  (`lib/core/record-canonical.js`): closed objects, no type coercion, `to` a lowercase UUID or null,
+  `createdByNodeId` a lowercase UUID, each category's `meta.key` recomputed and a mismatch refused,
+  an unrecognised category dropped, and the unsigned `valence`, `arousal` and `lineage.method`
+  dropped. The node stores, emits, delivers and serves only that projection. **Release note:**
+  `mood-delivered` no longer carries `valence`/`arousal` (they were unsigned). A category over
+  256 KiB, or 960 KiB of text in all (what this release mints), is refused before anything encodes
+  it; this reverses the earlier acceptance of larger categories (C-F4). nodeIds are taken only in
+  canonical lowercase at every door: the hello, a relay `from` or announcement, a grant, an invite.
+- **Authority counts only if its signer was authorised when it signed and when it was received
+  (C; draft spec PR #33).** One rule for a grant and its key vouch, a revoke and an attestation,
+  each kept with its receipt time (a line with none is treated as received at load). A revoked
+  validator can no longer backdate grants, key vouches, revokes or attestations into its old
+  window. A grant binding is a view over the grants in effect now, never stored; no grant binds this
+  node's own nodeId (one that vouches a foreign key for it is inert, and reported:
+  `role-grant-foreign-self-key`); 0.13 `grant` roster entries migrate as legacy claims. Role
+  resolution is memoised (linear in the records) and a delegation reaches at most 8 grants from the
+  anchor; a grantor holds at most 16 records per grantee (was 64).
+- **No shared budget is spent before verification, and a forgery ends its session (D).** Only the
+  peer's own lane is spent before a signature check; the shared ceiling is spent after it. A
+  signature that does not verify on a proven session closes it (`forged-signature`) and its nodeId
+  is not admitted again for 60 s. Grants and revokes have anti-entropy: a `role-digest` on every
+  admission, and a paged whole-store sync when digests differ. A key binding is never evicted
+  before it expires. **Every confirmed session runs with a session-scoped binding**, and a second
+  key for that nodeId while it lives is a 1009 IDENTITY_CONFLICT; the durable registry takes only
+  an EARNED binding (an admitted verified record, a pin, a grant in effect, or the key a legacy claim
+  expects) — a handshake, or a re-handshake, earns nothing, and neither does a record refused for
+  its room. Resource bounds: relay handshakes per relay `from` (one in flight, a hello rate) and
+  for unknown candidates (32 of the 256 slots, the oldest evicted, a wait list served known peers
+  first, failed ones backing off up to 10 min); the LAN listener (256 connections before their
+  first frame, 16 per address; 128 authenticating sessions, 8 per host; the oldest closed); a
+  5 s handshake timeout; a fair relay pacer (per destination, confirmed-session traffic first,
+  8 MiB per destination); 1011 replies from one budget of 2 a second; `cmb-fetch` served at 2 a
+  second per session, a record once a minute per session, and nothing while 2 MiB is unsent; a
+  record budget of 8 a second per session before SVAF; role-chain holds bounded by bytes (64 KiB)
+  and grant fields by length.
+- **Legacy Import pins the routed node's X25519 key (E).** A route needs `e2eKey` (the 0.13 node's
+  `e2e-keypair.json` public key) besides the identity key or fingerprint; a hello presenting another
+  X25519 key is refused (`e2e-key-mismatch`), so a relay squatter with the public keys reads nothing.
+  A Legacy Import peer never passes a gated room's door; a legacy session has a heartbeat (closed
+  after 45 s of silence); a record naming an author other than the routed node, or carrying the
+  v2.0 suite, is refused; no assertion id passes from a quarantined record; this node's
+  attestations of one say `legacy-import-*`. Legacy records raise `legacy-record` and legacy peers
+  `legacy-peer-joined` / `legacy-peer-left`, never `cmb-accepted` (or the inbox) and `peer-joined`.
+- **Errors are information, never commands (F; draft spec PRs #23, #31).** On a confirmed session an
+  `error` travels sealed. A clear error is ignored except 1011 UNKNOWN_SESSION, which prompts a new
+  handshake and never a teardown. Codes renumbered: 4404 → 1011, 4400 → 1010 SESSION_CLOSED. A
+  superseded session and a handshake that does not confirm send nothing. A replayed sealed frame is
+  discarded, not a close. `mesh-room-join` is now `room-join`. A peer that refused this node with
+  1009 is not re-handshaken or re-dialled (the LAN re-offer included) until a restart.
+- **The host hook fires once per assertion (G).** `verified-record` fires after de-duplication and
+  the in-flight check, once per assertion identity; a directed record older than 24 h by its
+  signed time is refused (its de-duplication marks are not kept longer).
+- **The rest of the review.** Relocation holds the identity lock through the export, fsyncs the
+  bundle, and then scrubs the source (identity.json without its private key; the `nodes/<name>`
+  link removed); a bundle is signed by its node, and an import needs an explicit pin (no fallback
+  to a key this host learned). The sticky floor is its own persisted fact. One mind per identity,
+  not per SymNode object. The interior socket lives in a 0700 directory this node made (the tmp
+  fallback is a fresh `mkdtemp`, never a predictable path that could be a planted symlink), and on
+  Windows `listen` refuses unless `{ allowDefaultPipeAcl: true }`. The interior capability is bound
+  to the first connection that presents it; `end` takes the capability, never the mindId; a
+  submission's kind is its signed intent. The client refuses a selection outside both offers.
+  Rooms compare in NFC. A relay frame type never rides inside a sealed control frame. Node names
+  are one path component. `sym keys <name>` lists without writing. `sym emit` pins its receiver
+  (`--receiver <nodeId> --receiver-key <key|sha256:…>`) and holds the identity lock while
+  connected. An anchor mark needs the record's author to be the session's node. `mood-delivered`
+  and `xmesh-insight` name the proven nodeId; the daemon no longer re-broadcasts peers' moods or
+  messages under its own name; an XMesh synthesis is the remix path and is paced (one per 10 s).
+  The wake queue holds no retired `message` frame, keeps each frame with the key it may go to, and
+  delivers only what the session takes. A room-join grant's expiry closes its session. Refused
+  frames are counted by known type only. A pinned key stays `pinned` when a session proves it.
+- **§15.7 is the remix path's (draft spec PR #35).** `remember(fields, parents)` is never refused as
+  a remix: a reply or a trail decision citing its parents mints, and sets the new-domain-data flag.
+  `node.remix(fields, { parents })` is the gated path (`{ refused: 'remix-without-new-domain-data' }`);
+  MeshAgent and the XMesh synthesis use it. A broadcast duplicate returns `{ key, duplicate: true }`.
+- **For hosts (mesh-channel 0.11.0).** Inbox entries carry `verified`, `profile`, `assertionId`,
+  `verification`, `session`, `author.key` and the signed `record`; `mood-delivered` carries `key`,
+  `assertionId`, `authorNodeId`, `deliveredBy`, `verified`; `node.publicKey`, `node.fingerprint`,
+  `node.keyBindings()`; the interior read side (`mission`, `deliveries`, `subscribe`, `ack`,
+  `recall`).
+
 ### Core Secure — breaking
 
 - **A peer is a proven session.** A sym peer used to exist before anything was proven about it: on
@@ -26,17 +115,18 @@ in-memory pending set for grants that arrive before their root (which could be f
   `client-hello` in an envelope; a relay session is bound to the relay `from` it was made on (a
   hello naming another nodeId is refused),
   torn down on `relay-peer-left`, superseded by a newer confirmed session for the same (nodeId,
-  key) (a restart under 4004), and never torn down by an unconfirmed hello. 10 s timeout.
+  key) (a restart under 4004), and never torn down by an unconfirmed hello. 5 s timeout.
 - **Discovery advertises the profile.** TXT `mmp=2.0` and `room=<room>` (and the same in the
   loopback registry). A record without `mmp=2.0` is a legacy node: never dialled as Core Secure.
   The lexicographically smaller nodeId dials (§5.1).
 - **Ephemeral E2E, sealed frames.** The persistent X25519 key (`e2e-keypair.json`) and the
   per-peer shared-secret map are gone: each handshake uses a fresh X25519 key pair and derives
   directional keys (§5.2.1). Records travel only as `cmb-encrypted` (§18.2.1), one sealed frame
-  per peer session. Every other post-handshake frame except ping/pong/error travels sealed as
-  `control-encrypted` (`mood` included: it is cognitive content). The receive counter advances
-  only after the AEAD opens (it advanced first, so one forged frame with the right sequence
-  desynchronised a session); a gap or replay closes the session and re-handshakes.
+  per peer session. Every other post-handshake frame except ping/pong travels sealed as
+  `control-encrypted` (`mood` included: it is cognitive content; `error` too). The receive counter
+  advances only after the AEAD opens (it advanced first, so one forged frame with the right
+  sequence desynchronised a session); a gap closes the session and re-handshakes, a replay is
+  discarded.
 - **Records are v2.0** (`MMP_EMIT_V2` on). Every record is signed `mmp-sig-v2.0` with the signed
   author `createdByNodeId`; the receiver resolves the author key by `createdByNodeId` through
   the key registry. An unsigned, legacy-suite or unresolvable record is refused (a legacy-suite
@@ -60,8 +150,8 @@ in-memory pending set for grants that arrive before their root (which could be f
   `xmesh-insight` goes only with `xmesh-insight-v1`; `state-sync` is refused. Records
   replayed as context on connect are announced in a sealed `cmb-anchors` frame (the `_anchor`
   frame flag could not ride a sealed record). The new wire elements that still need spec text
-  (`cmb-anchors`, `mesh-room-join`, `role-chain-fetch` / `role-chain`, relay error 4404) are
-  written out in `docs/WIRE-0.14.0.md`.
+  (`cmb-anchors`, `role-chain-fetch` / `role-chain` and their whole-store sync, `role-digest`, the
+  error rules and 1011) are written out in `docs/WIRE-0.14.0.md`; `room-join` is draft spec PR #31.
 - **Admission attestations are the `sym-attest-v1` extension** (draft spec PR
   meshcognition-website#27). The frames are `sym-attest-attestation`, `sym-attest-checkpoint`,
   `sym-attest-witness` and `sym-attest-node-stats`, sent only to sessions that selected the
@@ -92,7 +182,7 @@ in-memory pending set for grants that arrive before their root (which could be f
   (or pass `{ granteeKey }`).
 - **Room admission on proven keys.** A gated room admits its owner by its pinned key and a grantee
   whose room-join grant binds the key its session proved (the grant is presented in a sealed
-  `mesh-room-join` frame); `roomGate().admits` is now `grant-holders`. The `provenPublicKey`
+  `room-join` frame, draft spec PR #31); `roomGate().admits` is now `grant-holders`. The `provenPublicKey`
   strip and the "refuses everyone" fallback are gone.
 - **The Class 1 emitter speaks Core Secure.** `sym emit` / `lib/emit.js` run the v2 handshake
   and send sealed records. The room is explicit: an emitter that names none is in `default`, and
@@ -114,14 +204,17 @@ in-memory pending set for grants that arrive before their root (which could be f
   directory moves once, idempotently, and `nodes/<name>` stays as a symlink for one release so a
   0.13 rollback reads the old path.
 - `sym node export <name> --out <file> (--passphrase-env VAR | --to-host <key>)` tombstones the
-  node, then writes its encrypted bundle; `sym node import <file> --expect-node <id>
-  [--expect-key <k> | --expect-fingerprint sha256:…]` verifies it against an independently
-  pinned key (or this host's key registry) and refuses a re-keyed bundle; `sym node host-key`.
+  node, then writes its encrypted, node-signed bundle, then scrubs the source; `sym node import
+  <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…)` verifies it
+  against that explicit pin and the node's signature, and refuses a re-keyed or altered bundle;
+  `sym node host-key`.
 - `node.interior()`: the interior submission path for the node's mind — `startMind({ kinds,
   allowTo, ratePerMinute })` issues a per-mission capability (`queueMind` waits its turn; one
-  mind per node), `submit(capability, { kind, categories, to, parents, payload })` and the
-  interior socket (`listen()`, newline JSON) check audience, size (64 KiB text, 512 KiB
-  application), rate, declared kinds and lineage before the node signs; `endMind` revokes.
+  mind per identity), `submit(capability, { kind, categories, to, parents, payload })` and the
+  interior socket (`listen()`, newline JSON; the capability bound to its first connection) check
+  audience, size (64 KiB text, 512 KiB application), rate, declared kinds (the kind is the signed
+  intent) and lineage before the node signs; the socket also serves `mission`, `deliveries`,
+  `subscribe`, `ack` and `recall`; `endMind` revokes.
 - `node.connectTransport(transport, { role, expectNodeId })` runs the handshake over a transport
   the host provides; `node.inviteURL()` and `node.acceptInvite(url)` (invites carry the issuer's
   `node` and `key`; accepting pins the issuer only where that nodeId is unbound); `lib/invite.js`.
@@ -129,12 +222,12 @@ in-memory pending set for grants that arrive before their root (which could be f
 
 ### From the 0.13.17 re-review (0.14 requirements)
 
-- **Binding lifetime (design D3).** A first-contact `proven` key binding that verified nothing
-  since — no record, grant, attestation or later session — and was not seen for 30 days expires;
-  when the registry is full (65,536) the least recently seen such binding makes room. One that ever
-  verified something, or is pinned, grant-vouched, anchored or a legacy claim, never expires. The
-  `seen` / `verified` facts are persisted with the binding. If every binding protects history, a
-  newcomer's live session still verifies what it signs.
+- **Binding lifetime (design D3, as the security review changed it).** A confirmed session runs
+  with a session-scoped binding; the durable registry takes one only when it is earned (an
+  admitted verified record, a pin, a grant in effect). A `proven` binding that verified nothing and
+  was not seen for 30 days expires; nothing is evicted before it expires, and a full registry
+  (65,536) refuses a newcomer a durable binding — its live session still verifies what it signs.
+  The `seen` / `verified` facts are persisted with the binding.
 - **role-chain-fetch.** A grant or revoke that arrives before the grant rooting its grantor makes
   the node ask the delivering session for the chain (`role-chain-fetch` naming the grantor; answered
   with `role-chain`, ordinary signed grants verified top-down). The record is held only for that
@@ -154,16 +247,21 @@ in-memory pending set for grants that arrive before their root (which could be f
 ### Legacy Import (temporary: network Legacy Import is removed in 0.15.0)
 
 - Off by default. A route (`legacyRoutes: [{ nodeId, endpoint: 'host:port' | 'relay', key |
-  fingerprint }]`, or `legacy-routes.json` in the node dir) names a 0.13 peer; the identity key
-  fingerprint is mandatory and is pinned. This node always dials a route itself and never accepts
+  fingerprint, e2eKey }]`, or `legacy-routes.json` in the node dir) names a 0.13 peer; the identity
+  key fingerprint is mandatory and is pinned, and so is the peer's persistent X25519 key
+  (`e2eKey`). This node always dials a route itself and never accepts
   a legacy hello. Over the relay it sends its legacy hello to the routed nodeId, and takes only
   records whose signature verifies against the pinned key.
 - What it sends on a legacy session: its records as legacy `cmb` under the legacy E2E
-  construction (never plaintext). `sym status` says the session uses legacy encryption, with no
-  forward secrecy and no transcript proof. Everything received is stored `verified: false`,
-  `profile: 'legacy-import'`, never given authority. Connection-level frames are hints.
-- The sticky floor is the registry's persisted proven binding: once a nodeId has proven itself
-  over Core Secure its route is refused until an operator reset (`sym keys <name> reset-floor`).
+  construction, encrypted to the routed node's pinned X25519 key: a relay, or a squatter holding
+  only public keys, cannot read them; anyone who later obtains that node's X25519 private key can
+  read what was recorded (no forward secrecy). `sym status` says the session uses legacy
+  encryption, with no forward secrecy and no transcript proof. Everything received is stored
+  `verified: false`, `profile: 'legacy-import'`, never given authority, and raised as
+  `legacy-record`. Connection-level frames are hints.
+- The sticky floor is its own persisted fact: once a routed nodeId has proven itself over Core
+  Secure its route is refused until an operator reset (`sym keys <name> reset-floor`), whatever
+  becomes of its binding.
 
 ### Removed
 
@@ -246,8 +344,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   the relay's peer list, which is the peer's own registration over its relay-auth session, ranked with
   a channel kept by an earlier release (which recorded no source). At the bottom are a `wake-channel`
   frame over a session that proved nothing, which is just whoever claimed that node id at handshake,
-  and gossip. **No handshake in this runtime proves a key yet**, so a peer's own frame ranks with
-  gossip, and nothing unproven can repoint a channel the relay or a proven session gave.
+  and gossip. (In 0.13 no handshake proved a key, so a peer's own frame ranked with gossip; since
+  0.14 every session proves its key, and a channel is learned only from the confirmed session's own
+  nodeId.) Nothing unproven can repoint a channel the relay or a proven session gave.
 - **A peer can turn its wake channel off.** `platform: 'none'` removes the channel when it comes from
   the peer's own frame, or from the relay's registration, ranked at least as high as the channel
   held. Gossip cannot remove anyone's.

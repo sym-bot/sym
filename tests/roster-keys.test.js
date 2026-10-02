@@ -208,7 +208,9 @@ describe('persistence and the 0.13 file', () => {
       const before = fs.readFileSync(path.join(dir, 'roster-keys.jsonl'), 'utf8');
       const ro = new RosterKeyRegistry({ dir, readOnly: true });
       assert.strictEqual(ro.get('L'), k, 'listed as it is');
-      assert.strictEqual(fs.readFileSync(path.join(dir, 'roster-keys.jsonl'), 'utf8'), before, 'nothing expired, compacted or written');
+      ro.noteSeen('L'); ro.bind('M', key(), 'proven'); ro.bind('L', key(), 'proven'); ro.resetFloor('L');
+      assert.strictEqual(fs.readFileSync(path.join(dir, 'roster-keys.jsonl'), 'utf8'), before, 'nothing expired, compacted or written, whatever is called on it');
+      assert.ok(!fs.existsSync(path.join(dir, 'roster-conflicts.jsonl')), 'not even a conflict');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 

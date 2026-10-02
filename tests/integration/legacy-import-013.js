@@ -48,7 +48,7 @@ function start013({ relay, token, room = 'lg-room' } = {}) {
     const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
     node.on('cmb-accepted', (e) => out({ event: 'accepted', content: e.content, directed: !!e.directed }));
     node.on('metric', (m) => { if (/signature|legacy/.test(m.type)) out({ event: 'metric', m }); });
-    node.start().then(() => out({ event: 'ready', nodeId: node.nodeId, publicKey: node._identity.publicKey, port: node._port, version: require(DIR + '/package.json').version }));
+    node.start().then(() => out({ event: 'ready', nodeId: node.nodeId, publicKey: node._identity.publicKey, e2ePublicKey: node._e2eKeyPair.publicKey.toString('base64'), port: node._port, version: require(DIR + '/package.json').version }));
     let buf = '';
     process.stdin.on('data', (d) => {
       buf += d; let i;
@@ -91,7 +91,8 @@ describe('Legacy Import against a real 0.13.17 node', { skip: PRESENT ? false : 
     const node = new SymNode({
       name: `core-secure-${process.pid}`, silent: true, room: 'lg-room',
       discovery: new (require('../../lib/discovery').BonjourDiscovery)({ mdns: false }),
-      legacyRoutes: [{ nodeId: ready.nodeId, endpoint: `127.0.0.1:${ready.port}`, key: ready.publicKey }],
+      // The route pins the 0.13.17 node's identity key and its persistent X25519 key (security review E).
+      legacyRoutes: [{ nodeId: ready.nodeId, endpoint: `127.0.0.1:${ready.port}`, key: ready.publicKey, e2eKey: ready.e2ePublicKey }],
     });
     try {
       await node.start();
@@ -99,7 +100,7 @@ describe('Legacy Import against a real 0.13.17 node', { skip: PRESENT ? false : 
       assert.strictEqual(node.status().legacyImport.sessions.length, 1, 'a Legacy Import session over the route');
       // 0.13.17 → 0.14, directed: delivered here, quarantined.
       const got = [];
-      node.on('cmb-accepted', (e) => got.push(e));
+      node.on('legacy-record', (e) => got.push(e)); // quarantined: never a Core Secure delivery
       legacy.send({ cmd: 'remember', categories: CATS('from 0.13.17 to core secure'), to: node.nodeId });
       await until(() => got.length > 0, 15000);
       assert.strictEqual(got[0].verified, false);
@@ -129,14 +130,14 @@ describe('Legacy Import against a real 0.13.17 node', { skip: PRESENT ? false : 
     const node = new SymNode({
       name: `core-secure-relay-${process.pid}`, silent: true, room: 'lg-room', relayOnly: true, discovery: new NullDiscovery(),
       relay: relay.url, relayToken: token,
-      legacyRoutes: [{ nodeId: ready.nodeId, endpoint: 'relay', key: ready.publicKey }],
+      legacyRoutes: [{ nodeId: ready.nodeId, endpoint: 'relay', key: ready.publicKey, e2eKey: ready.e2ePublicKey }],
     });
     try {
       await node.start();
       await until(() => node._peers.has(ready.nodeId), 15000);
       assert.strictEqual(node.status().legacyImport.sessions[0].transport, 'relay');
       const got = [];
-      node.on('cmb-accepted', (e) => got.push(e));
+      node.on('legacy-record', (e) => got.push(e)); // quarantined: never a Core Secure delivery
       legacy.send({ cmd: 'remember', categories: CATS('over the relay from 0.13.17'), to: node.nodeId });
       await until(() => got.length > 0, 15000);
       assert.strictEqual(got[0].profile, 'legacy-import');

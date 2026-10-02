@@ -21,27 +21,45 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   persistent encryption key and no per-peer secret map.
 - **Sealed, ordered channel.** Records travel only as `cmb-encrypted` (ChaCha20-Poly1305 under
   the session's directional traffic key, AEAD-bound to session, direction, sequence and the
-  record's identity). Every other post-handshake frame except ping, pong and error travels as a
-  sealed `control-encrypted` frame on the same ordered sequence. The receive counter advances
-  only after a frame authenticates, so a forged frame moves nothing; an authentic frame out of
-  order (replay, rollback, gap) closes the session, which re-handshakes.
-- **One key per nodeId.** The key registry binds a nodeId to the first key a proven session, an
-  out-of-band pin (invite, Legacy Import route) or an anchor-rooted grant gives it, and never
-  replaces it: a different key from any source is a recorded conflict an operator resolves (a
-  session proving it is closed with error 1009 `IDENTITY_CONFLICT`). The
-  one way a binding ends is churn: a first-contact binding that never verified anything expires
-  after 30 days unseen (or gives way to a newcomer in a full registry), after which that nodeId is
-  first contact again; a binding that ever verified something is kept for good.
-  Keys pinned before 0.14 from unproven hellos become `legacy-claim`: expected, never trusted
-  to verify, so a squatter racing the upgrade cannot take an honest node's id.
-- **Records verified by author node id.** A record is admitted, delivered or exposed to a host
-  (`verified-record`) only after §8.8.5: application bytes, category keys and cognition key,
-  assertion identity, the Ed25519 signature against the key resolved by `createdByNodeId`, and
-  the signed audience (room, recipient). Directed versus room-bound delivery is decided by the
-  signed `metadata.to`, never by a relay envelope.
-- **Authority follows the key.** A role grant must name `granteeKey`; it confers its role only
-  on that key, and a chain is verified top-down with each grant's vouched key. A grantor whose
-  nodeId an impostor holds keeps exactly its vouched authority; the impostor gets none.
+  record's identity). Every other post-handshake frame except ping and pong — an `error` included —
+  travels as a sealed `control-encrypted` frame on the same ordered sequence. The receive counter
+  advances only after a frame authenticates, so a forged frame moves nothing; an authentic replay
+  or rollback is discarded, and a gap closes the session, which re-handshakes.
+- **Errors are information, never commands.** A clear `error` frame is anyone's to write: it is
+  ignored, except 1011 UNKNOWN_SESSION, which prompts a new handshake and never tears a session
+  down. A session ends on its peer's sealed 1010 SESSION_CLOSED or 1009 IDENTITY_CONFLICT only.
+- **A record goes only where its author signed it to.** The one seal point refuses a record whose
+  signed `metadata.to` names anyone but the session's proven peer, whatever path offered it
+  (a broadcast, an anchor replay, a fetch answer, a queued frame).
+- **One key per nodeId.** Every confirmed session runs with a binding: the key it proved, held for
+  that nodeId while the session lives. The durable key registry binds a nodeId only when the
+  binding is earned — an admitted verified record, an out-of-band pin (invite, Legacy Import route),
+  or an anchor-rooted grant in effect now (a grant binding is a view over the grants in effect,
+  never stored, and ends with them) — and never replaces it: a different key, from any source or
+  while a session holds the nodeId, is a recorded conflict an operator resolves (a session
+  proving it is closed with error 1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one,
+  earns nothing; nothing is evicted before it expires; a `proven` binding that verified nothing
+  expires after 30 days unseen. This node's own nodeId is always its own key. Keys pinned before
+  0.14 — from unproven hellos, or from 0.13 grants never checked against their grantors — become
+  `legacy-claim`: expected, never trusted to verify, so a squatter racing the upgrade cannot take
+  an honest node's id.
+- **Records verified by author node id, and kept as their signed projection.** A record is
+  admitted, delivered or exposed to a host (`verified-record`, once per assertion, after
+  de-duplication) only after §8.8.5: a strict schema check (closed objects, no coercion, canonical
+  lowercase ids, each category key recomputed and a mismatch refused), application bytes, cognition
+  key, assertion identity, the Ed25519 signature against the key resolved by `createdByNodeId`, and
+  the signed audience (room, recipient). Members no signature covers (`valence`, `arousal`,
+  `lineage.method`) are dropped, and what is stored, delivered and served is the projection.
+  Directed versus room-bound delivery is decided by the signed `metadata.to`, never by a relay
+  envelope; a directed record older than 24 h by its signed time is refused.
+- **Authority follows the key, and counts both when signed and when received.** A role grant must
+  name `granteeKey`; it confers its role only on that key, and a chain is verified top-down with
+  each grant's vouched key. A grant, its key vouch, a revoke and an attestation count only if the
+  signer was authorised at its signed time and when this node received it (the receipt time is
+  persisted), so a revoked validator cannot backdate any of them into its old window. A grantor
+  whose nodeId an impostor holds keeps exactly its vouched authority; the impostor gets none.
+- **A forgery ends its session.** A signature that does not verify on a proven session closes it,
+  and its nodeId is not admitted again for 60 s.
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
@@ -49,34 +67,44 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
   nobody.
-- **Moved, not copied.** `sym node export` tombstones a node before its encrypted bundle exists,
-  so the source refuses to start it; `sym node import` verifies the bundle against an
-  independently pinned key and refuses a re-keyed bundle.
-- **The interior.** A node's mind submits through the node's local interior socket with a
-  per-mission capability; the node checks audience, size, rate, declared kinds and lineage
-  before it signs. One mind per node.
+- **Moved, not copied.** `sym node export` holds the identity's lock, tombstones the node before
+  its encrypted bundle exists (so the source refuses to start it), signs the bundle with the node's
+  key, and once the bundle is durable removes the private key from the source and the 0.13 path to
+  it; `sym node import` verifies the bundle against an explicit pin and the node's signature, and
+  refuses a re-keyed or altered bundle.
+- **The interior.** A node's mind submits through the node's local interior socket, which lives in
+  a 0700 directory the node made (a fresh one under the temp directory when the path is too long),
+  with a per-mission capability bound to the first connection that presents it (another local
+  process cannot replay it; the connection closing ends the mind); the node checks audience, size,
+  rate, declared kinds (the kind is the signed intent) and lineage before it signs. One mind per
+  identity. On Windows the named pipe takes Node's default DACL, which sym cannot narrow, so the
+  socket is refused unless the host passes `{ allowDefaultPipeAcl: true }`.
 
 ## Bounds on what peers can make a node keep
 
 Every store a peer can feed has a fixed bound. Reaching one never stops the node: it is counted
 (and said in the log at most once a minute, or once).
 
-- **Key bindings** (the key registry): at most 65,536. A first-contact `proven` binding that has
-  verified nothing since (no record, grant, attestation or later session) expires after 30 days
-  unseen; when the registry is full, the least recently seen such binding makes room. A binding that
-  ever verified something, or is pinned, grant-vouched, anchored or a 0.13 legacy claim, is never
-  expired or evicted; if every binding is of that kind, a new one is refused and the newcomer's live
-  session still verifies what it signs. Key conflicts: at most 8 kept per nodeId and 1,024 in all,
-  every one counted (`status().coreSecure.keyConflicts`).
-- **Role grants**: at most 65,536 records, 1,024 per grantor and 64 per (grantor, grantee) pair
-  (the anchor's own are not limited). A record that arrives before its root is held only while
-  its chain is fetched from the session that delivered it (`role-chain-fetch`): at most 64 per
-  session, for at most 10 s; a fetch names at most 16 grantors, an answer carries at most 64 grants,
-  and a node answers at most 4 fetches a second per session (burst 16).
+- **Key bindings** (the key registry): at most 65,536, earned only (see above); the session-scoped
+  bindings are one per confirmed session. Nothing is evicted before it expires: in a full registry
+  a newcomer is refused a durable binding and its live session still verifies what it signs. Key
+  conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
+  (`status().coreSecure.keyConflicts`).
+- **Role grants**: at most 65,536 records, 1,024 per grantor and 16 per (grantor, grantee) pair
+  (the anchor's own are not limited); a nodeId in a grant is canonical lowercase of at most 128
+  characters, a role name at most 32. A delegation reaches at most 8 grants from the anchor, and
+  role resolution is memoised (linear in the records). A record that arrives before its root is
+  held only while its chain is fetched from the session that delivered it (`role-chain-fetch`): at
+  most 64 records and 64 KiB per session, for at most 10 s; a fetch names at most 16 grantors, an
+  answer carries at most 64 grants, and a node answers at most 4 fetches a second per session
+  (burst 16). A whole-store sync (on a differing `role-digest`) is at most 1,024 pages of 64.
 - **Gossip** (attestations, checkpoints, witnesses, grants): 2,000 new statements a second per
-  proven peer (burst 10,000; a new peer starts at 100) and 4,000 a second in all (burst 20,000),
-  spent before a signature is checked; checkpoints at most 4 a second per attester (burst 128);
-  at most 1,024 attesters, 32 checkpoints each, 256 witnesses per position.
+  proven peer (burst 10,000; a new peer starts at 100), spent before a signature is checked, and
+  4,000 verified statements a second in all (burst 20,000), spent only after it; checkpoints at most
+  4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
+  per position.
+- **Records**: a category at most 256 KiB and the seven at most 960 KiB of text, refused before
+  anything encodes them; at most 8 new records a second per session are evaluated (burst 32).
 - **Wake channels**: at most 1,024, learned only from a confirmed session's own nodeId (a peer's
   word about another node is never stored), dropped after 30 days unseen; when the table is full a
   new first-hand channel displaces the least recently seen one of the weakest source, so many
@@ -84,8 +112,17 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   is not retried within the cooldown (5 minutes); a `peer-info` frame is read for its first 256
   entries.
 - **Relay**: at most 4,096 announced candidates (a peer with a live session is not counted
-  against it), at most 256 relay handshakes in flight, at most 10,000 frames queued for the pacer;
-  a message off the relay is bounded in size before it is parsed.
+  against it); at most 256 relay handshakes in flight, of which unknown candidates (no binding, no
+  peer, no route) hold at most 32 — the oldest evicted for a newer one, the rest waiting known peers
+  first, a failed one backing off up to 10 minutes — one in flight per relay `from`, and a `from`'s
+  hellos at 1 a second (burst 4); a 5 s handshake timeout. The pacer is fair: confirmed-session
+  traffic first, then handshakes, then the rest (at most 64 such frames), destinations served in
+  turn, at most 8 MiB and 2,048 frames per destination and 10,000 frames in all. 1011 replies to
+  strangers: at most once a second per relay `from` and 2 a second in all (burst 8), dropped past
+  it. A message off the relay is bounded in size before it is parsed.
+- **LAN listener**: at most 256 connections before their first frame (16 per address) and 128
+  authenticating sessions (8 per host); past either the oldest is closed. A peer whose dial or
+  handshake failed is dialled again after 15 s, doubling to 10 minutes.
 - **JSON nesting**: at most 128 levels, checked before parsing wherever a peer's JSON is read: TCP
   frames, relay messages, decrypted `cmb-encrypted` and `control-encrypted` plaintext, the legacy
   E2E plaintext, interior requests.
@@ -95,8 +132,13 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   budget and checkpoint-rate tables hold at most 4,096 peers each; the log-line deduplication maps
   1,024 keys each.
 - **Fetch and interior**: a `cmb-fetch` names at most 32 keys, a session expects at most 64 fetched
-  records; an interior submission is at most 64 KiB of category text and 512 KiB of application
-  data, at the mission's rate (60 a minute by default); an IPC line to the daemon at most 8 MiB.
+  records; a node serves at most 2 fetches a second per session (burst 8), a record at most once a
+  minute per session, and nothing while 2 MiB to that session is unsent; an interior submission is
+  at most 64 KiB of category text and 512 KiB of application data, at the mission's rate (60 a
+  minute by default); an IPC line to the daemon at most 8 MiB.
+- **The store** keeps what it admits without a count or byte bound by default (retention is
+  unlimited unless the host sets one); what bounds its growth from one peer is the record budget
+  above and SVAF admission.
 
 ## What it does not solve
 
@@ -114,10 +156,15 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 - **The local machine.** Identity files are readable by any process running as the same user.
   Operating-system isolation is out of scope.
 - **Legacy Import is weaker, and temporary.** A route to a 0.13 node uses the legacy encryption
-  (X25519 + AES-256-GCM per connection: no forward secrecy, no transcript proof). Everything
-  received over it is stored `verified: false`, `profile: legacy-import`, and given no
-  authority. A nodeId that has proven itself over Core Secure has its legacy route refused (a
-  persisted floor) until an operator resets it. Network Legacy Import is removed in 0.15.0.
+  (X25519 + AES-256-GCM: this node's per-session key against the routed node's pinned persistent
+  key — no forward secrecy, no transcript proof). A 0.13 hello proves nothing, so over the relay a
+  token holder can answer as the routed node; it cannot read what this node sends (encrypted to
+  the pinned key), and what it sends is taken only if the route's pinned identity key signed it.
+  Anyone who later obtains the routed node's X25519 private key can read what was recorded.
+  Everything received over a route is stored `verified: false`, `profile: legacy-import`, raised as
+  `legacy-record`, and given no authority; a legacy peer never passes a gated room's door. A
+  nodeId that has proven itself over Core Secure has its legacy route refused (a persisted floor)
+  until an operator resets it. Network Legacy Import is removed in 0.15.0.
 - **Metadata.** The relay operator sees routing envelopes: who, to whom, room, timing, sizes.
 - **Attestations disclose decisions.** With `sym-attest-v1` (offered by default) every peer in the
   room learns which records a node gated and what it decided; a content address is a confirmation

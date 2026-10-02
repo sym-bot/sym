@@ -1,6 +1,6 @@
 # sym 0.14.0: wire elements that need spec text
 
-These are the four wire elements that sym 0.14.0 (Core Secure) sends and that MMP v2.0 does not
+These are the wire elements that sym 0.14.0 (Core Secure) sends and that MMP v2.0 does not
 define yet, written so that a spec PR can be drafted from them. Each section gives the element's
 fields, how it is signed or sealed, when it is sent, and what a receiver does.
 
@@ -47,53 +47,24 @@ immediately before the replayed records, which follow it on the same session as 
   at most 50 string keys and ignores entries that are not strings.
 - A record that then arrives on that session with a listed key goes through §8.8.5 verification
   and admission like any other, and is marked as replayed context (`anchor: true` on the
-  `verified-record` event and on the stored entry).
+  `verified-record` event and on the stored entry) only when its signed `createdByNodeId` is the
+  session's proven nodeId: an anchor is the sender's own record.
+- Only room-bound records are replayed: a record signed to one node (`to` set) is never replayed
+  to another, whoever's session it is (the seal point refuses it in any case).
 - Nothing about the record's authority or verification changes. `cmb-anchors` never causes a
   record to be accepted.
 
 ---
 
-## 2. `mesh-room-join`: presenting a room-join grant after the handshake
+## 2. `room-join`: now draft spec PR #31
 
-**Why.** A gated room (§5.8.1) admits a non-owner only on a room-join grant whose `granteeKey` is
-the key that the session proved. The v2.0 handshake transcript has no field for the grant, and a
-grant carried in a hello would be replayable. So the grant is presented inside the confirmed
-session, where it is bound to the proven key.
-
-**Frame** (sealed control frame):
-
-```json
-{ "type": "mesh-room-join",
-  "grant": {
-    "type": "room-join", "room": "<room>", "grantee": "<grantee nodeId>", "granteeKey": "<43-char base64url>",
-    "grantedBy": "<owner nodeId>", "grantedAt": 1786611600000, "expiresAt": 1786698000000,
-    "sigAlg": "ed25519", "sig": "<unpadded base64url>" } }
-```
-
-**Signing.** `grant` is the existing room-join grant, signed by the room owner's identity key
-over:
-
-```
-UTF8("mmp-room-join-v1\n") || lp(room) || lp(grantee) || lp(granteeKey) || lp(grantedBy) ||
-lp(decimal(grantedAt)) || lp(decimal(expiresAt))
-```
-
-The lifetime is at most 24 h (`expiresAt − grantedAt`). The frame itself is sealed and adds no
-signature of its own.
-
-**When it is sent.** A node that holds a grant for its room sends this frame as the first frame
-after both proofs validate (and after its own key-registry check of the peer). It is sent to
-every newly confirmed session, before any other control frame.
-
-**Receiver** (a gated room):
-- A newly confirmed session is held in `pending` admission. The owner, recognised by its pinned
-  key, is admitted at once. Any other session waits for a `mesh-room-join` frame, for up to the
-  handshake timeout (10 s), and is refused if none arrives.
-- The grant is verified against the owner's pinned key for this room. It must name the session's
-  proven nodeId as `grantee`, its proven key as `granteeKey`, and this node's room, and it must
-  not have expired. Then the session is admitted, otherwise it is refused (closed).
-- A copied grant presented on another key's session is refused. A `mesh-room-join` on an
-  already admitted session is ignored. In an ungated room the frame is ignored.
+sym 0.14.0 sent this frame as `mesh-room-join` until the security review. It now sends and reads
+`room-join`, as draft spec PR meshcognition-website#31 names and defines it (§5.8.1: a sealed
+control frame carrying the owner-signed grant, sent as the first control frame of a newly
+confirmed session; pending admission for up to the handshake timeout; verified against the
+owner's pinned key, the session's proven nodeId and key, this room, and the grant's expiry). One
+behaviour beyond the draft: an admitted session whose grant expires is closed when it does
+(`room-grant-expired`), not kept for as long as the session lasts.
 
 ---
 
@@ -126,7 +97,21 @@ that delivered the record for the missing chain.
   fields only (`type, grantee, role?, grantedBy, grantedAt, granteeKey?, sig, sigAlg`). They are
   ordered top-down: each record comes after the records that root its grantor, up to the anchor
   (depth at most 8). For each named grantee the answer holds the records the server holds whose
-  grantee it is, each preceded by its grantor's chain.
+  grantee it is, revokes included, each preceded by its grantor's chain.
+
+**Whole-store sync** (anti-entropy, security review D). The same pair carries a paged copy of the
+server's whole store:
+
+```json
+{ "type": "role-chain-fetch", "reqId": "rs-<16 hex>", "sync": true, "after": 0 }
+{ "type": "role-chain", "reqId": "<the request's reqId>", "grants": [ ... ], "next": 64 }
+```
+
+- `after`: where the page starts, in the server's sync order: the anchor's records first, then
+  those of each grantor the earlier ones reach, breadth first, each grantor's own records by
+  signed time; records no chain reaches come last. A page holds at most 64 records.
+- `next`: present when another page follows; the client asks for it with `after: next`. A client
+  asks for at most 1,024 pages per session, one page in flight at a time.
 
 **Signing.** Neither frame is signed. Each grant in `grants` keeps its grantor's signature
 (§6.5) and is verified as gossip is: top-down, against the key that the chain vouches for its
@@ -134,13 +119,17 @@ grantor, or the anchor's configured key. Its authority never comes from the sess
 it.
 
 **When they are sent.**
+- A node sends a whole-store `role-chain-fetch` when a peer's `role-digest` (section 5) differs
+  from its own.
 - A node sends `role-chain-fetch` when a role grant or revoke that arrived on a session is refused
   as `unknown-grantor-key` (no chain reaches its grantor) or `unrooted`.
   - It sends at most one fetch in flight per (session, grantor). Further early records for the
     same grantor join the fetch already in flight.
-  - The early record is held in memory only for that fetch, under a key made of every signed field
-    plus the signature, so a forged copy cannot displace the genuine one. At most 64 records are
-    held per session. A held record is never written and never relayed.
+  - The early record is held in memory only for that fetch, as its signed fields only, under a key
+    made of every signed field plus the signature, so a forged copy cannot displace the genuine
+    one. At most 64 records, and at most 64 KiB, are held per session. A held record is never
+    written and never relayed. A record whose fields are malformed (a nodeId that is not canonical
+    lowercase or is over 128 characters, a role name over 32) is never held.
 - A node answers `role-chain` for each fetch it receives, paced per session by a token bucket of
   4 a second (burst 16). Fetches past that are dropped and counted.
 
@@ -148,8 +137,9 @@ it.
 - Reads an answer only if it matches a fetch in flight on that same session. An answer that
   nobody asked for, or that arrives on another session, is ignored.
 - Offers the grants to its store until a pass stores nothing, so their order does not matter.
-  Each goes through the ordinary ingest: the gossip budget, verification with the vouched key,
-  storing as its signed fields only, and relaying once.
+  Each goes through the ordinary ingest: the gossip budget, verification with the vouched key and
+  the both-times rule (draft spec PR #33), storing as its signed fields only, and relaying once.
+  A grant in the answer whose signature does not verify ends the session (it is attributable).
 - Then offers each held record once more and drops it either way. Neither the answer's grants nor
   the held records start a further fetch.
 - A fetch that is not answered within 10 s, or whose session closes, releases its held records.
@@ -157,43 +147,85 @@ it.
 
 ---
 
-## 4. Relay `error` 4404: "unknown session"
+## 4. Errors on a session: 1011 `UNKNOWN_SESSION` in the clear, everything else sealed
+
+sym 0.14.0 used sym-local codes 4404 ("unknown session") and 4400 ("session closed") until the
+security review. It now uses the renumbering draft spec PR meshcognition-website#23 adopts: **1011
+`UNKNOWN_SESSION`** and **1010 `SESSION_CLOSED`**, beside #21's 1009 `IDENTITY_CONFLICT`, and the
+rule that an error is information, never a command.
+
+**On a confirmed session every error is sealed** (`control-encrypted`): 1010 when a node closes the
+session, 1009 when the peer's proven key conflicts with the binding, and any 2xxx. A sealed 1010
+or 1009 ends the session at the receiver; any other sealed code is counted and changes nothing.
+A handshake that does not confirm sends nothing, and a superseded session sends nothing (the
+peer's own new session supersedes it): it leaves any confirmed session exactly as it was.
+
+**A clear `error`** on a confirmed session, or over the relay, is anyone's to write, and is
+ignored (counted as `clear-error-ignored`), with one exception:
+
+```json
+{ "type": "error", "code": 1011, "message": "unknown session", "detail": "session:<32 lowercase hex>" }
+```
 
 **Why.** A relay session is bound to the relay `from` (draft #23). When a peer restarts behind the
 relay, the relay replaces its connection (4004) and, since sym-relay 0.5.4, sends no
 `relay-peer-left`. The other node still holds the old confirmed session and cannot tell the
-restart from a repeated announcement. Re-handshaking on every announcement would only supersede
-working sessions (0.13.17 re-review A2). So the peer's new process says that it holds no such
-session.
-
-**Frame** (a plain MMP error frame §7.2, sent as a relay envelope payload; it cannot be sealed,
-because the sender has no session to seal it under):
-
-```json
-{ "type": "error", "code": 4404, "message": "unknown session", "detail": "session:<32 lowercase hex>" }
-```
+restart from a repeated announcement. So the peer's new process says, in the clear (it has no
+session to seal under), that it holds no such session.
 
 - `detail` names the sessionId when the triggering frame carried one (a sealed frame), and is
   absent when it did not (a `ping`).
 
-**When it is sent.** A node that receives, from a relay `from`, either a `cmb-encrypted` or
-`control-encrypted` frame naming a session it does not hold, or a `ping` from a `from` it holds
-no relay session with, answers with this error. It answers at most once a second per relay
-`from`, to bound the reply rate.
+**When it is sent.** A node that receives, from a relay `from`, either a sealed frame naming a
+session it does not hold, or a `ping` from a `from` it holds no relay session with, answers with
+1011: at most once a second per relay `from` (the table of froms is bounded at 1,024, least
+recently said first out), and at most 2 a second in all (burst 8) across every `from`, past which
+replies are dropped, never queued (security review D, pacer-starve).
 
 **Receiver.**
 - If it is the client for that peer (the smaller nodeId, §5.2.2), and the peer is present on the
   relay, it starts a new handshake. It **keeps** the session it has until the new one confirms
   and supersedes it, so a restart produces no `peer-left`.
-- The server ignores the error: the client will re-handshake.
-- 4404 never tears a session down on its own. Like every error frame it is informational (§7.2):
-  at most it prompts a new handshake, and only the new confirmed session replaces the old one.
+- The server ignores it: the client will re-handshake.
+- 1011 never tears a session down. At most it prompts a new handshake.
+
+**A replayed frame.** An authentic sealed frame whose sequence the receiver has already passed (a
+relay repeating what it carried) is discarded and counted (`replay`); the session is unharmed. A
+gap still closes the session (a lost frame cannot heal).
+
+**1009 is not retried.** A node refused with 1009 does not re-handshake over the relay and is not
+re-dialled over the LAN (discovery's 15 s re-offer included) until it restarts.
 
 **Probe.** A node that sees a repeated announcement (`relay-peer-joined`, `relay-peers`) for a
 peer it holds a live relay session with does not re-handshake. It sends a `ping` on that session,
-at most once a second. A live peer answers `pong`; a restarted one answers 4404.
+at most once a second. A live peer answers `pong`; a restarted one answers 1011.
 
-**Code space.** 4404 sits beside the relay close codes (§4.4.9) but is an error-frame code between
-endpoints, not a relay close code. 4400 is sym's error code for "session closed: <reason>",
-which a node sends to its relay peer when it closes a relay session. Both should be registered,
-or renumbered in the 1xxx connection-level range, when #23 is finalised.
+---
+
+## 5. `role-digest`: anti-entropy for grants and revokes
+
+**Why.** Gossip is relay-once. A grant or revoke dropped on its way (a full hold, a budget, a
+session that ended) was never sent again, and a revoke lost that way left a revoked node's
+authority standing (security review D, p7-ceiling).
+
+**Frame** (sealed control frame):
+
+```json
+{ "type": "role-digest", "count": 12, "digest": "<64 lowercase hex>" }
+```
+
+- `count`: the role-grant and role-revoke records the sender holds.
+- `digest`: lowercase hex SHA-256 over the canonical spellings of those records' signatures,
+  sorted, each followed by `\n`. Two nodes holding the same records give the same digest.
+
+**When it is sent.** To every newly admitted session, after `cmb-anchors`, whatever the sender
+holds (`count` 0 for an empty store). It is therefore also the first authenticated frame a relay
+client hears from its server on a new session: a client that re-handshakes while it holds a
+confirmed session keeps the old one until the new one carries such a frame (it cannot otherwise
+know the server took its `client-finish`), and closes a new one that hears nothing within the
+handshake timeout (`unconfirmed-by-peer`).
+
+**Receiver.** If `count` is above 0, the digest differs from its own, and no whole-store sync is
+in flight on that session, it asks for the sender's store with a whole-store `role-chain-fetch` (section 3), page
+by page. Each record goes through the ordinary ingest, so what the receiver already holds costs
+nothing and what is new is relayed once. A digest is a hint: nothing is taken on its word.

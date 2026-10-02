@@ -122,16 +122,20 @@ participant.
   and confirms the X25519 key schedule. Nothing about a peer — its key, its room membership, its
   roles — exists until both proofs validate. A discovery record or a relay roster entry only
   decides whom to dial.
-- **One key per nodeId, for life.** The first proven key for a nodeId is bound; a session that
-  later proves the same nodeId with a different key is a *conflict*: refused, recorded, and
-  shown in `sym status` for you to resolve (`sym keys <name> resolve`). No source overrides a
-  different key. The one exception is churn: a first-contact binding that never verified anything
-  (no record, grant or later session) expires after 30 days unseen, or gives way to a newcomer when
-  the registry is full; a binding that ever verified something never does.
+- **One key per nodeId, for life.** A session that proves a nodeId with a different key from the
+  one this node binds — durably, or for a session that is live — is a *conflict*: refused with
+  1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to resolve
+  (`sym keys <name> resolve`). No source overrides a different key. A handshake alone binds a
+  key only for its session; the binding becomes durable when it is earned (an admitted verified
+  record, a pin, an anchor-rooted grant in effect), so churning identities cannot fill the
+  registry, and nothing is ever evicted to make room.
 - **Every record is signed, and verified by its author's node id.** A record is accepted only
   if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
   `createdByNodeId` — a key it proved, pinned from an invite, or holds from an anchor-rooted
-  grant. An unsigned, legacy or unresolvable record is refused.
+  grant in effect. An unsigned, legacy or unresolvable record is refused. What is kept, delivered
+  and served is the record's signed projection: members no signature covers are dropped.
+- **A record goes only where its author signed it to.** A record signed to one node is sealed to
+  that node's session and no other's, whichever path offers it.
 - **Content is sealed per session.** Records travel only as `cmb-encrypted` frames, and every
   other frame (mood, gossip, grants) as a sealed control frame, under directional keys derived
   fresh for each handshake (X25519, HKDF-SHA256, ChaCha20-Poly1305). A relay sees routing
@@ -149,15 +153,19 @@ What this does not solve, said plainly:
   proven use*: the handshake proves the peer holds the key it presents, not that the key is
   the one you meant. Pin it out of band (an invite carries the issuer's key) when that matters.
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
-  replace another node's connection (close 4004). A squatter gets no session — it cannot
-  prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
+  replace another node's connection (close 4004). A squatter gets no Core Secure session — it
+  cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
 - **Key compromise.** There is no key rotation: a node whose private key leaks must be
   replaced, under a new nodeId.
 - **Your own machine.** Another process running as the same user can read the identity file.
   Operating-system isolation is out of scope.
 - **Legacy peers (0.13 and older)** are reached only through explicit Legacy Import routes,
-  which use the old encryption (no forward secrecy, no transcript proof); what they send is
-  quarantined as unverified. Network Legacy Import is removed in 0.15.0.
+  which use the old encryption (no forward secrecy, no transcript proof). A 0.13 hello proves
+  nothing, so over the relay anyone can answer as a routed node; what this node sends is
+  encrypted to the routed node's pinned X25519 key, so such a squatter cannot read it, but anyone
+  who later obtains that node's X25519 private key can read what was recorded. What legacy peers
+  send is quarantined as unverified, and they never join a gated room. Network Legacy Import is
+  removed in 0.15.0.
 
 A room name or relay token is still not an enterprise trust boundary — anyone holding the
 token is in the channel; the envelope (who, to whom, room, timing, sizes) is visible to the

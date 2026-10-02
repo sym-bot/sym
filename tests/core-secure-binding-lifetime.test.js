@@ -137,6 +137,31 @@ describe('binding lifetime (D3)', () => {
     } finally { await node.stop(); }
   });
 
+  it('at the node: re-handshakes on a durable binding that verified nothing never make it verified (roster-fill-014)', async () => {
+    const node = new SymNode({ name: `life-rh-${Date.now()}`, silent: true, discovery: new NullDiscovery(), room: 'life' });
+    try {
+      await node.start();
+      const id = identity('legacy-then-proven');
+      node._roster.bind(id.nodeId, id.publicKey, 'legacy-claim'); // the key a 0.13 file expected
+      const { memoryPipe, until } = require('./_core-secure');
+      const { PeerSession } = require('../lib/session');
+      for (let k = 0; k < 3; k++) {
+        const [tc, ts] = memoryPipe();
+        node.connectTransport(ts, { role: 'server' });
+        const s = new PeerSession({ role: 'client', transport: tc, local: id, room: 'life', extensions: ['cmb-encrypted-v2'], implementation: { name: 'x', version: '1' }, expectNodeId: node.nodeId });
+        tc.on('message', (f) => s.receiveWire(f));
+        s.start();
+        await until(() => s.confirmed && node._peers.has(id.nodeId), 3000);
+        s.close('done');
+        await until(() => !node._peers.has(id.nodeId), 3000);
+      }
+      const e = node._roster.entries().find((x) => x.nodeId === id.nodeId);
+      assert.strictEqual(e.source, 'proven', 'the expected key, proven');
+      assert.strictEqual(e.verified, null, 'three handshakes verified nothing');
+      assert.ok(node._roster._lru.has(id.nodeId), 'and it can still expire');
+    } finally { await node.stop(); }
+  });
+
   it('at the node: a second key for a nodeId with a live session-scoped binding is a 1009 conflict, even with the registry full', async () => {
     const node = new SymNode({ name: `life-full-${Date.now()}`, silent: true, discovery: new NullDiscovery(), room: 'life', maxKeyBindings: 1 });
     try {
