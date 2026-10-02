@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.13.17 (2026-10-02)
+
+A security hotfix. In 0.13.16 a peer could stop a node from ever starting again, and crash a
+running node or the daemon, with one frame. Every node and every daemon should take it.
+
+### Security
+
+- **One role-grant from any peer stopped a node from starting, for good.** A connected peer could
+  sign a role-grant itself (naming itself as grantor) and send it; the node checked the signature
+  against that peer's own key, which it had just learned from the peer's handshake, wrote the grant
+  to `role-grants.jsonl` and relayed it to every peer it had, which did the same. Reading any
+  `role-grants.jsonl` then threw (`object is not iterable`), so every node that had received the
+  frame failed in `new SymNode` on its next start, and kept failing. The anchor's own `grantRole()`
+  had the same effect on its own node. Now:
+  - a grant or revoke is kept only when it is rooted at the pinned anchor: its grantor held, when it
+    signed, the rank the record needs, by the chain the node already holds. A record that is not
+    rooted has no effect on any role, so it is not stored, not written and not relayed (and costs no
+    signature check). A node without an anchor (the daemon, by default) keeps none;
+  - the store looks grantor keys up through the roster's own lookup, on receipt and on reload alike;
+  - reading the file never stops a node from starting. A record that cannot be verified (not JSON,
+    malformed, unknown grantor key, bad signature, unrooted) is skipped and counted, and the node says
+    what it skipped, once; a file that cannot be read leaves the node starting with no grants. **A
+    node that 0.13.16 left unable to start starts on 0.13.17 with nothing to clean up**: the bad
+    records stay in the file (it is append-only and is not rewritten) and are skipped at each start;
+  - `grantRole`/`revokeRole` on a node without that rooted authority make nothing, send nothing, and
+    return `null`.
+- **A peer's `mood` frame crashed any node over the relay.** The relay path called the frame
+  handler with no guard (the LAN path caught a handler's throw inside the frame parser and dropped it
+  silently), and the mood handler always threw on a stock node: it registered the mood as a peer in
+  the coupling set and ran a coupling step that the stock coupler cannot run. The throw reached
+  `uncaughtException`; the daemon exits on that, and so does a host without a handler. On LAN, where
+  it was swallowed, the phantom peer stayed for two minutes and the node's own `remember()` threw for
+  as long: one mood frame every two minutes kept a node from publishing. Now:
+  - every inbound frame, over every transport (LAN and loopback, inbound and outbound, the relay),
+    goes through one guarded dispatch. A frame the node cannot handle is refused and counted
+    (`metrics().framesRefused`, `framesRefusedByType`), said at most once a minute per peer, and
+    never thrown out of the transport. The handshake that opens a LAN connection and the asynchronous
+    half of a CMB's evaluation go through the same guard;
+  - a mood's drift is measured directly against the node's own state; nothing is added to the
+    coupling set. The metrics logger and `peers()` read only what the coupler contract gives.
+- **A peer's `message` frame crashed the daemon over the relay.** The daemon fed every message to an
+  insight engine that a stock daemon does not have. It now checks for one, and the IPC requests that
+  read it (`xmesh-context`, `xmesh-search`) answer with an error when there is none.
+- **A peer could crash a node with its own name.** A peer's nodeId and name arrive as JSON, which can
+  carry an object that throws when printed, and 0.13.16 kept them as given and printed them later, in
+  timers and transport callbacks. Over the relay, a joiner's name reaches every node in the channel in
+  the relay's join notice and peer list, so one token holder could crash them all, again on every
+  reconnect; over the LAN, a handshake did it. A LAN handshake without a nodeId put a phantom peer in
+  the table that made `peers()` and `status()` throw until restart, and a handshake the node could
+  not take left its connection open with no deadline, so a peer could hold sockets without limit. A
+  nodeId is now a non-empty string or the announcement or connection is refused, a name is a string
+  or `'unknown'`, a key is text or it is not pinned, and a wake channel is kept only as text
+  (`{ platform, token, environment }`), before anything stores, prints or passes them on.
+
 ## 0.13.16 (2026-10-02)
 
 Follow-ups to the 0.13.15 witness-storm fix, from its last review.
