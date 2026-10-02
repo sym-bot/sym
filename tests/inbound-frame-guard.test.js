@@ -187,6 +187,7 @@ describe('the daemon survives a peer\'s mood and message frames over the relay (
       await new Promise((r) => setTimeout(r, 500));
       assert.strictEqual(daemon.exitCode, null, `the daemon is still running; log:\n${out.slice(-1500)}`);
       assert.doesNotMatch(out, /FATAL/);
+      assert.doesNotMatch(out, /Refused a/, 'both frames are handled, not refused: the cause is gone, not just caught');
       assert.match(out, /Mood from evil: .*(ACCEPTED|IGNORED)/);
       const reply = await new Promise((resolve, reject) => {
         const c = net.createConnection(sock, () => c.write(JSON.stringify({ type: 'xmesh-context' }) + '\n'));
