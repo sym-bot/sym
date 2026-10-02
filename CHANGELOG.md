@@ -154,6 +154,11 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   would then store as its own.
 - The semantic encoder no longer starts a second model load while the first is loading.
   `semanticSettled()` resolves when it is ready or has failed.
+- **A failure after the neural gate decided re-ran the frame through the heuristic gate.** A failure
+  in the tether encode or the store write landed in the evaluator's fallback. One frame was then
+  decided twice, and two attestations were signed and gossiped for it. Now only the evaluator's own
+  failure falls back. A later failure is logged and the frame is not gated again, and a tether the
+  encoder cannot evaluate leaves the record stored unverified.
 
 ### Fixed — the attestation logs
 
