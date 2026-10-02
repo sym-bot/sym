@@ -85,8 +85,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   that would not fit. These are minting rules. A receiver applies no record bound beyond the frame a
   record arrives in: earlier releases minted larger categories and longer agent ids, and refusing
   them would stop a node hearing such a peer at all.
-- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's
-  metadata whole, as a copy.
+- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's two
+  sections exactly as signed, as a copy: the metadata whole, and each category with its `meta`. Text
+  alone dropped the per-category parents the signature commits to, so a record that declared them
+  failed verification at the requester.
 - **A frame written to a destroyed socket counted as sent (B-D6, residual).**
 - **A send that failed for any reason was reported as "not connected".** `sendFrame` and the
   transports returned one `false` for a frame over the bound, a closed socket and a failed write.
