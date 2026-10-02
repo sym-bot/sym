@@ -318,8 +318,8 @@ describe('attestation log rotation — nothing held is lost', () => {
       attesters: [...s._checkpoints.keys()],
       checkpoints: ['Q', 'A'].map((by) => s.checkpointsOf(by).map((c) => [c.upto_seq, c.root])),
       conflicted: s.hasConflict('Q', 5),
-      positions: s._positions.map((p) => p.join(':')),
-      witnesses: s._positions.map(([a, seq]) => s.witnessesFor(a, seq).map((w) => w.sig)),
+      positions: [...s._positions.values()].map((p) => p.join(':')),
+      witnesses: [...s._positions.values()].map(([a, seq]) => s.witnessesFor(a, seq).map((w) => w.sig)),
       own: [s.hasWitnessed('Q', 5, 'me'), s.hasWitnessed('A', 1, 'me'), s.hasWitnessed('A', 60, 'me')],
     });
     const before = snap(st);

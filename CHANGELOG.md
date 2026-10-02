@@ -165,6 +165,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A conflict on a held position is remembered as long as the position is held.** 0.13.16's
   32,768-entry list also counted positions already dropped, so another attester's conflicts could push
   out the mark of a position still held.
+- **A dropped position is unlisted in O(1).** Each checkpoint dropped searched every witnessed
+  position (up to 32,768) for its own; the positions are now indexed by key, and the witness cap takes
+  the oldest from the head.
 
 ### Fixed — one peer's attestation gossip has a budget
 

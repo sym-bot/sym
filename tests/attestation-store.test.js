@@ -369,3 +369,48 @@ describe('AttestationStore — 0.13.15 review follow-ups', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+// 0.14.0 review follow-up: a position was unlisted with findIndex over every witnessed position (up
+// to 32,768), once per position dropped.
+describe('AttestationStore — position eviction is O(1)', () => {
+  it('a dropped checkpoint unlists its position by key, and the global cap takes the oldest from the head, never scanning', () => {
+    const st = new AttestationStore({ maxCheckpointsPerAttester: 2, maxAttesters: 2000, maxWitnessesPerPosition: 1, maxWitnesses: 100000 });
+    for (let a = 0; a < 1000; a++) {
+      for (const n of [1, 2]) {
+        st.recordCheckpoint({ by: `A${a}`, upto_seq: n, root: 'r', sig: `c${a}-${n}` });
+        st.recordWitness({ attester: `A${a}`, upto_seq: n, root: 'r', by: 'W', sig: `w${a}-${n}` });
+      }
+    }
+    let iterations = 0;   // iterator steps taken over the position index
+    const counted = (it) => ({ next() { iterations++; return it.next(); }, [Symbol.iterator]() { return this; } });
+    class Counted extends Map {
+      entries() { return counted(super.entries()); }
+      keys() { return counted(super.keys()); }
+      values() { return counted(super.values()); }
+      forEach(fn, self) { for (const [k, v] of this) fn.call(self, v, k, this); }
+      [Symbol.iterator]() { return counted(super.entries()); }
+    }
+    st._positions = new Counted(st._positions);
+    iterations = 0;
+    // 500 attesters commit a third checkpoint: each drops its oldest position, with its witness.
+    for (let a = 0; a < 500; a++) st.recordCheckpoint({ by: `A${a}`, upto_seq: 3, root: 'r', sig: `c${a}-3` });
+    assert.strictEqual(iterations, 0, 'unlisting a dropped position looks at nothing else');
+    assert.strictEqual(st._positions.size, 1500);
+    assert.strictEqual(st.witnessesFor('A0', 1).length, 0);
+    // The global cap: 100 more positions than it allows, each drop one look at the head.
+    st._maxWitnesses = st._witnessCount;
+    for (let a = 500; a < 600; a++) {
+      st.recordCheckpoint({ by: `A${a}`, upto_seq: 3, root: 'r', sig: `c${a}-3x` });   // drops A${a}'s position 1
+      st.recordWitness({ attester: `A${a}`, upto_seq: 3, root: 'r', by: 'W', sig: `w${a}-3` });
+    }
+    st._maxWitnesses -= 100;
+    iterations = 0;
+    st.recordCheckpoint({ by: 'B', upto_seq: 1, root: 'r', sig: 'b1' });
+    st.recordWitness({ attester: 'B', upto_seq: 1, root: 'r', by: 'W', sig: 'wb1' });
+    assert.strictEqual(iterations, 101, 'one step at the head per position the cap drops');
+    assert.strictEqual(st._witnessCount, st._maxWitnesses);
+    assert.strictEqual(st.witnessesFor('A0', 2).length + st.witnessesFor('A100', 2).length, 0, 'the oldest positions went first');
+    assert.strictEqual(st.witnessesFor('A101', 2).length, 1, 'and no more');
+    assert.strictEqual(st.witnessesFor('B', 1).length, 1, 'the newest stayed');
+  });
+});
