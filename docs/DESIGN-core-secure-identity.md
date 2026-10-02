@@ -115,19 +115,28 @@ ever overrides a different key**; the old code's "strictly stronger source overr
 | nodeId unbound, proven session | bind (`proven`) |
 | nodeId unbound, anchor-rooted grant vouches a key | bind (`grant`) |
 | nodeId unbound, accepted invite names a key | bind (`pinned`) |
-| nodeId bound, same key from any source | keep; record the stronger source |
+| nodeId bound, same key from any source | keep; record the stronger source. The order is anchor, then `pinned`, then `grant`, then `proven`: a pin outranks a proof of the same key (decided in the 0.14.0 security round: an invite's pin was being relabelled `proven` by the first session that proved it) |
 | nodeId bound, **different** key from any source | **conflict**: refused, recorded, shown in `sym status`; the operator resolves it |
 | the configured anchor | always its configured key. It is read from configuration at every start and **never persisted to or replayed from** `roster-keys.jsonl`, so re-pinning a fresh anchor out of band (§6.6) takes effect |
 | a `legacy-claim` entry (every pre-0.14 `handshake` entry, relabelled on first load) | the **expected** key. A proven session presenting it binds `proven`. A proven session presenting a different key is a conflict, not a fresh binding. Identity files do not change on upgrade, so an honest peer always matches, and a squatter racing the upgrade cannot win |
 
-**Binding lifetime (added after the 0.13.17 re-review).** A first-contact `proven` binding
-expires when two things hold: it has verified nothing (no record, grant or session since it was
-bound), and it has not been seen for 30 days. A binding that ever verified something never
-expires, and neither does one that is pinned, grant-vouched or the anchor.
-- This bounds the registry under identity churn: new keypairs are cheap, and any fixed cap can be
-  filled from the LAN in seconds.
-- It never forgets a binding that protects history.
-- "Last verified" and "last seen" persist with the binding.
+**Binding lifetime (revised in the 0.14.0 security round; it replaces the 0.13.17 re-review's rule).**
+- **Every confirmed session runs with a binding:** the key it proved, held for that nodeId while
+  the session lives. That table is bounded by the session caps. A second key for a nodeId with a
+  live session binding is a conflict (sealed 1009 `IDENTITY_CONFLICT`), recorded.
+- **The durable registry takes only earned bindings:** an admitted verified record, an
+  out-of-band pin (an invite, a Legacy Import route), an anchor-rooted grant in effect now (a
+  view, never stored), or the anchor. A handshake, or a second one, earns nothing, so identity
+  churn cannot fill the registry. Nothing is evicted before it expires. A newcomer to a full
+  registry keeps its session binding and gets no durable one.
+- **Residual, kept on purpose (decided by agent-a under the user's 2026-10-02 delegation):** a
+  nodeId that never earned a durable binding is first contact again once its sessions end, so
+  another key may then claim it. Such a node left nothing this node protects: no admitted record,
+  no grant, no pin, so no history or standing to take. Hosts show signers by key fingerprint
+  (mesh-channel 0.11.0), so a change of key under one nodeId is visible. An expiring first-contact
+  binding was rejected: any table a stranger can fill is a table a stranger can use to push honest
+  bindings out.
+- "Last verified" and "last seen" persist with each durable binding.
 - Test: a flood of 20,000 one-shot identities ages out, and an honest long-lived peer survives.
 
 **Authority follows the key.**
@@ -206,7 +215,9 @@ expires, and neither does one that is pinned, grant-vouched or the anchor.
     fingerprint.
   - Connection-level frames from a legacy session are hints.
 - **What 0.14 sends on a legacy session:** legacy `cmb` frames under the legacy E2E construction,
-  so the relay never sees plaintext. `sym status` says plainly that the session uses legacy
+  encrypted to the routed node's persistent X25519 key, which the route pins. A relay token holder
+  can answer as the routed node, because a 0.13 hello proves nothing, but it cannot read what this
+  node sends. Anyone who later obtains that X25519 private key can read what was recorded. `sym status` says plainly that the session uses legacy
   encryption, with no forward secrecy and no transcript proof.
 - **Quarantine:** everything received is stored with `verified: false` and `profile: legacy-import`.
   It is never given authority, never shown as verified, and flagged on the channel surface.
