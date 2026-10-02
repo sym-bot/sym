@@ -165,6 +165,38 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   32,768-entry list also counted positions already dropped, so another attester's conflicts could push
   out the mark of a position still held.
 
+### Fixed — one peer's attestation gossip has a budget
+
+- **A peer's new statements are budgeted (0.13.15's other known limit).** The attestations,
+  checkpoints and witnesses one peer delivers may make this node check at most 2,000 new statements a
+  second, after a burst of 10,000. Past that a frame is dropped before its signature is checked, so no
+  peer buys more signature checks than that (~40 µs each: under a tenth of a core). Attestations are
+  covered as well as checkpoints and witnesses.
+- **Only a new statement spends it.** These are dropped first, for nothing: a repeat (an attestation
+  whose signature is held, however it is spelled; a checkpoint or witness held, waiting for its
+  checkpoint, or already refused as a conflict), a checkpoint older than every position held, an
+  unsigned frame, and a frame whose signer's key this node does not hold.
+- **Sized above a busy room.** A room of R nodes, each gating G CMBs a second, makes R·G
+  attestations, R·G/8 checkpoints and R·G/8·(R−1) witnesses a second: 640 at R = 32, G = 4. Only the
+  first copy of a statement is new, so a peer spends the budget only for what it delivers first:
+  about what it signs itself (~20 a second there), and at most all 640 when it is this node's only
+  path to the room. 2,000 is three times that. `gossipBudget: { perSecond, burst }` changes it.
+- **Forged frames cannot starve genuine ones.** The budget is the delivering peer's, never the claimed
+  signer's, so a forged frame spends only its sender's budget. An honest peer relays only what it has
+  verified, so its budget is never spent on forgeries. A dropped frame is not marked seen, so the same
+  statement from another peer is taken. The budget refills, so a peer that stops flooding is heard
+  again.
+- **A drop is attributable.** A `gossip-over-budget` metric (`fromPeerId`, `from`, `dropped`,
+  `frames` by type, and up to 16 `authors` whose statements were dropped) and one log line name the
+  peer, at most once per 10 s per peer: the first drop at once, the rest when the 10 s close, so every
+  drop is counted. A gap it leaves is told apart from an omission by the attester. Budgets are kept for
+  at most 4,096 peers, the least recently active evicted in O(1), without scanning.
+- **An attestation is de-duplicated by its signature's bytes.** Base64url decoding ignores padding,
+  whitespace and stray characters. One signature could be spelled any number of ways that all verify,
+  and each spelling was stored and relayed as a new attestation.
+- **A dropped attestation is logged once a minute per peer and reason, with a count.** It was logged
+  once per frame, and one naming a signer whose key is not held is dropped before any budget.
+
 ### Fixed — dependencies
 
 - `npm audit` is clean. Floors are raised past the vulnerable versions, because `overrides` do not
