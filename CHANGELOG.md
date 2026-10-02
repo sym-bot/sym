@@ -269,6 +269,8 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
 - **A daemon rooted with `SYM_STATE_DIR` kept its room, tasks and relay.env in `~/.sym`.** It uses
   the state root now, and so does the `sym` CLI: its pid file, room, relay.env and node directory.
   Two rooted deployments sharing a home shared one pid file, so `sym stop` for one stopped the other.
+  `MeshAgent` and `llm-reason` read `relay.env` from the state root too, and LAN discovery keeps its
+  loopback registry there, so a rooted deployment meets only its own root's nodes over 127.0.0.1.
 - **A second daemon start took the socket from the one serving it.** The daemon removed any socket
   file at start, assuming it stale, so a second start unlinked a live daemon's socket; that daemon
   ran on, reachable by no client, and every client reported "sym-daemon not running".
