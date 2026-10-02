@@ -9,6 +9,15 @@ its follow-ups).
 Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
 debt, and the daemon's log flood. Every item has a test that fails without its fix.
 
+### Security
+
+- **A copied room-join grant admitted its holder to a gated room** (0.13.16, and the releases before
+  it that gate rooms). A grant is shown in its grantee's every handshake, so any node that saw one
+  could keep a copy. Writing the grant and the key printed in it into its own handshake (as
+  `provenPublicKey`) admitted that node to the gated room as the grantee, with no proof it held the
+  grantee's key. 0.14.0 drops a `provenPublicKey` that arrives in a handshake (see Fixed — security).
+  A room with no owner, the default, was never gated and is not affected.
+
 ### Fixed — security
 
 - **A relay could replay a signed directed record.** The directed de-duplication mark was the raw
