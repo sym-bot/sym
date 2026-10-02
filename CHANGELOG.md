@@ -17,6 +17,11 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   `provenPublicKey`) admitted that node to the gated room as the grantee, with no proof it held the
   grantee's key. 0.14.0 drops a `provenPublicKey` that arrives in a handshake (see Fixed — security).
   A room with no owner, the default, was never gated and is not affected.
+- **One captured role grant could be stored and relayed without end** (0.13.16, and the releases
+  before it that gossip role grants). A grant re-spelled (padding, whitespace, a `+`/`/` swap: each
+  spelling verifies) was taken as a new grant, so any admitted peer holding one, with no key of its
+  own, could make every node store, append and relay it again for every spelling. 0.14.0 refuses the
+  re-spelling, budgets grants and bounds what is kept (see Fixed — signed gossip is budgeted).
 
 ### Fixed — security
 
@@ -271,33 +276,59 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   position (up to 32,768) for its own; the positions are now indexed by key, and the witness cap takes
   the oldest from the head.
 
-### Fixed — attestation gossip is budgeted, per peer and per attester
+### Fixed — signed gossip is budgeted, per connection and per attester
 
-- **A peer's new statements are budgeted (0.13.15's other known limit).** The attestations,
-  checkpoints and witnesses one peer delivers may make this node check at most 2,000 new statements a
-  second, after a burst of 10,000. Past that a frame is dropped before its signature is checked, so no
-  peer buys more signature checks than that (~40 µs each: under a tenth of a core). Attestations are
-  covered as well as checkpoints and witnesses.
+- **New signed statements are budgeted (0.13.15's other known limit).** The attestations,
+  checkpoints, witnesses and role grants that arrive on one connection may make this node check at most
+  2,000 new statements a second, up to a burst of 10,000. A connection seen for the first time starts
+  with 100 and earns the rest at that rate. All connections together draw on one ceiling, 4,000 a
+  second after a burst of 20,000. Past either, a frame is dropped before its signature is checked, so
+  no sender, and no number of senders, buys more signature checks than the ceiling (~40 µs each: under
+  a fifth of a core). Attestations are covered as well as checkpoints and witnesses.
 - **Only a new statement spends it.** These are dropped first, for nothing: a repeat (an attestation
-  whose signature is held, however it is spelled; a checkpoint or witness held, waiting for its
-  checkpoint, or already refused as a conflict), a checkpoint older than every position held, an
-  unsigned frame, and a frame whose signer's key this node does not hold.
+  or role grant whose signature is held, however it is spelled; a checkpoint or witness held, waiting
+  for its checkpoint, or already refused as a conflict), a checkpoint older than every position held,
+  a further root for a position already in conflict, an unsigned or malformed frame, and a frame whose
+  signer's key this node does not hold.
 - **Sized above a busy room.** A room of R nodes, each gating G CMBs a second, makes R·G
   attestations, R·G/8 checkpoints and R·G/8·(R−1) witnesses a second: 640 at R = 32, G = 4. Only the
   first copy of a statement is new, so a peer spends the budget only for what it delivers first:
   about what it signs itself (~20 a second there), and at most all 640 when it is this node's only
-  path to the room. 2,000 is three times that. `gossipBudget: { perSecond, burst }` changes it.
-- **A forged frame spends only its sender's budget.** The budget is the delivering peer's, never the
-  claimed signer's. A peer that floods forgeries loses its own frames while it floods, and no one
-  else's. An honest peer relays only what it has verified, so its budget is never spent on forgeries.
-  A dropped frame is not marked seen, so the same statement from another peer is taken. The budget
-  refills, so a peer that stops flooding is heard again.
+  path to the room. 2,000 is three times that, and the ceiling six times the room's 640 in all.
+  `gossipBudget: { perSecond, burst, newLane, globalPerSecond, globalBurst }` changes it.
+- **The budget is the connection's, not a declared id's.** A connection is one TCP connection, or the
+  relay connection together with the sender id the relay names. A first reading kept the budget by the
+  peer id a sender declares, and gave an id seen for the first time the whole burst, so a sender that
+  minted ids bought 10,000 signature checks per id. Fresh ids on one TCP connection now share its
+  budget; over the relay each starts with 100, and together they stay under the ceiling. The budget is
+  never the claimed signer's, so a forged frame spends only its own connection's budget and the
+  ceiling. An honest peer relays only what it has verified, so its budget is never spent on
+  forgeries. A dropped frame is not marked seen, so the same statement from another peer is taken.
+  The budget refills, so a sender that stops flooding is heard again.
+- **Limits of the budget.** Under a flood from many ids or connections at once, the ceiling drops
+  honest peers' new statements too, for as long as the flood lasts (a copy that comes again later is
+  taken); what a flood cannot do is buy more checks than the ceiling. Over the relay this node cannot
+  tell whether the relay checked the sender id it names, so a sender that names an honest peer's id
+  spends that peer's relay budget.
 - **A drop is attributable.** A `gossip-over-budget` metric (`fromPeerId`, `from`, `dropped`,
   `frames` by type, and up to 16 `authors` whose statements were dropped) and one log line name the
   peer, at most once per 10 s per peer: the first drop at once, the rest when the 10 s close, so every
-  drop is counted (`gossipOverBudget` in `metrics()` keeps the total). A gap it leaves is told apart
-  from an omission by the attester. Budgets are kept for at most 4,096 peers, the least recently active
-  evicted in O(1), without scanning.
+  drop is counted (`gossipOverBudget` in `metrics()` keeps the total). Drops by the ceiling are said
+  in one report for all peers, `gossip-over-ceiling` (with up to 16 `fromPeerIds`), not one per id. A
+  gap a drop leaves is told apart from an omission by the attester. Budgets are kept for at most
+  4,096 connections, the least recently active evicted in O(1), without scanning. A log or metric
+  listener that throws cannot break the handling of a frame or `stop()`: a report's counts are reset
+  before it is said, so none is said twice, and the totals stay in `metrics()`.
+- **Role grants are gossip like the rest.** They were outside the budget and de-duplicated by the
+  signature as written, so one grant re-spelled (see Security) was stored, appended to
+  `role-grants.jsonl` and relayed again for every spelling. A grant is now refused in the same order
+  as the other statements (malformed, not spelled canonically, a repeat by its signature's bytes, a
+  grantor whose key is not held) before it spends the budget, and is kept in its canonical spelling.
+  The store bounds what it keeps, and so what it relays: 1,024 records per grantor, 64 per grantor and
+  grantee, 65,536 in all. A full bound refuses the newcomer and never evicts, since a record's
+  authority can depend on its place in a chain; the anchor's own records are never refused. Limit: a
+  node whose key this node holds can fill its own bounds with grants that confer nothing, and enough
+  such nodes can fill the store, after which only the anchor's grants are taken.
 - **One attester's checkpoints cannot make the room sign witnesses without end.** Each checkpoint a
   node takes costs every node in the room a witness signed, gossiped and verified. The per-peer budget
   bounds what one peer delivers, not what one attester signs: an attester sending new checkpoints
@@ -308,20 +339,27 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   10 s (`checkpoint-over-rate`, naming the attester and the peers that brought it). An attester commits
   a checkpoint every 8 attestations: 0.5 a second in the busy room above. 4 a second is 8× that, and
   the burst holds 1,024 attestations gated back to back. A second root for a position already held is
-  still recorded as a conflict. `checkpointRate: { perSecond, burst }` changes it.
+  still recorded as a conflict, whatever the rate. A further root for a position already in conflict
+  adds nothing and is dropped before the budget and the signature check; it was verified, up to the
+  peer's 2,000 a second, where the attester's rate was meant to bound it. `checkpointRate: {
+  perSecond, burst }` changes it.
 - **Only the spelling a signer writes is stored.** Base64url decoding ignores padding, whitespace and
   stray characters, so one signature could be spelled any number of ways that all verify. Each spelling
   was stored and relayed as a new attestation. The chain hash and the Merkle root are computed over the
   signature as written, so a re-spelling that arrived first made its attester's chain look broken. A
-  gossiped attestation, checkpoint or witness whose signature is not 64 bytes in unpadded base64url is
-  now refused before anything is spent on it. It is counted (`signaturesNotCanonical` in `metrics()`)
-  and said like a budget drop (`signature-not-canonical`). A re-spelling of an attestation already
-  held is a repeat. Every signer sym knows writes the canonical spelling, and this node checks its own
+  gossiped attestation, checkpoint, witness or role grant whose signature is not 64 bytes in unpadded
+  base64url is now refused before anything is spent on it, before the repeat check (which decoded a
+  re-spelling to look it up). It is counted (`signaturesNotCanonical` in `metrics()`) and said like a
+  budget drop (`signature-not-canonical`). A signature longer than 128 characters is malformed,
+  refused before it is decoded or looked up: one of ~900 KB cost a decode and a hash, for nothing.
+  Every signer sym knows writes the canonical spelling, and this node checks its own
   before recording one. A log written before 0.14.0 can hold another spelling. Such a line is read as
   the canonical spelling, which is counted and said once, so it can no longer make an honest chain
   look broken; a rotation then writes the canonical one.
-- **A dropped attestation is logged once a minute per peer and reason, with a count.** It was logged
-  once per frame, and one naming a signer whose key is not held is dropped before any budget.
+- **A dropped attestation is logged once a minute per connection and reason, with a count.** It was
+  logged once per frame, and one naming a signer whose key is not held is dropped before any budget.
+  Per connection, not per peer: over the relay the id is the sender's to choose, and a fresh one per
+  frame bought a line per frame.
 
 ### Fixed — dependencies
 

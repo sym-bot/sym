@@ -3,8 +3,10 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * 0.14.0: one peer's gossiped attestations, checkpoints and witnesses have a budget of new statements
- * (2,000 a second, a burst of 10,000), spent before the signature is checked. The earlier, rejected
+ * 0.14.0: gossiped attestations, checkpoints, witnesses and role grants have a budget of new
+ * statements, spent before the signature is checked: per lane (the connection a frame came by), 2,000
+ * a second up to a burst of 10,000, a new lane starting at 100; and a ceiling all lanes share, 4,000 a
+ * second after a burst of 20,000. The earlier, rejected
  * attempts spent it on repeats and unsigned frames, left attestations unbudgeted, budgeted 100 a
  * second (below a busy room's legitimate rate, so a drop read as an omission), emitted a metric per
  * dropped frame, and scanned the bucket map on every call. Each case below fails on one of those.
@@ -121,8 +123,8 @@ describe('gossip budget — sized for a busy room', () => {
           for (const f of room.next().value) { const r = ingest(node, 'hub', f); if (!r.ok && r.reason !== 'pending') refused++; }
         }
       }
-      // A burst of 10,000, then 2,000 a second: ~14,000 signature checks bought, of 40,000 sent.
-      assert.ok(Math.abs(flood.verified - 14000) <= 2, `verified ${flood.verified}`);
+      // A new lane's 100, then 2,000 a second: ~4,100 signature checks bought, of 40,000 sent.
+      assert.ok(Math.abs(flood.verified - 4100) <= 2, `verified ${flood.verified}`);
       assert.strictEqual(flood.verified + flood.dropped, 40000);
       assert.strictEqual(refused, 0, 'the honest peer lost nothing during the flood');
       assert.ok(metrics.length >= 1 && metrics.every((m) => m.fromPeerId === 'flooder'));
@@ -133,8 +135,8 @@ describe('gossip budget — sized for a busy room', () => {
 describe('gossip budget — only new statements spend it', () => {
   it('repeats, re-spelled signatures, unsigned frames and unknown signers are dropped before it and spend nothing', () => {
     withNode(3, ({ node, keys: [A, W, X] }) => {
-      const tokens = () => node._gossipBuckets.get('p')?.tokens ?? node._gossipBurst;
-      const spent = () => node._gossipBurst - tokens();
+      const tokens = () => node._gossipBuckets.get('p')?.tokens ?? node._gossipNewLane;
+      const spent = () => node._gossipNewLane - tokens();
       // One of each held: an attestation, a checkpoint and its witness, a conflict, a waiting witness.
       const att = attestation(A, 1);
       const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
@@ -165,7 +167,7 @@ describe('gossip budget — only new statements spend it', () => {
       }
       const reasons = new Set();
       for (const f of repeats) { const r = ingest(node, 'p', f); assert.strictEqual(r.ok, false); reasons.add(r.reason); }
-      assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'malformed', 'unknown-attester-key']);
+      assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'malformed', 'non-canonical-signature', 'unknown-attester-key']);
       assert.strictEqual(spent(), before, `50,000 repeats spent nothing (${spent() - before})`);
       assert.strictEqual(node._attestations.size(), 1, 'and a re-spelled signature is not a second attestation');
       assert.strictEqual(ingest(node, 'p', attestation(A, 2)).ok, true, 'a new statement is still taken');
@@ -175,12 +177,12 @@ describe('gossip budget — only new statements spend it', () => {
   it('a checkpoint older than every position held is dropped before it', () => {
     withNode(1, ({ node, keys: [A] }) => {
       for (let n = 1; n <= 32; n++) ingest(node, 'p', { type: 'checkpoint', checkpoint: signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 100 + n, root: `r${n}`, at: n }, A.priv, signCheckpoint) });
-      const spent = node._gossipBurst - node._gossipBuckets.get('p').tokens;
+      const spent = node._gossipNewLane - node._gossipBuckets.get('p').tokens;
       for (let i = 0; i < 1000; i++) {
         const r = ingest(node, 'p', { type: 'checkpoint', checkpoint: { type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: i % 100, root: 'old', at: 1, sig: forgedSig() } });
         assert.strictEqual(r.reason, 'stale');
       }
-      assert.strictEqual(node._gossipBurst - node._gossipBuckets.get('p').tokens, spent);
+      assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('p').tokens, spent);
     });
   });
 });
@@ -201,7 +203,8 @@ describe('gossip budget — forged frames cannot starve genuine ones', () => {
         if (ms % 25 < 16) { const r = ingest(node, 'honest', genuine()); if (!r.ok) honestRefused++; }
       }
       assert.strictEqual(honestRefused, 0, 'every genuine statement from the honest peer was taken');
-      assert.ok(floodVerified <= 10000 + 10 * 2000 + 1, `what the flooder could send is bounded: ${floodVerified}`);
+      // A new lane's 100, then 2,000 a second for 10 s.
+      assert.ok(Math.abs(floodVerified - (100 + 10 * 2000)) <= 4, `what the flooder could send is bounded: ${floodVerified}`);
       // During the flood the flooder's own genuine relay is dropped, unverified, and marks nothing...
       const g = genuine();
       assert.strictEqual(ingest(node, 'flooder', g).reason, 'over-budget');
@@ -266,7 +269,7 @@ describe('gossip budget — what it reports, and what it keeps', () => {
       }
       assert.strictEqual(node._gossipBuckets.size, 4096);
       assert.ok(node._gossipBuckets.has('busy'), 'an active peer keeps its bucket');
-      assert.strictEqual(node._gossipBurst - node._gossipBuckets.get('busy').tokens, 50 + 6, 'and what it spent');
+      assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('busy').tokens, 50 + 6, 'and what it spent');
       assert.ok(!node._gossipBuckets.has('peer-0'), 'the least recently active went');
       assert.strictEqual(iterations, 6001 - 4096, 'one step at the head per eviction, nothing else');
     });
