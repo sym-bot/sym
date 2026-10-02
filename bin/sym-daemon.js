@@ -227,16 +227,7 @@ function startIPCServer() {
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 1);
-        if (line.trim()) {
-          let msg;
-          try { msg = JSON.parse(line); } catch (err) { log(`IPC parse error: ${err.message}`); continue; }
-          try {
-            handleIPCMessage(socketId, socket, msg);
-          } catch (err) {
-            log(`IPC ${msg && msg.type ? `'${msg.type}'` : 'message'} failed: ${err.message}`);
-            if (msg && msg.type) sendIPC(socket, { type: 'result', action: msg.type, error: err.message, code: err.code });
-          }
-        }
+        if (line.trim()) takeIPCLine(socketId, socket, line);
       }
     });
 
@@ -274,6 +265,39 @@ function startIPCServer() {
 }
 
 const NO_INSIGHT_ENGINE = 'this node runs no insight engine';
+
+/** The text of a thrown value, without trusting it to print. */
+function errorText(err) {
+  return err && typeof err.message === 'string' ? err.message.slice(0, 500) : 'unknown error';
+}
+
+/**
+ * Take one IPC line. An IPC message is typed at the door, as a wire frame is: it is a JSON object
+ * whose `type` is a non-empty string, or it is refused with an error reply and handled no
+ * further. Only then is anything in it printed: the catch below names the message by its type,
+ * and in 0.13.17 as first built it printed `type` unchecked, so one line whose type was an object
+ * that cannot be turned into text made the catch itself throw, and the daemon exited (FATAL).
+ */
+function takeIPCLine(socketId, socket, line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch (err) {
+    log(`IPC parse error: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: null, error: 'not JSON' });
+    return;
+  }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.type !== 'string' || !msg.type) {
+    log('IPC message refused: not an object with a string type');
+    sendIPC(socket, { type: 'result', action: null, error: 'an IPC message is a JSON object with a string type' });
+    return;
+  }
+  const type = msg.type.slice(0, 64);
+  try {
+    handleIPCMessage(socketId, socket, msg);
+  } catch (err) {
+    log(`IPC '${type}' failed: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: type, error: errorText(err), code: err && typeof err.code === 'string' ? err.code : undefined });
+  }
+}
 
 /**
  * Handle a single IPC message from a virtual node.
