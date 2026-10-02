@@ -98,7 +98,17 @@ running node or the daemon, with one frame. Every node and every daemon should t
     first. A connected peer's entry is never dropped for room. The derived-key cache is one entry per
     peer: one link re-sending its handshake with a new key each time had added one per handshake. A
     lifecycle role is one of the named roles or it is not kept (it was kept as any JSON value);
-  - the roster's list of refused key rebindings: at most 256, each one kept once.
+  - the roster's list of refused key rebindings: at most 256, each one kept once;
+  - key bindings: the roster key registry added a binding, and a line to its file, for every new
+    nodeId a handshake named. It now holds at most 16,384. Past that a new binding is refused and
+    none is ever evicted, since forgetting one would let its nodeId be pinned again with another
+    key. The refusal is said once and counted (`status().roster.refusedFull`), and a record signed
+    by a key that could not be pinned fails verification;
+  - peers added by relay announcements: the relay's join notices and peer list added a peer for
+    every nodeId they named. At most 4,096 peers that only an announcement introduced are now held;
+    an announcement for another unknown nodeId is ignored, said once and counted
+    (`status().relayState.announcementsIgnored`). Peers the node already knows, including any with
+    a live LAN connection, are not affected, and a peer that leaves the relay frees its place.
 - **The loopback scan threw on a registry file it could not use.** It runs in a timer and did
   arithmetic and comparisons on registry file fields as read. Any process of the same user can write
   that directory. A registration is now typed when it is read, or skipped.
@@ -107,6 +117,13 @@ running node or the daemon, with one frame. Every node and every daemon should t
   nodeId (as stale, or by the dual-dial tie-break), and only then refuse the new one. Admission is
   now decided first. Nothing is learned from a refused handshake: no secret is derived, no key is
   pinned, and nothing is read from its connection.
+
+### Known limit
+
+- **A handshake that claims a connected peer's nodeId can reset that peer's room verdict** until
+  the peer handshakes again. The cause is unproven identity: in 0.13 a peer's identity is trust on
+  first use, and the handshake proves nothing. 0.14.0 removes the cause by proving identity before
+  it keeps any per-peer state. This and the bounds above are described in the new `SECURITY.md`.
 
 ## 0.13.16 (2026-10-02)
 

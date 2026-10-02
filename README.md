@@ -137,7 +137,9 @@ limits rather than as a promise.
 What this does not cover: a room name or relay token is not an enterprise trust boundary —
 anyone holding the token is in the channel; the envelope (names, room, timing, sizes) is
 visible to the relay operator; and a peer's own machine is trusted with everything that peer
-admitted.
+admitted. Peer identity in 0.13 is trust on first use: the handshake does not prove a peer's key.
+[SECURITY.md](SECURITY.md) lists what follows from that and the bounds on what peers can make a
+node keep.
 
 ## Current boundaries
 
