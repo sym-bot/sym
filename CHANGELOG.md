@@ -107,8 +107,10 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   even when relayed. `from` is a display label (two node ids can sign the same `createdBy`):
   authorize on `author.nodeId`.
 - **Record timestamps ran ahead of the clock after a backward step, and restarted every process
-  (K6).** The ratchet starts from this node's newest stored record. After a step back of more than a
-  minute, timestamps follow the clock again, with a `clock-stepped-back` metric.
+  (K6).** The ratchet starts from the newest of this node's own stored records, read from the whole
+  store index once per process (a first reading took only the 20 most recently stored, so after 20
+  peer records it started from zero). After a step back of more than a minute, timestamps follow the
+  clock again, with a `clock-stepped-back` metric.
 - **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
   must be numbers in [-1, 1], and a mood given only as numbers keeps them.
 - **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB of text

@@ -6,8 +6,10 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * - K4: inbox()'s limit counts unread deliveries; an item already acked (read in full by id) comes
  *   back marked but does not take a new delivery's place.
  * - K6: record timestamps are strictly increasing across restarts (the ratchet starts from the newest
- *   stored record), and after the clock steps back by more than a minute they follow the clock again
- *   instead of running ahead of it indefinitely.
+ *   of this node's own stored records), and after the clock steps back by more than a minute they
+ *   follow the clock again instead of running ahead of it indefinitely.
+ * - 0.14.0 part A2 F3: "the newest stored record" was read from the 20 most recently stored, so on a
+ *   node that had admitted 20 peer records since its own last one the ratchet started from zero.
  */
 
 const { describe, it } = require('node:test');
@@ -67,6 +69,41 @@ describe('record timestamps (K6)', () => {
       const second = b.remember({ focus: 'after the restart' });
       assert.ok(second.cmb.metadata.createdTimestamp > first.cmb.metadata.createdTimestamp);
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
+  it('stay strictly increasing across a restart after 20 or more peer records were stored since', () => {
+    const name = uniq('clock-busy');
+    const peerName = uniq('clock-peer');
+    const realNow = Date.now;
+    try {
+      const a = mkNode(name);
+      const peer = mkNode(peerName);
+      const t0 = realNow();
+      Date.now = () => t0 + 30 * 1000;   // written 30 s "ahead", as after a small clock step
+      const own = a.remember({ focus: 'before the restart' });
+      // 25 peer records, minted further ahead still and stored after this node's own.
+      for (let i = 0; i < 25; i++) {
+        Date.now = () => t0 + 50 * 1000 + i;
+        const r = peer.remember({ focus: `peer record ${i}` });
+        Date.now = () => t0 + 31 * 1000 + i;
+        assert.ok(a._store.receiveFromPeer(peer.nodeId, { cmb: r.cmb, content: r.content, source: peerName }), `peer record ${i} stored`);
+      }
+      assert.ok(a._store.allEntries().every((e) => e.peerId != null), 'none of the 20 most recent is its own');
+      Date.now = realNow;
+      a._identityLock?.release?.();
+      a._releaseIdentityLock?.();
+      const b = mkNode(name); // a new process on the same store, the clock 30 s behind the last record
+      const after = b.remember({ focus: 'after the restart' });
+      const ts = after.cmb.metadata.createdTimestamp;
+      assert.ok(ts > own.cmb.metadata.createdTimestamp, `${ts} after ${own.cmb.metadata.createdTimestamp}`);
+      assert.ok(ts < t0 + 50 * 1000, "and it starts from this node's own, not a peer's");
+      b._releaseIdentityLock?.();
+      peer._releaseIdentityLock?.();
+    } finally {
+      Date.now = realNow;
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+      fs.rmSync(nodeDir(peerName), { recursive: true, force: true });
+    }
   });
 
   it('follow the clock again after it steps back by more than a minute', () => {
