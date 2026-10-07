@@ -129,28 +129,28 @@ describe('role grants are gossip under the budget (F1)', () => {
       for (let i = 0; i < 100; i++) assert.strictEqual(node._ingestRoleGrant(forgedGrant('nobody', 'x'), 'p5').reason, 'unknown-grantor-key');
       assert.strictEqual(node._gossipBuckets.has('p5'), false);
       assert.strictEqual(sent.length, 0, 'nothing refused was relayed');
-      // Genuine grants from one grantor to one grantee: kept up to the pair's bound, and only those relayed.
+      // Genuine grants from one grantor: kept within its delegation subtree's budget (final re-review
+      // ruling A), and only those relayed.
+      node._roleGrants._budget = 16;
       let kept = 0;
       for (let i = 0; i < 70; i++) {
         const r = node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: P.id, grantedAt: i }, P.priv), 'p2');
-        if (r.ok) kept++; else assert.strictEqual(r.reason, 'pair-full');
+        if (r.ok) kept++; else assert.strictEqual(r.reason, 'outranked');
       }
-      assert.strictEqual(kept, 16, 'the pair bound (16 since the security review: role-resolve-cost)');
+      assert.strictEqual(kept, 16, 'P\'s subtree holds its budget: the 16 earliest');
       assert.strictEqual(sent.length, 16);
-      // Another grantor's grant to the same grantee is not kept out by the first one's.
+      // Another subtree's grant to the same grantee is not kept out by P's.
       assert.strictEqual(node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: Q.id, grantedAt: 1 }, Q.priv), 'p3').ok, true);
     });
   });
 
-  it("the store dedups by the signature's bytes, keeps the canonical spelling, and bounds what it keeps without evicting", () => {
+  it("the store dedups by the signature's bytes, keeps the canonical spelling, and keeps each subtree within its budget by one order", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grants-'));
     try {
       const A = kp('A');
       const P = kp('P');
       const Q = kp('Q');
-      const keys = new Map([[P.id, P.pub], [Q.id, Q.pub]]);
-      // maxGrants counts the anchor's two grants that root P and Q (0.13.17: only a rooted record is kept).
-      const opts = { anchor: { nodeId: A.id, publicKey: A.pub }, keys, dir, maxPerGrantor: 3, maxPerPair: 2, maxGrants: 7 };
+      const opts = { anchor: { nodeId: A.id, publicKey: A.pub }, dir, subtreeBudget: 3 };
       const st = new RoleGrantStore(opts);
       const keyOf = (grantee) => ({ [P.id]: P.pub, [Q.id]: Q.pub })[grantee] || SOME_KEY;
       const grant = (by, grantee, at) => signGrant({ type: 'role-grant', grantee, granteeKey: keyOf(grantee), role: 'validator', grantedBy: by.id, grantedAt: at }, by.priv);
@@ -163,15 +163,16 @@ describe('role grants are gossip under the budget (F1)', () => {
       for (const G of [P, Q]) assert.strictEqual(st.record(grant(A, G.id, 0)).stored, true);
 
       const r = (by, grantee, at) => st.record(grant(by, grantee, at)).reason ?? 'stored';
-      assert.deepStrictEqual([r(P, 'x', 1), r(P, 'x', 2), r(P, 'x', 3)], ['stored', 'stored', 'pair-full']);
-      assert.deepStrictEqual([r(P, 'y', 4), r(P, 'z', 5)], ['stored', 'grantor-full']);
-      assert.strictEqual(st.record(forgedGrant(P.id, 'w')).reason, 'grantor-full', 'refused before its signature is checked');
-      assert.deepStrictEqual([r(Q, 'x', 6), r(Q, 'y', 7)], ['stored', 'store-full']);
-      assert.strictEqual(st.size(), 7);
-      assert.deepStrictEqual([r(A, 'x', 8), r(A, 'z', 9)], ['stored', 'stored'], "the anchor's own are never refused");
-      assert.deepStrictEqual(st.grantsFor('x').map((x) => x.grantedAt), [1, 2, 6, 8], 'nothing kept was evicted');
+      assert.deepStrictEqual([r(P, 'x', 5), r(P, 'y', 6), r(P, 'z', 7)], ['stored', 'stored', 'stored']);
+      assert.strictEqual(r(P, 'w', 8), 'outranked', 'past the budget a later record loses');
+      assert.strictEqual(r(P, 'u', 2), 'stored', 'an earlier one replaces the last kept');
+      assert.deepStrictEqual(st.grantsFor('z'), [], 'the last-ranked record was replaced');
+      assert.strictEqual(st.record(forgedGrant(P.id, 'w')).reason, 'bad-signature', 'refused before it could rank');
+      assert.deepStrictEqual([r(Q, 'x', 6), r(Q, 'y', 7)], ['stored', 'stored'], 'Q\'s subtree has its own budget');
+      assert.deepStrictEqual([r(A, 'x', 8), r(A, 'z', 9)], ['stored', 'stored'], "the anchor's own are never bounded");
       const again = new RoleGrantStore(opts);
-      assert.strictEqual(again.size(), 9, 'and a restart reads back what was kept');
+      assert.strictEqual(again.size(), st.size(), 'a restart keeps what the rule keeps');
+      assert.strictEqual(again.digest().digest, st.digest().digest);
       assert.strictEqual(again.resolveRole('x', 100), 'validator');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
@@ -213,8 +214,11 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
         node._frameHandler.handle(lan, { type: 'role-grant', grant: forgedGrant(A.id, `x-${i}`) });
       }
       assert.deepStrictEqual([...node._gossipBuckets.keys()], ['peer-two-paths']);
-      // A role grant from a grantor no chain reaches costs nothing (0.13.17, 0.14 D3).
-      assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('peer-two-paths').tokens, 80, 'each spent one of the one budget');
+      // A role grant from a grantor no chain reaches costs nothing (0.13.17, 0.14 D3). The first 8
+      // statements for A that fail spend the one budget; past them this peer's statements for A are
+      // dropped unverified for the minute, spending nothing (final re-review, Finding 3).
+      assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('peer-two-paths').tokens, 8, 'each spent one of the one budget, until the signer was muted');
+      assert.strictEqual(node._relayMuted('peer-two-paths', A.id), true);
     });
   });
 

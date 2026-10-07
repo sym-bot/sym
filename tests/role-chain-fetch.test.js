@@ -78,11 +78,8 @@ describe('a grant or revoke that arrives before its root is resolved by role-cha
         await until(() => N._roleGrants.size() === order.length, 3000);
         assert.strictEqual(N._roleGrants.size(), order.length, 'every record stored');
         assert.strictEqual(N.resolveRole(X.nodeId, Date.now(), { key: X.pub }), role);
-        // A record before its root, or (re-review N4: a revoke is bounded by the grants it clears) a
-        // non-anchor revoke before any grant to its grantee.
-        const early = order.some((k, i) => (k === 'VX' || k === 'rVX') && order.indexOf('AV') > i)
-          || (order.includes('rVX') && !order.slice(0, order.indexOf('rVX')).some((k) => k === 'VX' || k === 'AX'));
-        assert.strictEqual(N._chainStats.fetched > 0, early, 'a fetch only when a record came before its root, or a revoke before its grant');
+        const early = order.some((k, i) => (k === 'VX' || k === 'rVX') && order.indexOf('AV') > i);
+        assert.strictEqual(N._chainStats.fetched > 0, early, 'a fetch only when a record came before the grant vouching its grantor\'s key');
       } finally { await stopAll(P, N); }
     });
   }

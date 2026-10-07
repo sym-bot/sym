@@ -168,14 +168,17 @@ function kp(nodeId) {
 const grantOf = (type, grantee, role, grantor, at, extra = {}) => signGrant({ type, grantee: grantee.nodeId, ...(role ? { role } : {}), grantedBy: grantor.nodeId, grantedAt: at, ...(type === 'role-grant' ? { granteeKey: grantee.pub } : {}), ...extra }, grantor.priv);
 
 describe('N2: a revoke carries a cutoff; when a node received anything is no part of the rule', () => {
-  // V legitimately revokes W on "day 1"; the anchor revokes V on "day 3" (its cutoff: day 3).
+  // V legitimately revokes W on "day 1"; the anchor revokes V on "day 3" (cutoff day 3), ratifying
+  // V's revoke of W (final re-review ruling B: what a revoked node signed before its cutoff stands
+  // when its revoker ratifies it).
   const ANC = kp(), V = kp(), W = kp();
   const t = Date.now() - 1_000_000;
+  const rVW = grantOf('role-revoke', W, undefined, V, t + 100_000, { cutoff: t + 100_000 });
   const R = {
     AV: grantOf('role-grant', V, 'validator', ANC, t),
     AW: grantOf('role-grant', W, 'validator', ANC, t + 1),
-    rVW: grantOf('role-revoke', W, undefined, V, t + 100_000),
-    rAV: grantOf('role-revoke', V, undefined, ANC, t + 300_000),
+    rVW,
+    rAV: grantOf('role-revoke', V, undefined, ANC, t + 300_000, { cutoff: t + 300_000, ratify: [rVW.sig] }),
   };
   const roleOfW = (store) => store.resolveRole(W.nodeId, W.pub, Date.now());
 
@@ -188,8 +191,9 @@ describe('N2: a revoke carries a cutoff; when a node received anything is no par
     assert.strictEqual(roleOfW(early), 'participant', 'early receiver');
     const late = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub } });
     for (const k of ['AV', 'AW', 'rAV']) late.record(R[k]);
-    assert.strictEqual(late.record(R.rVW).stored, true, 'V\'s revoke, signed before V\'s cutoff, stands when it arrives after V\'s own revoke');
+    assert.strictEqual(late.record(R.rVW).stored, true, 'V\'s revoke, signed before V\'s cutoff and ratified, stands when it arrives after V\'s own revoke');
     assert.strictEqual(roleOfW(late), 'participant', 'late receiver');
+    assert.strictEqual(late.digest().digest, early.digest().digest);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'n2-upgrade-'));
     try {
       // A 0.13 store: bare lines, no receipt times, in the order 0.13 happened to write them.
@@ -217,63 +221,73 @@ describe('N2: a revoke carries a cutoff; when a node received anything is no par
     const X = kp();
     const store = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub } });
     store.record(R.AV); store.record(R.AW);
-    assert.strictEqual(store.record(grantOf('role-revoke', V, undefined, ANC, t + 300_000, { cutoff: t + 50_000 })).stored, true);
-    assert.strictEqual(store.resolveRole(V.nodeId, V.pub, t + 40_000), 'validator', 'before the cutoff');
+    assert.strictEqual(store.record(grantOf('role-revoke', V, undefined, ANC, t + 300_000, { cutoff: t + 50_000, ratify: [R.rVW.sig] })).stored, true);
+    assert.strictEqual(store.resolveRole(V.nodeId, V.pub, t + 40_000), 'validator', 'V\'s own role before the cutoff stands (the anchor that granted it holds rank)');
     assert.strictEqual(store.resolveRole(V.nodeId, V.pub, t + 60_000), 'participant', 'from the cutoff, before the revoke was signed');
-    assert.deepStrictEqual(store.record(R.rVW), { stored: false, reason: 'unrooted' }, 'V\'s revoke of W, signed after the cutoff, does not count');
-    assert.strictEqual(roleOfW(store), 'validator');
-    assert.strictEqual(store.record(grantOf('role-grant', X, 'validator', V, t + 10_000)).stored, true, 'V\'s grant before the cutoff stands as a statement');
+    assert.strictEqual(store.record(R.rVW).stored, true, 'kept: verifiable');
+    assert.strictEqual(roleOfW(store), 'validator', 'V\'s revoke of W, signed after the cutoff, does not count, ratified or not');
+    assert.strictEqual(store.record(grantOf('role-grant', X, 'validator', V, t + 10_000)).stored, true, 'kept: verifiable');
+    assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), 'participant');
   });
 
-  it('a revoker reaches back only over time it was itself authorised for', () => {
+  it('a revoker reaches back only over time it was itself authorised for: a revoke whose cutoff precedes its revoker\'s rank is kept but has no effect', () => {
     const Q = kp(); const X = kp();
     const store = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub } });
     store.record(grantOf('role-grant', X, 'validator', ANC, t));
     store.record(grantOf('role-grant', Q, 'validator', ANC, t + 200_000)); // Q a validator from t+200 s
-    assert.deepStrictEqual(store.record(grantOf('role-revoke', X, undefined, Q, t + 300_000, { cutoff: t + 100_000 })), { stored: false, reason: 'unrooted' }, 'a cutoff before Q held rank');
-    assert.strictEqual(store.record(grantOf('role-revoke', X, undefined, Q, t + 300_000, { cutoff: t + 250_000 })).stored, true);
+    assert.strictEqual(store.record(grantOf('role-revoke', X, undefined, Q, t + 300_000, { cutoff: t + 100_000 })).stored, true, 'kept: verifiable');
+    assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), 'validator', 'Q held no rank at its cutoff: no effect (decided at resolution)');
+    assert.strictEqual(store.record(grantOf('role-revoke', X, undefined, Q, t + 300_001, { cutoff: t + 250_000 })).stored, true);
+    assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), 'participant');
   });
 
-  it('wire: a revoke without a cutoff signs the bytes 0.13 signed; the cutoff is signed when present, at most the revoke\'s time, only on a revoke', () => {
+  it('wire: a revoke without a cutoff signs the bytes 0.13 signed; the cutoff and ratify list are signed when present, and checked', () => {
     const r = { type: 'role-revoke', grantee: 'g', grantedBy: 'b', grantedAt: 5 };
     assert.strictEqual(grantPayload(r).toString(), 'role-revoke|g||b|5|');
     assert.strictEqual(grantPayload({ ...r, cutoff: 3 }).toString(), 'role-revoke|g||b|5||3');
-    const c = grantOf('role-revoke', W, undefined, ANC, t + 10, { cutoff: t });
+    const s1 = 'A'.repeat(85) + 'A', s2 = 'B'.repeat(85) + 'A';
+    assert.strictEqual(grantPayload({ ...r, cutoff: 3, ratify: [s1, s2] }).toString(), `role-revoke|g||b|5||3|${s1},${s2}`);
+    const c = grantOf('role-revoke', W, undefined, ANC, t + 10, { cutoff: t, ratify: [s1] });
     assert.strictEqual(verifyGrant(c, ANC.pub).valid, true);
     assert.strictEqual(verifyGrant({ ...c, cutoff: t + 1 }, ANC.pub).valid, false, 'the cutoff is signed');
+    assert.strictEqual(verifyGrant({ ...c, ratify: [s2] }, ANC.pub).valid, false, 'the ratify list is signed');
     const store = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub } });
-    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, ANC, t, { cutoff: t + 1 })).reason, 'malformed', 'a cutoff after the revoke');
+    const bad = (extra, why) => assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, ANC, t, extra)).reason, 'malformed', why);
+    bad({ cutoff: t + 1 }, 'a cutoff after the revoke');
+    bad({ granteeKey: 'abc|1' }, 'a revoke key that is not a key');
+    bad({ ratify: [s1] }, 'ratify without a cutoff');
+    bad({ cutoff: t, ratify: [] }, 'an empty ratify list');
+    bad({ cutoff: t, ratify: [s2, s1] }, 'an unsorted ratify list');
+    bad({ cutoff: t, ratify: [s1, s1] }, 'a repeat');
+    bad({ cutoff: t, ratify: ['not-a-signature'] }, 'not a signature');
     assert.strictEqual(store.record(grantOf('role-grant', W, 'validator', ANC, t, { cutoff: t })).reason, 'malformed', 'a cutoff on a grant');
-    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, ANC, t, { granteeKey: 'abc|1' })).reason, 'malformed', 'a revoke key that is not a key');
     store.record(c);
-    assert.strictEqual(store.grantsFor(W.nodeId)[0].cutoff, t, 'kept with its cutoff');
+    assert.deepStrictEqual([store.grantsFor(W.nodeId)[0].cutoff, store.grantsFor(W.nodeId)[0].ratify], [t, [s1]], 'kept with its cutoff and ratify list');
   });
 });
 
-describe('N4: no cap refuses a revoke; revokes are bounded by their grants', () => {
-  it('past every grant cap a validator can still revoke; one revoke per grant its grantee holds', () => {
+describe('N4: no cap refuses a revoke: a budget per delegation subtree (final re-review ruling A)', () => {
+  it('a sybil tree fills only its own subtree\'s budget; an honest revoke from another subtree is always kept', () => {
     const A = kp(), M = kp(), H = kp(), X = kp();
-    const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, maxPerGrantor: 2, maxPerPair: 1, maxGrants: 5 });
+    const store = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, subtreeBudget: 8 });
     const t = Date.now() - 100_000;
     store.record(grantOf('role-grant', M, 'validator', A, t));
     store.record(grantOf('role-grant', H, 'validator', A, t));
-    assert.strictEqual(store.record(grantOf('role-grant', X, 'validator', H, t + 1)).stored, true, 'H grants X (H\'s pair with X is now full)');
-    // M fills what is left of the store with sybil grants.
-    for (let i = 0; i < 2; i++) store.record(grantOf('role-grant', kp(), 'validator', M, t + 2 + i));
-    assert.strictEqual(store.record(grantOf('role-grant', kp(), 'validator', H, t + 9)).reason, 'store-full', 'the grant caps are full');
-    const rHX = grantOf('role-revoke', X, undefined, H, t + 10);
-    assert.strictEqual(store.record(rHX).stored, true, 'H\'s revoke of X is kept: pair-full, grantor-full and store-full never refuse a revoke');
-    assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), 'participant');
-    const rHM = grantOf('role-revoke', M, undefined, H, t + 11);
-    assert.strictEqual(store.record(rHM).stored, true, 'and H can revoke the flooder');
-    // Bounded by grants: X holds one grant, so H keeps one revoke for X; a grantee with none, none.
-    assert.strictEqual(store.record(grantOf('role-revoke', X, undefined, H, t + 12)).reason, 'nothing-to-revoke');
-    assert.strictEqual(store.record(grantOf('role-revoke', kp(), undefined, H, t + 13)).reason, 'nothing-to-revoke');
-    assert.strictEqual(store.record(grantOf('role-revoke', kp(), undefined, A, t + 14)).stored, true, 'the anchor\'s own are never refused');
+    store.record(grantOf('role-grant', X, 'validator', A, t));
+    // M grows a sybil tree and floods records under it.
+    const sybils = Array.from({ length: 6 }, () => kp());
+    for (const y of sybils) store.record(grantOf('role-grant', y, 'validator', M, t + 1));
+    for (const y of sybils) for (let i = 0; i < 20; i++) store.record(grantOf('role-revoke', X, undefined, y, t + 100 + i, { cutoff: t + 100 + i }));
+    for (let i = 0; i < 20; i++) store.record(grantOf('role-grant', kp(), 'validator', M, t + 200 + i));
+    assert.strictEqual(store._byRoot.get(M.nodeId).size, 8, 'M\'s subtree holds its budget and no more');
+    assert.ok(store.size() <= 3 + 8 + 8, `the store holds the anchor's records and the budgets: ${store.size()}`);
+    const rHX = grantOf('role-revoke', X, undefined, H, t + 1000, { cutoff: t + 1000 });
+    assert.strictEqual(store.record(rHX).stored, true, 'H\'s revoke counts against H\'s subtree, which M cannot touch');
+    assert.strictEqual(store.record(grantOf('role-revoke', X, undefined, H, t + 1001, { cutoff: t + 900 })).stored, true, 'and H can tighten it');
   });
 });
 
-describe('N4 at the node: a whole-store sync never sends a revoke ahead of the grant it clears', () => {
+describe('N4 at the node: a whole-store sync over several pages', () => {
   it('a revoke whose grant is on a later page still counts after the sync', async () => {
     const A = kp(), V = kp(), Q = kp(), X = kp();
     const t = Date.now() - 100_000;
@@ -427,7 +441,7 @@ describe('leads', () => {
       }
       assert.strictEqual(b._store.allEntries().length, 0, 'nothing minted');
       assert.ok(b.remember({ focus: 'to a nodeId' }, { to: id }), 'a lowercase UUID is taken');
-      assert.strictEqual(b.send('hello', { to: id.toUpperCase() }), 0, 'send says it delivered nothing');
+      assert.throws(() => b.send('hello', { to: id.toUpperCase() }), (e) => e.code === 'EBADTO', 'send refuses it too');
     } finally { await stopAll(b); }
   });
 

@@ -174,7 +174,7 @@ describe('B. a record is its signed projection (cs-review-B/p3-unsigned, cs-revi
   });
 });
 
-describe('C. a revoke carries a cutoff: what the revoked node signed before it stands, at or after it never counts (cs-review-B; re-review N2 replaces draft spec PR #33\'s receipt time)', () => {
+describe('C. a revoke carries a cutoff; a revoked key gains nothing by backdating; the anchor ratifies (cs-review-B; re-review N2; final re-review ruling B)', () => {
   const ANC = kp('anchor'), V = kp('validator-v'), W = kp('validator-w'), H = kp('honest-h'), ATT = kp('attacker');
   const t0 = Date.now() - 100_000;
   // V was granted at t0 and revoked at t0+50 s, its trust withdrawn from t0+500 ms (the cutoff).
@@ -189,55 +189,63 @@ describe('C. a revoke carries a cutoff: what the revoked node signed before it s
     return { roster, store };
   }
 
-  it('p2-revoked-vouch: a revoked validator\'s grant dated at or after its cutoff is not kept; one before it is kept but confers nothing now; no key is bound', () => {
+  it('p2-revoked-vouch: a revoked validator\'s grants are kept (verifiable) but confer nothing, before or after its cutoff; no key is bound', () => {
     const { roster, store } = world();
     assert.strictEqual(store.resolveRole(V.nodeId, V.pub, Date.now()), 'participant');
-    const r = store.record(grantOf('role-grant', { nodeId: H.nodeId, pub: ATT.pub }, 'validator', V, t0 + 1000));
-    assert.deepStrictEqual(r, { stored: false, reason: 'unrooted' }, 'V signed it after its cutoff');
-    assert.strictEqual(roster.get(H.nodeId), undefined, 'the attacker key is bound to nobody');
-    const early = store.record(grantOf('role-grant', { nodeId: H.nodeId, pub: ATT.pub }, 'validator', V, t0 + 100));
-    assert.strictEqual(early.stored, true, 'a statement V signed before its cutoff stands');
-    assert.strictEqual(store.resolveRole(H.nodeId, ATT.pub, Date.now()), 'participant', 'and confers nothing while V is revoked (the §6.6 cascade)');
-    assert.strictEqual(roster.get(H.nodeId), undefined, 'so it vouches no key');
+    for (const at of [t0 + 1000, t0 + 100]) {
+      const H2 = kp(`h-${at}`);
+      assert.strictEqual(store.record(grantOf('role-grant', { nodeId: H2.nodeId, pub: ATT.pub }, 'validator', V, at)).stored, true, 'verifiable: kept, decided at resolution (final re-review ruling A)');
+      assert.strictEqual(store.resolveRole(H2.nodeId, ATT.pub, Date.now()), 'participant', 'V no longer holds rank, and nothing ratifies it (ruling B)');
+      assert.strictEqual(store.resolveRole(H2.nodeId, ATT.pub, t0 + 200), 'participant', 'not even back then');
+      assert.strictEqual(roster.get(H2.nodeId), undefined, 'the attacker key is bound to nobody');
+    }
     const self = store.record(grantOf('role-grant', { nodeId: 'receiver', pub: ATT.pub }, 'validator', V, t0 + 1001));
-    assert.strictEqual(self.stored, false);
+    assert.strictEqual(self.stored, true, 'kept as a statement; it binds nothing');
     assert.strictEqual(roster.get('receiver'), roster._self.publicKey, 'this node\'s own id is always its own key');
   });
 
-  it('p2c-backdate: a revoked validator\'s revoke dated after its cutoff strips nothing, and its attestation dated after it weighs as a participant', () => {
+  it('p2c-backdate: a revoked validator\'s revoke strips nothing and its attestation weighs as a participant, however it is dated, unless the anchor ratified it', () => {
     const { store } = world();
-    assert.deepStrictEqual(store.record(grantOf('role-revoke', W, undefined, V, t0 + 1000)), { stored: false, reason: 'unrooted' });
+    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, V, t0 + 1000, { cutoff: t0 + 1000 })).stored, true);
+    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, V, t0 + 100, { cutoff: t0 + 100 })).stored, true, 'backdated before V\'s cutoff');
     assert.strictEqual(store.resolveRole(W.nodeId, W.pub, Date.now()), 'validator', 'W keeps its role');
-    const role = (at) => verifyAttestationRole({ by: V.nodeId, at, role: 'validator' }, (id, t) => store.resolveRole(id, V.pub, t)).resolved;
-    assert.strictEqual(role(t0 + 1000), 'participant', 'dated after the cutoff: a participant\'s');
-    assert.strictEqual(role(t0 + 100), 'validator', 'dated before it: it stands');
+    assert.strictEqual(store.resolveRole(W.nodeId, W.pub, t0 + 300), 'validator', 'throughout');
+    const sig = 'A'.repeat(85) + 'A';
+    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 1000, sig), 'participant', 'dated after the cutoff');
+    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 100, sig), 'participant', 'dated before it: V holds no rank now and nothing ratifies it');
+    store.record(grantOf('role-revoke', V, undefined, ANC, t0 + 60_000, { cutoff: CUT, ratify: [sig] }));
+    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 100, sig), 'validator', 'ratified by the anchor\'s revoke: it stands');
+    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 1000, sig), 'participant', 'ratifying cannot reach past the cutoff');
   });
 
-  it('a revoke signed before its revoker\'s cutoff stands, whichever arrives first', () => {
+  it('a revoke signed before its revoker\'s cutoff stands, whichever arrives first, when the revoker\'s revoke ratifies it', () => {
     const ANC2 = kp('anchor-2'), V2 = kp('v-2'), X = kp('x-2');
     const t = Date.now() - 10_000;
+    const rVX = grantOf('role-revoke', X, undefined, V2, t + 2, { cutoff: t + 2 });
     const recs = {
       AV: grantOf('role-grant', V2, 'validator', ANC2, t),
       AX: grantOf('role-grant', X, 'validator', ANC2, t + 1),
-      rVX: grantOf('role-revoke', X, undefined, V2, t + 2),
-      rAV: grantOf('role-revoke', V2, undefined, ANC2, t + 5),
+      rVX,
+      rAV: grantOf('role-revoke', V2, undefined, ANC2, t + 5, { cutoff: t + 5, ratify: [rVX.sig] }),
+      rAVbare: grantOf('role-revoke', V2, undefined, ANC2, t + 5, { cutoff: t + 5 }),
     };
-    for (const order of [['AV', 'AX', 'rVX', 'rAV'], ['AV', 'AX', 'rAV', 'rVX']]) {
+    for (const [order, role] of [[['AV', 'AX', 'rVX', 'rAV'], 'participant'], [['AV', 'AX', 'rAV', 'rVX'], 'participant'], [['AV', 'AX', 'rVX', 'rAVbare'], 'validator'], [['AV', 'AX', 'rAVbare', 'rVX'], 'validator']]) {
       const store = new RoleGrantStore({ anchor: { nodeId: ANC2.nodeId, publicKey: ANC2.pub } });
       for (const k of order) assert.strictEqual(store.record(recs[k]).stored, true, `${order.join(' ')}: ${k}`);
-      assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), 'participant', `${order.join(' → ')}: the revoke stands`);
+      assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), role, `${order.join(' → ')}`);
     }
   });
 
   it('a revoke signed at or after its revoker\'s cutoff has no effect, whichever arrives first', () => {
     const ANC3 = kp('anchor-3'), V3 = kp('v-3'), W3 = kp('w-3');
     const t = Date.now() - 100_000;
+    const rVW = grantOf('role-revoke', W3, undefined, V3, t + 20, { cutoff: t + 20 });
     const recs = {
       AV: grantOf('role-grant', V3, 'validator', ANC3, t),
       AW: grantOf('role-grant', W3, 'validator', ANC3, t + 1),
-      rVW: grantOf('role-revoke', W3, undefined, V3, t + 20),
-      // The anchor revoked V3 at t+30, withdrawing its trust from t+10.
-      rAV: grantOf('role-revoke', V3, undefined, ANC3, t + 30, { cutoff: t + 10 }),
+      rVW,
+      // The anchor revoked V3 at t+30, withdrawing its trust from t+10, and (wrongly) lists rVW.
+      rAV: grantOf('role-revoke', V3, undefined, ANC3, t + 30, { cutoff: t + 10, ratify: [rVW.sig] }),
     };
     for (const order of [['AV', 'AW', 'rVW', 'rAV'], ['AV', 'AW', 'rAV', 'rVW']]) {
       const store = new RoleGrantStore({ anchor: { nodeId: ANC3.nodeId, publicKey: ANC3.pub } });
@@ -257,7 +265,7 @@ describe('C. a revoke carries a cutoff: what the revoked node signed before it s
     assert.strictEqual(store.vouchedKey(own.nodeId), undefined);
   });
 
-  it('p2b-node: at the node, a grant a revoked validator dated after its cutoff is not stored or relayed, and records forged under it are refused', async () => {
+  it('p2b-node: at the node, a grant a revoked validator dated after its cutoff confers nothing and binds no key, and records forged under it are refused', async () => {
     const ANCN = identity('anchor-n');
     const b = mk('p2b', { anchor: { nodeId: ANCN.nodeId, publicKey: ANCN.publicKey }, room: 'r' });
     try {
@@ -272,7 +280,8 @@ describe('C. a revoke carries a cutoff: what the revoked node signed before it s
       deliver(b, s, g({ type: 'role-grant', grantee: b.nodeId, role: 'validator', grantedBy: VV.nodeId, grantedAt: t0 + 1001, granteeKey: AT.publicKey }, VV.privateKey));
       assert.strictEqual(b._roster.source(HH.nodeId), undefined);
       assert.strictEqual(b._roster.source(b.nodeId), 'self');
-      assert.strictEqual(b._roleGrants.size(), 2, 'only the anchor\'s two');
+      assert.strictEqual(b._roleGrants.size(), 4, 'kept, as verifiable records (final re-review ruling A); they confer nothing');
+      assert.strictEqual(b.resolveRole(HH.nodeId, Date.now(), { key: AT.publicKey }), 'participant');
       const hooked = [];
       b.on('verified-record', (e) => hooked.push(e));
       deliver(b, s, { type: 'cmb', cmb: signedRecord({ ...HH, publicKey: AT.publicKey, privateKey: AT.privateKey }, { categories: { focus: 'forged as H' }, room: 'r' }) });
@@ -311,10 +320,11 @@ describe('D. no shared budget before verification; bounds (cs-review-B, cs-revie
     let depthReached = 0;
     for (let d = 1; d <= 24; d++) {
       const g = kp(`l${d}`);
-      if (s.record(grantOf('role-grant', g, 'validator', prev, t + d)).stored) depthReached = d;
+      assert.strictEqual(s.record(grantOf('role-grant', g, 'validator', prev, t + d)).stored, true, 'verifiable: kept, its effect decided at resolution');
+      if (s.resolveRole(g.nodeId, g.pub, Date.now()) === 'validator') depthReached = d;
       prev = g;
     }
-    assert.strictEqual(depthReached, 8, 'the 9th link is not rooted');
+    assert.strictEqual(depthReached, 8, 'the 9th link confers nothing');
     const B = kp('anchor-c');
     const st = new RoleGrantStore({ anchor: { nodeId: B.nodeId, publicKey: B.pub } });
     const chain = [kp('c0')];
@@ -728,7 +738,10 @@ describe('the rest of the review (cs-review-B/p11-cli-compact, node-level attest
       const inWindow = { by: V.nodeId, at: t0 + 1000 };
       assert.strictEqual(node._attesterRole(inWindow), 'validator', 'signed while V was a validator: it counts');
       node._roleGrants.record(signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: ANCN.nodeId, grantedAt: t0 + 50_000, cutoff: t0 + 2000 }, ANCN.privateKey));
-      assert.strictEqual(node._attesterRole(inWindow), 'validator', 'and, signed before the cutoff, keeps its standing after V is revoked, for every receiver');
+      assert.strictEqual(node._attesterRole(inWindow), 'participant', 'V no longer holds rank, and nothing ratified it (final re-review ruling B)');
+      const ratified = { ...inWindow, sig: 'Q'.repeat(85) + 'A' };
+      node._roleGrants.record(signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: ANCN.nodeId, grantedAt: t0 + 50_001, cutoff: t0 + 2000, ratify: [ratified.sig] }, ANCN.privateKey));
+      assert.strictEqual(node._attesterRole(ratified), 'validator', 'one the anchor ratified keeps its standing, for every receiver');
       const backdated = { by: V.nodeId, at: t0 + 3000 };
       assert.strictEqual(node._attesterRole(backdated), 'participant', 'one dated at or after the cutoff never counts, whenever it was signed (re-review N2)');
     } finally { await stopAll(node); }

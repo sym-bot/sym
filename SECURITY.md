@@ -54,22 +54,32 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   `lineage.method`) are dropped, and what is stored, delivered and served is the projection.
   Directed versus room-bound delivery is decided by the signed `metadata.to`, never by a relay
   envelope; a directed record older than 24 h by its signed time is refused.
-- **Authority follows the key; a revoke carries a cutoff.** A role grant must name `granteeKey`; it
-  confers its role only on that key, and a chain is verified top-down with each grant's vouched key.
-  A revoke signs a cutoff (by default its own time; a revoker may set it earlier, back to when the
-  revoked node stopped being trustworthy, but never before the revoker itself held rank). What the
-  revoked node signed before its cutoff — grants, key vouches, revokes, attestations — counts by
-  its rank when signed, for every node whenever it arrives; what it signed at or after the cutoff
-  never counts. When a node received a statement is no part of the rule, so nodes that learn a
-  history in different orders resolve the same authority. A grant also confers only while its
-  grantor still holds rank (MMP §6.6's cascade). A grantor whose nodeId an impostor holds keeps
-  exactly its vouched authority; the impostor gets none.
+- **Authority follows the key, and every node that holds the same grants resolves the same
+  authority.** A role grant must name `granteeKey`; it confers its role only on that key, and a chain
+  is verified top-down with each kept grant's vouched key. A store keeps every grant or revoke whose
+  signature it can verify, and decides its effect only when it resolves a role, so what it keeps
+  and what it resolves depend on the records it holds, never on the order they arrived in
+  (docs/WIRE-0.14.0.md §6).
+- **A revoke carries a cutoff, and a revoked key gains nothing by backdating.** Every revoke this
+  release signs names its cutoff (no default). What the revoked node signed at or after the cutoff
+  never counts. What it signed before the cutoff counts only while it still holds the rank the
+  statement needs, or when an effective revoke of it ratifies that statement by its signature (the
+  revoker lists the statements that stay valid). So a key signing after its revoke, dated before it,
+  achieves nothing. A revoker counts only if it held the rank at every point from its cutoff to its
+  signed time. A grant also confers only while its grantor still holds rank (MMP §6.6's cascade),
+  unless ratified. An attestation counts with its signer's role when it signed, by the same rule,
+  and one dated before the record it attests is refused. A grantor whose nodeId an impostor holds
+  keeps exactly its vouched authority; the impostor gets none.
 - **A forgery in a session's own name ends the session.** A statement that names the session's own
   peer as its signer and does not verify under the key that session proved closes it, and its
   nodeId is not admitted again for 60 s. A statement the session relays for another signer is
   verified under this node's binding for that signer, which may differ from the relayer's (a local
   view); one that fails is dropped and counted (`relayed-signature-unverified`), and the relayer is
-  not charged.
+  not charged. Not charging it does not make forgeries free: each session's records spend a
+  verification lane (32 a second, burst 128) before any work is done on them, and once 8 of one
+  peer's statements for one signer have failed within a minute, that peer's statements for that
+  signer are dropped unverified for the rest of the minute. A refused record is logged and recorded
+  in the decision log at most once a minute per peer and reason.
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
@@ -77,17 +87,26 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
   nobody.
-- **Moved, not copied.** `sym node export` holds the identity's lock, tombstones the node before
-  its encrypted bundle exists (so the source refuses to start it), signs the bundle with the node's
-  key, and once the bundle is durable removes the private key from the source and the 0.13 path to
-  it; `sym node import` verifies the bundle against an explicit pin and the node's signature, and
-  refuses a re-keyed or altered bundle.
+- **Moved, and copied only when asked.** `sym node export` refuses while the node runs (in another
+  process or this one), holds the identity's lock, tombstones the node before its encrypted bundle
+  exists (so the source refuses to start it), signs the bundle with the node's key, and once the
+  bundle is durable removes the private key from the source and the 0.13 path to it. By default the
+  bundle is sealed to the target host's key, so only that host can open it. A passphrase bundle
+  opens on any host that has the passphrase, so it is a copy, and is made only with
+  `--allow-copies`. `sym node import` checks the bundle's header against an explicit pin and the
+  node's signature before it uses anything the header says, verifies the contents the same way,
+  refuses a re-keyed or altered bundle, a bundle this host imported before, and one exported at or
+  before this host's own move of that node away (a replay), and installs nothing until everything
+  is written, keeping each file's mode.
 - **The interior.** A node's mind submits through the node's local interior socket, which lives in
   a 0700 directory the node made (a fresh one under the temp directory when the path is too long),
   with a per-mission capability bound to the first connection that presents it (another local
   process cannot replay it; the connection closing ends the mind); the node checks audience, size,
   rate, declared kinds (the kind is the signed intent) and lineage before it signs. One mind per
-  identity. On Windows the named pipe takes Node's default DACL, which sym cannot narrow, so the
+  identity. A mind reads only its own mission's view: deliveries that arrived while it runs,
+  directed ones only from nodes its mission may address, and room broadcasts; its recall returns
+  only those and its own submissions (and context the host gives the mission); it has its own
+  cursor and acks, never moves the host's inbox, and its reads are rate-limited. On Windows the named pipe takes Node's default DACL, which sym cannot narrow, so the
   socket is refused unless the host passes `{ allowDefaultPipeAcl: true }`.
 
 ## Bounds on what peers can make a node keep
@@ -100,14 +119,16 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   a newcomer is refused a durable binding and its live session still verifies what it signs. Key
   conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
   (`status().coreSecure.keyConflicts`).
-- **Role grants**: at most 65,536 grants, 1,024 per grantor and 16 per (grantor, grantee) pair
-  (the anchor's own are not limited). No cap refuses a revoke: a revoker keeps at most as many
-  revokes for one grantee as this node holds grants for it (a revoke that arrives first waits for
-  the grant through `role-chain-fetch`), so revokes are bounded by grants and a revoker can fill
-  only its own allowance; a nodeId in a grant is canonical lowercase of at most 128
-  characters, a role name at most 32. A delegation reaches at most 8 grants from the anchor, and
-  role resolution is memoised (linear in the records). A record that arrives before its root is
-  held only while its chain is fetched from the session that delivered it (`role-chain-fetch`): at
+- **Role grants**: the anchor's own records are not limited; everything else is bounded per
+  delegation subtree: everything an anchor grantee and its descendants sign shares one budget of
+  4,096 records. A compromised subtree fills only its own budget, so a revoke from another subtree
+  is never refused. Inside a full budget the records kept are chosen by one order on signed fields
+  (shallower signers first, revokes before grants, earlier cutoffs and grants first, then the
+  signature), and a record that ranks above the last one kept replaces it. A revoke lists at most
+  64 ratified statements. A nodeId in a grant is canonical lowercase of at most 128 characters, a
+  role name at most 32. A delegation reaches at most 8 grants from the anchor, and
+  role resolution is memoised. A record whose grantor no kept grant vouches is held only while its
+  chain is fetched from the session that delivered it (`role-chain-fetch`): at
   most 64 records and 64 KiB per session, for at most 10 s; a fetch names at most 16 grantors, an
   answer carries at most 64 grants, and a node answers at most 4 fetches a second per session
   (burst 16). A whole-store sync (on a differing `role-digest`) is at most 1,024 pages of 64.
@@ -159,16 +180,23 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 
 ## What it does not solve
 
-- **First contact is trust on first proven use.** Without an anchor, an invite carrying the
-  issuer's key, or a grant, the first key a session proves for a nodeId is the one bound. The
-  handshake proves possession, not intent. A nodeId that never earned a durable binding here (no
-  admitted record, no directed exchange, no pin, no grant) is first contact again once its
-  sessions end. While another key's session holds a nodeId, the genuine node is refused with 1009,
-  and a node refused with 1009 does not retry until it restarts.
-- **A cutoff is the revoker's judgement.** Statements the revoked node signed before its revoke's
-  cutoff stand, so a revoked node can still backdate a statement to before the cutoff. A revoker
-  that suspects an earlier compromise sets the cutoff earlier; nothing can tell a backdated
-  statement from a timely one.
+- **First contact is trust on first use, and one directed record makes it permanent.** A nodeId is
+  not derived from its key. Without an anchor, an invite carrying the issuer's key, or a grant, the
+  first key a session proves for a nodeId is the one this node uses for it, and the handshake
+  proves possession, not intent. Whoever reaches this node first under a nodeId and has one record
+  it signed to this node accepted (or one broadcast admitted) holds that nodeId here durably: the
+  genuine node is then refused with 1009, and a node refused with 1009 does not retry until it
+  restarts. A nodeId that never earned a durable binding is first contact again once its sessions
+  end. Pin a key out of band (an invite) where that matters. Deriving a nodeId from its key would
+  remove the squat; it is a future MMP change, not this release.
+- **A ratification is the revoker's judgement.** A revoked node's statements before its cutoff
+  stand only if its revoker ratified them, so a revoker that ratifies too much keeps them standing,
+  and one that ratifies too little voids honest ones. The revoker sees what it holds
+  (`node.roleStatementsBy`).
+- **The kept set can lag after a reshaped tree.** Records are chosen within a budget from the
+  records held; one refused for its budget is not kept for later. If a signer later gains a
+  shallower chain through another subtree, records refused earlier in the budget it left return
+  only when a peer offers them again (the next whole-store sync after two nodes' digests differ).
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no
@@ -178,7 +206,9 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   possession, MMP spec PR meshcognition-website#20) is drafted, not implemented.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.
 - **The local machine.** Identity files are readable by any process running as the same user.
-  Operating-system isolation is out of scope.
+  Operating-system isolation is out of scope. The daemon's IPC socket trusts the same user the same
+  way: any process running as that user can connect to it and act as the daemon's node (remember,
+  send, recall); it is not a boundary between processes of one user.
 - **Legacy Import is weaker, and temporary.** A route to a 0.13 node uses the legacy encryption
   (X25519 + AES-256-GCM: this node's per-session key against the routed node's pinned persistent
   key — no forward secrecy, no transcript proof). A 0.13 hello proves nothing, so over the relay a

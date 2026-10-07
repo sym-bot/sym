@@ -52,7 +52,8 @@ describe('node earned-authority wiring (EA2/EA3)', () => {
       const g = node.grantRole(peer, 'validator');
       assert.ok(g && g.sig, 'grant is signed');
       assert.strictEqual(node.resolveRole(peer), 'validator', 'grantee resolves to validator');
-      const revoke = node.revokeRole(peer);
+      assert.throws(() => node.revokeRole(peer), (e) => e.code === 'ECUTOFF', 'a revoke names its cutoff: there is no default (final re-review ruling B)');
+      const revoke = node.revokeRole(peer, { cutoff: Date.now() });
       assert.ok(revoke && revoke.type === 'role-revoke');
       assert.strictEqual(node.resolveRole(peer), 'participant', 'revoked → participant');
     } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }

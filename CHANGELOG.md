@@ -13,6 +13,60 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### The final re-review of f0d936a (BLOCK) — what changed
+
+The founder ruled three design changes; each is made where its assumption was, and the rule is in
+`docs/WIRE-0.14.0.md` §6 and §7 and the design doc (branch `design/0.14.0-core-secure-identity`).
+
+- **The kept grant set is a function of the records held (ruling A; Findings 1 and 2).** The store
+  decided at ingest whether a record was rooted and capped records per grantor, per pair and in
+  all, so two honest nodes holding the same records kept different subsets by arrival order, their
+  digests never matched, and every session between them ran a whole-store sync; and a revoker could
+  not tighten its cutoff (`nothing-to-revoke`). Now every verifiable record is kept (its signature
+  verifies under the anchor's key or a key a kept grant vouches) and its effect is decided at
+  resolution; `unrooted` and `nothing-to-revoke` are gone. Records are bounded by a budget per
+  delegation subtree (everything an anchor grantee and its descendants sign: 4,096 records; the
+  anchor's own unbounded), which replaces the per-grantor, per-pair and store caps: a compromised
+  subtree fills only its own budget, and a revoke from another subtree is never refused. Inside a
+  full budget the records kept are chosen by one order on signed fields, and a record that ranks
+  higher replaces the last one kept (`outranked`).
+- **The anchor ratifies; a revoked key gains nothing by backdating (ruling B; Finding 4).** With a
+  cutoff alone, a key revoked on day 20 could sign a revoke dated day 2 and it counted for everyone.
+  Now `revokeRole(id, { cutoff, ratify })` requires the cutoff (no default; `ECUTOFF`), and a revoke
+  may list (`ratify`, signed, at most 64) the revoked node's earlier statements that stay valid. Any
+  other statement it signed before the cutoff counts only while it still holds the rank it needs.
+  A revoker is checked at every breakpoint from its cutoff to its signed time (Low 8a). An
+  attestation dated before the record it attests is refused, and counts with its signer's role when
+  signed by the same rule. `node.roleStatementsBy(id, before)` lists what a revoker may ratify.
+- **The interior read side is scoped to the mind's mission (ruling C; Finding 6).** A mind for
+  mission B read mission A's deliveries and notes through `deliveries` and `recall`, and its drain
+  moved the host's inbox cursor. Each mind now has its own view (deliveries that arrived while it
+  runs: directed ones only from its mission's `allowTo`, and room broadcasts), its own cursor and
+  acks; `recall` returns only that view, its own submissions and the mission's `context`; a
+  `parents` key outside it is refused as if absent; reads are rate-limited (10 a second, burst 20);
+  `node.inbox()` is never moved by a mind.
+- **Relayed forgeries cost bounded work (Finding 3).** Each session's records spend a verification
+  lane (32 a second, burst 128) before any work; a peer whose statements for one signer fail 8 times
+  in a minute has its statements for that signer dropped unverified for the rest of the minute
+  (`relayed-signer-muted`), without blame; a refusal is logged and written to the decision log at
+  most once a minute per peer and reason.
+- **First contact is said as it is (Finding 5).** SECURITY.md and the README state that a nodeId is
+  not derived from its key, so first contact is trust on first use, and one accepted directed record
+  makes it permanent; key-derived nodeIds are a future MMP change.
+- **Relocation (Finding 7).** A same-process re-acquire of an identity lock returns a release that
+  does nothing while the first holder holds it, a never-started node's `stop()` releases its lock,
+  and export refuses while a node in this process holds the identity. A bundle is sealed to the
+  target host by default; a passphrase bundle opens on any host with the passphrase, so it is a copy
+  and needs `copyable: true` (`--allow-copies`). Import checks the clear header (now carrying the
+  node's key and its own signature) against the pin before it uses the header's scrypt parameters
+  (also bounded), refuses a bundle this host imported before (`consumed-bundles.jsonl`) and one
+  exported at or before this host's own tombstone of the node, stages everything and renames it
+  into place last (a refused import installs nothing), and keeps file modes.
+- **Lows.** `send()` throws `EBADTO` for a `to` that is not a lowercase UUID, as `remember()` does;
+  `sym emit` releases the identity's lock when it cannot connect; stale comments are corrected;
+  `valence` and `arousal` are gone from the README, the CLI and SKILL.md (they are unsigned, and
+  peers drop them); SECURITY.md says the daemon's IPC socket trusts every process of the same user.
+
 ### The re-review at 72daeb6 — what changed
 
 Five findings and the open leads, each fixed where its assumption was made (the design is
@@ -28,7 +82,8 @@ for the spec PRs is `docs/WIRE-0.14.0.md` §6 and §7):
   key that failed is the key it proved; any other failure is dropped and counted
   (`relayed-signature-unverified`), never charged to the relayer.
 - **A revoke carries a cutoff; receipt time is no part of authority (N2; replaces draft spec PR
-  #33's both-times rule).** The both-times rule voided a genuine revoke for every node that received
+  #33's both-times rule; refined by the final re-review above: the cutoff has no default, and what
+  a revoked node signed before it stands only if ratified).** The both-times rule voided a genuine revoke for every node that received
   it after its revoker was itself revoked (a newcomer, an anti-entropy sync, a store upgraded from
   0.13), so authority depended on arrival order. Now a `role-revoke` signs a `cutoff` (by default its
   own time; `revokeRole(id, { cutoff })` sets an earlier one, never before the revoker held rank):
@@ -41,7 +96,8 @@ for the spec PRs is `docs/WIRE-0.14.0.md` §6 and §7):
   node's further directed records to it, while the genuine peer, refused with 1009, did not retry.
   A verified record its author signed to this node, accepted for delivery (surfaced, stored or not),
   now earns the binding, as an admitted record does.
-- **No cap refuses a revoke (N4).** The per-grantor, per-pair and store caps refused revokes too,
+- **No cap refuses a revoke (N4; the mechanism below is replaced by the final re-review's budget
+  per delegation subtree).** The per-grantor, per-pair and store caps refused revokes too,
   so past them a grant could no longer be revoked except by the anchor, and a validator filling the
   store with sybil grants stopped every honest revoke. The caps now bound grants only; a revoker
   keeps at most as many revokes for a grantee as this node holds grants for it (`nothing-to-revoke`
@@ -89,7 +145,7 @@ Seven design assumptions, each changed where it was made, not patched where it s
   node's own nodeId (one that vouches a foreign key for it is inert, and reported:
   `role-grant-foreign-self-key`); 0.13 `grant` roster entries migrate as legacy claims. Role
   resolution is memoised (linear in the records) and a delegation reaches at most 8 grants from the
-  anchor; a grantor holds at most 16 grants per grantee (was 64 records).
+  anchor (the grant caps of this round are replaced by the final re-review's budget per subtree).
 - **No shared budget is spent before verification, and a forgery ends its session (D).** Only the
   peer's own lane is spent before a signature check; the shared ceiling is spent after it. A
   signature in a session's own name that does not verify under the key it proved closes it

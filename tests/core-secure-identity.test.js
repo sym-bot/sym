@@ -79,6 +79,12 @@ describe('identities by nodeId (D9.1)', () => {
   });
 });
 
+/** Import as another host would: this host's tombstoned copy removed (one HOME stands in for two). */
+function asAnotherHost(nodeId) {
+  fs.rmSync(config.nodeDirById(nodeId), { recursive: true, force: true });
+  if (config.identityDirById(nodeId) !== config.nodeDirById(nodeId)) fs.rmSync(config.identityDirById(nodeId), { recursive: true, force: true });
+}
+
 describe('relocation (D9.2)', () => {
   it('export tombstones the source before the bundle exists; the source then refuses to start it; import verifies against a pinned key', async () => {
     const name = uniq('id-move');
@@ -90,7 +96,7 @@ describe('relocation (D9.2)', () => {
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-')), 'node.bundle');
     assert.throws(() => relocation.exportNode({ name, out }), /passphrase/, 'no sealing given: refused, and not tombstoned');
     assert.strictEqual(config.readTombstone(nodeId), null);
-    const r = relocation.exportNode({ name, out, passphrase: 'a long operator passphrase' });
+    const r = relocation.exportNode({ name, out, passphrase: 'a long operator passphrase', copyable: true });
     assert.strictEqual(r.nodeId, nodeId);
     assert.ok(config.readTombstone(nodeId), 'tombstoned');
     // Security review: once the bundle is durable the source loses the key and the 0.13 path to it.
@@ -101,7 +107,12 @@ describe('relocation (D9.2)', () => {
     assert.ok(!fs.readFileSync(out, 'utf8').includes(node._identity.privateKey), 'the private key is not in the clear');
     assert.throws(() => new SymNode({ name, silent: true, discovery: new NullDiscovery() }), (e) => e.code === 'EIDENTITYTOMBSTONED', 'the source refuses to start it');
     // Import: the wrong passphrase does not open it; no pin refuses it; the pinned key admits it.
-    assert.throws(() => relocation.importNode({ from: out, passphrase: 'not the passphrase at all' }), /does not open/);
+    assert.throws(() => relocation.importNode({ from: out, passphrase: 'not the passphrase at all', expect: { nodeId, key: pub } }), /does not open/);
+    // On this host, the very bundle of the move away is a replay (final re-review, Finding 7b).
+    assert.throws(() => relocation.importNode({ from: out, passphrase: 'a long operator passphrase', expect: { nodeId, key: pub } }), /at or before this host moved the node away/);
+    // Another host (simulated: this host's copy of the node removed).
+    fs.rmSync(config.nodeDirById(nodeId), { recursive: true, force: true });
+    if (config.identityDirById(nodeId) !== config.nodeDirById(nodeId)) fs.rmSync(config.identityDirById(nodeId), { recursive: true, force: true });
     const imported = relocation.importNode({ from: out, passphrase: 'a long operator passphrase', expect: { nodeId, fingerprint: keyFingerprint(pub) } });
     assert.strictEqual(imported.nodeId, nodeId);
     assert.strictEqual(config.readTombstone(nodeId), null, 'it lives here again');
@@ -121,7 +132,7 @@ describe('relocation (D9.2)', () => {
     await node.stop();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-'));
     const out = path.join(dir, 'node.bundle');
-    relocation.exportNode({ name, out, passphrase: 'a long operator passphrase' });
+    relocation.exportNode({ name, out, passphrase: 'a long operator passphrase', copyable: true });
     // An attacker re-keys the identity in a copy of the bundle (they cannot sign as the node).
     const { importNode } = relocation;
     const tampered = path.join(dir, 'rekeyed.bundle');
@@ -156,7 +167,7 @@ describe('relocation (D9.2)', () => {
     await node.stop();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-'));
     const out = path.join(dir, 'node.bundle');
-    relocation.exportNode({ name, out, passphrase: 'a long operator passphrase' });
+    relocation.exportNode({ name, out, passphrase: 'a long operator passphrase', copyable: true });
     const crypto2 = require('crypto');
     const open = (b) => {
       const key = crypto2.scryptSync('a long operator passphrase', Buffer.from(b.salt, 'base64url'), 32, { N: b.N, r: b.r, p: b.p, maxmem: 128 * 1024 * 1024 });
@@ -182,7 +193,8 @@ describe('relocation (D9.2)', () => {
     const { signature, ...unsigned } = plain; void signature;
     const stripped = reseal(b, key, unsigned, path.join(dir, 'stripped.bundle'));
     assert.throws(() => relocation.importNode({ from: stripped, passphrase: 'a long operator passphrase', expect: { nodeId, key: pub } }), /not signed by the node/);
-    // The genuine one imports.
+    // The genuine one imports (on another host).
+    asAnotherHost(nodeId);
     assert.strictEqual(relocation.importNode({ from: out, passphrase: 'a long operator passphrase', expect: { nodeId, key: pub } }).nodeId, nodeId);
   });
 
@@ -194,6 +206,7 @@ describe('relocation (D9.2)', () => {
     const host = relocation.hostKey();
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-')), 'node.bundle');
     relocation.exportNode({ name, out, toHostKey: host.publicKey });
+    asAnotherHost(nodeId);
     const r = relocation.importNode({ from: out, expect: { nodeId, key: pub } });
     assert.strictEqual(r.nodeId, nodeId);
   });

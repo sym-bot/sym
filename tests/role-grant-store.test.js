@@ -122,15 +122,19 @@ describe('RoleGrantStore — revocation actually contains a compromised grantor'
     const st = storeWith(A, [B, X]);
     st.record(grant('role-grant', B, 'validator', A, T));
     st.record(grant('role-revoke', B, undefined, A, T + 300));
-    // Dated before B's cutoff (here the revoke's own time), the grant is a statement that stands and is
-    // kept (re-review N2: whenever it arrives); it confers nothing while B is revoked (the cascade).
+    // Dated before B's cutoff (here the revoke's own time), the grant is kept (verifiable); it confers
+    // nothing while B is revoked.
     assert.strictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)).stored, true);
     assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'it confers nothing — backdating cannot bypass revocation');
-    // A revoke whose cutoff reaches back over B's window: a grant B dated inside it is not even kept.
+    assert.strictEqual(st.resolveRole(X.nodeId, T + 150), 'participant', 'and not back then either: B no longer holds rank and nothing ratified it (final re-review ruling B)');
+    // A revoke whose cutoff reaches back over B's window: a grant B dated inside it never counts,
+    // even if ratified.
     const st2 = storeWith(A, [B, X]);
     st2.record(grant('role-grant', B, 'validator', A, T));
-    st2.record(grant('role-revoke', B, undefined, A, T + 300, { cutoff: T + 50 }));
-    assert.deepStrictEqual(st2.record(grant('role-grant', X, 'validator', B, T + 100)), { stored: false, reason: 'unrooted' }, 'signed after B\'s cutoff');
+    const late = grant('role-grant', X, 'validator', B, T + 100);
+    st2.record(grant('role-revoke', B, undefined, A, T + 300, { cutoff: T + 50, ratify: [late.sig] }));
+    assert.strictEqual(st2.record(late).stored, true, 'kept: verifiable');
+    assert.strictEqual(st2.resolveRole(X.nodeId, T + 500), 'participant', 'signed after B\'s cutoff');
   });
 
   it('revoking a grantor cascades to everything it granted', () => {

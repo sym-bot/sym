@@ -525,7 +525,7 @@ function handleIPCMessage(socketId, socket, msg) {
           motivation: 'mesh communication',
           commitment: msg.message.slice(0, 120),
           perspective: `${node.name}, direct message`,
-          mood: { text: 'neutral', valence: 0, arousal: 0 },
+          mood: { text: 'neutral' },
         });
         sendIPC(socket, { type: 'result', action: 'send', peers: node.peers().length });
       }

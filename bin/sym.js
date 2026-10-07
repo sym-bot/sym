@@ -32,7 +32,7 @@ const { recordCreatedBy } = require('../lib/record');
  *   sym keys <name> [conflicts]       # Key registry: bindings and conflicts (Core Secure, 0.14)
  *   sym keys <name> resolve <nodeId> <key>    # Operator: bind nodeId to key (pinned), clearing its conflicts
  *   sym keys <name> reset-floor <nodeId>      # Operator: let a Legacy Import route be used again
- *   sym node export <name> --out <file> (--passphrase-env VAR | --to-host <x25519 pub>)
+ *   sym node export <name> --out <file> (--to-host <x25519 pub> | --passphrase-env VAR --allow-copies)
  *   sym node import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR]
  *   sym node host-key                 # This host's X25519 key for receiving node bundles
  *   sym logs                          # Tail daemon logs
@@ -172,8 +172,10 @@ function cmdNode() {
       return;
     }
     if (sub === 'export') {
-      const r = relocation.exportNode({ name: args[2], out: flagValue('--out'), passphrase: passphrase(), toHostKey: flagValue('--to-host') || undefined });
-      console.log(`exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.`);
+      // Sealed to the target host by default; a passphrase bundle opens on any host with the passphrase,
+      // so it is a copy, and needs --allow-copies (final re-review, Finding 7b).
+      const r = relocation.exportNode({ name: args[2], out: flagValue('--out'), passphrase: passphrase(), toHostKey: flagValue('--to-host') || undefined, copyable: args.includes('--allow-copies') });
+      console.log(`exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.${flagValue('--to-host') ? '' : ' The bundle is a passphrase bundle: any host with the passphrase can import it.'}`);
       return;
     }
     if (sub === 'import') {
@@ -186,7 +188,7 @@ function cmdNode() {
     console.error(err.message);
     process.exit(1);
   }
-  console.error('usage: sym node (export <name> --out <file> (--passphrase-env VAR | --to-host <pub>) | import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR] | host-key)');
+  console.error('usage: sym node (export <name> --out <file> (--to-host <pub> | --passphrase-env VAR --allow-copies) | import <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…) [--passphrase-env VAR] | host-key)');
   process.exit(1);
 }
 
@@ -501,7 +503,7 @@ function cmdPublish() {
   const content = parsed.positional.join(' ');
 
   if (!content) {
-    console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
+    console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"..."},...}\'');
     console.error('  The calling agent (LLM) extracts CAT7 categories. The protocol does not parse raw text.');
     console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
     console.error('  --name:       mesh identity for standalone mode. REQUIRED (or set SYM_NODE_NAME).');
@@ -588,7 +590,7 @@ function cmdPublish() {
  * repeated calls with the same --name resolve to the same nodeId.
  *
  * Ships CAT7 category vectors via SymNode's internal encoder — the caller
- * only needs to supply text (and valence/arousal for mood).
+ * only needs to supply text.
  */
 async function standaloneObserve(categories, opts) {
   const { SymNode } = require('..');
@@ -1287,11 +1289,11 @@ ${bold('CAT7 categories:')}
   motivation    Reasons, drivers, incentives
   commitment    Who will do what, by when
   perspective   Whose viewpoint, situational context
-  mood          { text, valence (-1..1), arousal (-1..1) }
+  mood          { text }  (valence and arousal are unsigned: peers drop them)
 
 ${bold('Examples:')}
   sym start
-  sym publish '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
+  sym publish '{"focus":"debugging auth","mood":{"text":"tired"}}'
   sym recall "energy patterns"
   sym ask "should we use UUID v7 or keep v4?"
   sym insight
@@ -1302,10 +1304,10 @@ ${bold('Daemon-less one-shot observations:')}
   # for relay credentials. Identity is stable across invocations via
   # the cached keypair in ~/.sym/nodes/<name>/.
   sym publish --standalone --name claude-code-mac \\
-    '{"focus":"resolved 3 review board tickets","mood":{"text":"focused","valence":0.3,"arousal":0.2}}'
+    '{"focus":"resolved 3 review board tickets","mood":{"text":"focused"}}'
 
   # Remix with lineage (resolve upstream tickets). --parents implies --standalone.
   sym publish --name claude-code-mac --parents cmb-876bbd483a,cmb-c0d4332a \\
-    '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
+    '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved"}}'
 `);
 }

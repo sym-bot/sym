@@ -37,7 +37,7 @@ sym listen
 Back in the first terminal, publish one observation:
 
 ```bash
-sym publish '{"focus":"trying SYM","intent":"confirm the second terminal receives this","mood":{"text":"curious","valence":0.4,"arousal":0.3}}'
+sym publish '{"focus":"trying SYM","intent":"confirm the second terminal receives this","mood":{"text":"curious"}}'
 ```
 
 The listening terminal should receive the typed observation with its source. No API key is required for this wire test.
@@ -143,9 +143,10 @@ participant.
   envelopes and ciphertext. There is no long-lived encryption key to steal later.
 - **Authority follows the key.** A role grant names the key it confers authority on, and a
   grant chain is checked with the keys each grant vouches, from the anchor down. A revoke signs a
-  cutoff: what the revoked node signed before it stands for every node, and what it signed from
-  the cutoff on never counts, so every node resolves the same authority whatever order it learned
-  the history in.
+  cutoff: what the revoked node signed from the cutoff on never counts, and what it signed before
+  counts only if the revoker ratified it (or the node still holds its rank), so a revoked key gains
+  nothing by backdating. Nodes holding the same grants keep the same ones and resolve the same
+  authority, whatever order they learned them in.
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
   evaluation on every record it hears and stores only what it admits.
 - **Bounded.** Every store a peer can feed — key bindings, grants, wake channels, gossip, relay
@@ -157,9 +158,10 @@ What this does not solve, said plainly:
   proven use*: the handshake proves the peer holds the key it presents, not that the key is
   the one you meant. Pin it out of band (an invite carries the issuer's key) when that matters.
   A node whose records yours never admitted, and that never signed a record to yours, is first contact
-  again once it leaves.
-- **A revoke's cutoff is a judgement.** A revoked node can still date a statement before its
-  cutoff, and that statement stands; set the cutoff back to when you stopped trusting it.
+  again once it leaves; and whoever reaches yours first under a nodeId and has one record accepted
+  holds that nodeId there for good (a nodeId is not derived from its key).
+- **A ratification is a judgement.** A revoked node's earlier statements stand only where its
+  revoker lists them; list too much and they stand, too little and honest ones lapse.
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
   replace another node's connection (close 4004). A squatter gets no Core Secure session — it
   cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.

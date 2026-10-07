@@ -94,8 +94,8 @@ that delivered the record for the missing chain.
 ```
 
 - `grants`: at most 64 role-grant or role-revoke records, each the canonical object of its signed
-  fields only (`type, grantee, role?, grantedBy, grantedAt, granteeKey?, cutoff?, sig, sigAlg`;
-  `cutoff` on a revoke only, section 6). They are
+  fields only (`type, grantee, role?, grantedBy, grantedAt, granteeKey?, cutoff?, ratify?, sig,
+  sigAlg`; `cutoff` and `ratify` on a revoke only, section 6). They are
   ordered top-down: each record comes after the records that root its grantor, up to the anchor
   (depth at most 8). For each named grantee the answer holds the records the server holds whose
   grantee it is, revokes included, each preceded by its grantor's chain.
@@ -110,9 +110,7 @@ server's whole store:
 
 - `after`: where the page starts, in the server's sync order: the anchor's records first, then
   those of each grantor the earlier ones reach, breadth first, each grantor's own records by
-  signed time; records no chain reaches come last; and every revoke not signed by the anchor after
-  every grant, so a revoke never comes before a grant it clears (section 6). A page holds at most
-  64 records.
+  signed time; records no chain reaches come last. A page holds at most 64 records.
 - `next`: present when another page follows; the client asks for it with `after: next`. A client
   asks for at most 1,024 pages per session, one page in flight at a time.
 
@@ -125,9 +123,9 @@ it.
 - A node sends a whole-store `role-chain-fetch` when a peer's `role-digest` (section 5) differs
   from its own.
 - A node sends `role-chain-fetch` when a role grant or revoke that arrived on a session is refused
-  as `unknown-grantor-key` (no chain reaches its grantor) or `unrooted`, naming the grantor; and
-  when a revoke is refused as `nothing-to-revoke` (it arrived before the grant it clears, section
-  6), naming the revoke's grantee, whose own records the answer then carries.
+  as `unknown-grantor-key` (no record it holds vouches a key for its grantor), naming the grantor.
+  That is the only reason a verifiable record waits: no record is refused for its authority
+  (section 6).
   - It sends at most one fetch in flight per (session, grantor). Further early records for the
     same grantor join the fetch already in flight.
   - The early record is held in memory only for that fetch, as its signed fields only, under a key
@@ -148,8 +146,8 @@ it.
   own peer and the key that failed is the one the session proved; any other is dropped and counted,
   since it was verified under this node's view of its grantor's keys, which the server's may not
   share (section 7).
-- Then offers the held records again, in passes until one stores nothing (a held revoke can wait
-  for a held grant), and drops what is left. Neither the answer's grants nor the held records
+- Then offers the held records again, in passes until one stores nothing (a held record can wait
+  for another held record that vouches its grantor's key), and drops what is left. Neither the answer's grants nor the held records
   start a further fetch.
 - A fetch that is not answered within 10 s, or whose session closes, releases its held records.
   They are dropped.
@@ -241,69 +239,106 @@ nothing and what is new is relayed once. A digest is a hint: nothing is taken on
 
 ---
 
-## 6. The revoke's `cutoff`: authority without receipt time (replaces draft spec PR #33's rule)
+## 6. Grants and revokes: what is kept, and what counts (replaces draft spec PR #33's rule)
 
-**Why.** A signer's date is its own to write, so a revoked validator can still sign statements
-dated inside its old window. Draft spec PR #33 counted a statement only if its signer was
-authorised both at its signed time and when the receiver received it. That fails open for late
-receivers: a validator V legitimately revokes W on day 1, the anchor revokes V on day 3, and every
-node that receives V's revoke after day 3 (a new node, an anti-entropy sync, a store upgraded from a
-version that kept no receipt times) restores W's authority, while the nodes online on day 1 do not.
-Authority then depends on arrival order, and the mesh disagrees. sym 0.14.0 replaces the receipt
-time with a date the revoker signs. (The founder's ruling, 2026-10.)
+**Why.** Two things went wrong in 0.14.0's first two designs, and both made the mesh disagree.
+Draft spec PR #33 counted a statement only if its signer was authorised both at its signed time and
+when the receiver received it, so nodes that received a genuine revoke at different times resolved
+different authority. Its first replacement still decided at ingest whether a record was rooted, and
+bounded records with caps that refused newcomers, so two nodes holding the same records kept
+different subsets depending on arrival order, their digests never matched, and every session between
+them ran a whole-store sync. The rule below makes the kept set and the resolved authority functions
+of the records held: no receipt time, no arrival order. (The founder's rulings, 2026-10.)
 
-**Field.** A `role-revoke` carries `cutoff`: an integer, milliseconds since the epoch, with
-`0 <= cutoff <= grantedAt`. It is signed: the §6.5 grant payload gains `|<cutoff>` (decimal) at its
-end, appended only when the revoke carries one:
+### 6.1 Fields
+
+A `role-revoke` carries:
+
+- `cutoff`: an integer, milliseconds since the epoch, `0 <= cutoff <= grantedAt`: the time from
+  which the revoked node is no longer trusted. sym 0.14.0 requires it on every revoke it signs
+  (`revokeRole(nodeId, { cutoff })` has no default). A revoke without one (0.13) has
+  `cutoff = grantedAt`.
+- `ratify` (optional): the revoked node's statements that stay valid, as their canonical signatures
+  (86 unpadded base64url characters), sorted ascending, no repeats, 1 to 64 entries. Only on a revoke
+  that carries `cutoff`. A revoker that must ratify more issues several revokes; each counts.
+
+Both are signed. The §6.5 grant payload gains `|<cutoff>` at its end when the revoke carries a
+cutoff, and then `|<ratify joined by ",">` when it carries `ratify`:
 
 ```
-role-revoke|<grantee>|<role or empty>|<grantedBy>|<grantedAt>|<granteeKey or empty>|<cutoff>
+role-revoke|<grantee>|<role or empty>|<grantedBy>|<grantedAt>|<granteeKey or empty>|<cutoff>|<sig1>,<sig2>
 ```
 
-A revoke without `cutoff` signs exactly the bytes MMP v2.0 signs today, and its cutoff is its
-`grantedAt`. A `cutoff` on a `role-grant`, a cutoff after `grantedAt`, a revoke `granteeKey` that is
-neither empty (absent) nor an unpadded base64url Ed25519 key (43 characters), or a `role` containing `|` makes the record
-malformed (so no two records sign the same bytes). sym 0.14.0 puts a cutoff on every revoke it
-signs: `revokeRole(nodeId, { cutoff })`, by default the revoke's own time.
+A revoke without `cutoff` signs exactly the bytes MMP v2.0 signs today. Malformed: a `cutoff` or
+`ratify` on a `role-grant`; a cutoff after `grantedAt`; `ratify` without `cutoff`, empty, unsorted,
+repeated, over 64 entries or holding anything but a canonical signature; a revoke `granteeKey` that
+is neither empty nor a 43-character key; a `role` containing `|`. So no two records sign the same
+bytes.
 
-**The rule** (for §6.6). For a node N holding key K, its role at time T is resolved, not stored:
+### 6.2 What is kept: a deterministic function of the records held
+
+1. **Verifiable.** A record is kept only when its signature verifies under the anchor's configured
+   key (its grantor is the anchor) or under a key that a kept `role-grant` vouches for its grantor
+   (`granteeKey`). Whether the grantor had authority is not asked here: a verifiable record is kept
+   and its effect is decided at resolution (6.3), so no record is refused for an order in which
+   records happened to arrive. A record whose grantor no kept grant vouches is refused
+   (`unknown-grantor-key`) and held for a `role-chain-fetch` (section 3).
+2. **Depth and subtree.** The anchor signs at depth 0. A grant kept at depth d makes its
+   (grantee, granteeKey) a signer at depth d + 1, in the subtree of the anchor grantee at the top of
+   that chain. A signer reachable by several chains takes the shallowest, then the one whose subtree
+   root has the smallest nodeId.
+3. **Budget per delegation subtree.** The anchor's own records are not bounded. Every other record
+   counts against the subtree of its signer: everything an anchor grantee and its descendants sign
+   shares that one budget (sym: 4,096 records). One subtree, however compromised, cannot fill
+   another's budget, so a revoke signed in another subtree is never refused by it.
+4. **Selection.** Inside a subtree the kept records are the first, up to the budget, in this total
+   order on signed fields: the signer's depth (shallower first); revokes before grants; a revoke's
+   cutoff, or a grant's `grantedAt` (earlier first); the canonical signature (smaller first). A
+   record that loses is replaced: a record that ranks above the last one kept takes its place, and
+   one that ranks below it is refused (`outranked`). Several revokes by one revoker for one grantee
+   are all kept while they fit; the earliest cutoff is the one that matters, so a revoker can always
+   tighten its cutoff by signing another revoke.
+5. **Equal stores.** Two nodes that hold the same records keep the same records and give the same
+   `role-digest`, whatever order they learned them in.
+
+Selection is computed over the records held: a record refused or replaced is not kept for later.
+Where a later grant gives a signer a shallower chain through another subtree, that signer's
+records move between budgets, and a record refused earlier in the budget they left is not
+reconsidered until a peer offers it again (the next whole-store sync after `role-digest`s differ).
+
+### 6.3 What counts: resolution
+
+For a node N holding key K, its role at time T is resolved from the kept records. "Now" is the
+resolving node's clock.
 
 1. The anchor holding its configured key is `anchor`.
-2. Otherwise take N's grants with `granteeKey` = K and `grantedAt <= T`, and N's revokes with
+2. Otherwise take N's grants with `granteeKey = K` and `grantedAt <= T`, and N's revokes with
    `cutoff <= T`. Replay them in `grantedAt` order (a revoke at its own `grantedAt`, even when that
-   is after T), starting from `participant`.
-3. A grant G by grantor P confers G's role if P, holding the key that signed G, resolves to a rank
-   at least G's role both at `G.grantedAt` and at T. (The second is §6.6's cascade: revoking a
-   grantor withdraws what it granted, for as long as it stays revoked.)
-4. A revoke R by revoker Q clears the role to `participant` if Q, holding the key that signed R,
-   resolves to `validator` or above, and to at least the role being cleared, both at `R.grantedAt`
-   and at `R.cutoff`. A revoker reaches back only over time it was itself authorised for.
-5. A rank is 0 when the resolved node already sits at the delegation depth (8, draft spec PR #36).
+   is after T), from `participant`.
+3. **Every statement by a signer S (key k), signed at s, counts only if S held the rank it needs at
+   s** (a revoke of S whose cutoff is at or before s has already cleared S there, so a statement
+   S signs at or after its cutoff never counts), **and either S still holds that rank now, or an
+   effective revoke of S ratifies it** (lists its signature, with s before that revoke's cutoff).
+   So a revoked key gains nothing by backdating: what it signs after its revoke, dated before its
+   cutoff, is not ratified and its signer no longer holds rank.
+4. A grant G by S confers G's role if step 3 holds and, unless G is ratified, S holds at least G's
+   role at T as well (§6.6's cascade). A ratified grant keeps conferring after its grantor's
+   revoke.
+5. A revoke R by revoker Q clears N to `participant` if step 3 holds for R and Q's rank is at least
+   `validator`, and at least the role being cleared, **at every time from R's cutoff to R's signed
+   time** (roles change only where some record's time is crossed, so it is checked at each of those
+   breakpoints in that span): a revoker reaches back only over time it was itself authorised for. An
+   effective revoke is one for which this holds; only an effective revoke ratifies.
+6. A rank is 0 when the resolved node already sits at the delegation depth (8, draft spec PR #36).
    Cycles and chains that do not reach the anchor confer nothing.
 
-Every time in the rule is a signed time. Nothing depends on when a node received a record, so two
-nodes holding the same records resolve the same role, whatever order they learned them in.
+Every time in the rule is a signed time, or now. Nothing depends on when a node received a record.
 
-**What follows.**
-- A statement the revoked node signed **before** the cutoff (a grant, a key vouch, a revoke, an
-  attestation, each judged at its own signed time) stands, for every receiver, whenever it
-  arrives. A grant among them still confers only while its grantor holds rank (step 3).
-- A statement it signed **at or after** the cutoff never counts, even at times before the revoke
-  itself was signed: that is what stops backdating. The revoker chooses how far back trust is
-  withdrawn; nothing can tell a backdated statement before the cutoff from a timely one.
-- An attestation's signer counts with its role at the attestation's signed time.
-
-**Keeping a record.** A grant or revoke is kept (and relayed once) only when it is rooted: its
-grantor held the rank it needs (a grant: the rank it confers; a revoke: `validator`) at its signed
-time, and for a revoke at its cutoff too. A record from a grantor revoked later stays kept, and
-the resolution above decides its effect.
-
-**Revokes are never refused by a cap.** Grants are bounded per grantor, per (grantor, grantee) and
-in all. A revoke is not: a revoke refused by a full store would leave authority standing. Instead,
-a revoker other than the anchor keeps at most as many revokes for a grantee as the node holds
-grants for that grantee (`nothing-to-revoke` past that). A revoke that arrives before any grant it
-could clear is held for a `role-chain-fetch` naming its grantee (section 3), and the whole-store
-sync sends grants before revokes.
+**Attestations.** An attestation's signer counts with its role at the attestation's signed time,
+under step 3: if it no longer holds that role now and no effective revoke of it ratifies the
+attestation (by its signature), it counts as `participant`. An attestation dated before the attested
+record's signed `createdTimestamp` is refused where the record is known (it attests to what did not
+yet exist).
 
 ---
 
@@ -320,3 +355,13 @@ nodeId for 60 s) only when the statement names the session's own proven peer as 
 key that failed is the key that session proved. Any other statement that fails is dropped, counted
 and never charged to the session that delivered it. Its frame is not marked seen, so a genuine copy
 from another peer is still taken.
+
+**Cost.** Not charging a relayer must not make forgeries free. A receiver therefore:
+- spends a per-session record lane before it does any work on a record (sym: 32 a second, burst
+  128), as it spends a per-peer gossip lane before verifying a statement; past it, records are
+  dropped unverified and unmarked;
+- counts, per (delivering peer, named signer), the statements that failed under its binding for
+  that signer: past 8 in a minute, that peer's statements for that signer are dropped unverified
+  until the minute ends. The peer is not blamed and its other statements are taken;
+- says each refused record at most once a minute per peer and reason, and records it in its
+  decision log at most as often.
