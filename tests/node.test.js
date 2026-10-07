@@ -471,6 +471,66 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
+  // THE RELAY RE-ANNOUNCES A PEER THIS NODE ALREADY HOLDS (7 Oct 2026, xmesh-world-room): a cloud peer that
+  // reconnected to the relay is announced again while its old relay transport is still registered and idle.
+  // The prior reads as stale and is replaced. A RelayPeerTransport emits 'close' synchronously, so with the
+  // prior still registered its handler removed the peer, nulled peer.transport and emitted peer-left; the
+  // caller re-added the same peer object with transport null, and from then on every send and broadcast in
+  // the room threw "Cannot read properties of null (reading 'send')", and stop() threw on 'close'.
+  it('a relay peer announced again over the relay keeps a live transport; the room can still send', async () => {
+    const { RelayPeerTransport } = require('../lib/transport');
+    const name = `test-relay-reannounce-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    const left = [];
+    node.on('peer-left', (e) => left.push(e));
+    const ws = { readyState: 1, sent: [], send(d) { this.sent.push(d); } };
+
+    const first = new RelayPeerTransport(ws, 'peer-cloud');
+    const peer = node._createPeer(first, 'peer-cloud', 'cloud-peer', true, 'relay');
+    node._addPeer(peer);
+    peer.lastSeen = Date.now() - 5000;   // idle: the registered relay transport reads as stale
+
+    const again = new RelayPeerTransport(ws, 'peer-cloud');
+    const back = node._createPeer(again, 'peer-cloud', 'cloud-peer', true, 'relay');
+    if (!node._peers.has('peer-cloud')) node._addPeer(back);   // as the relay's peer-joined handler does
+
+    assert.strictEqual(node._peers.get('peer-cloud'), peer, 'the same peer, still held');
+    assert.strictEqual(peer.transport, again, 'its active transport is the new relay transport');
+    assert.strictEqual(peer.transports.get('relay'), again);
+    assert.strictEqual(left.length, 0, 'a replaced transport is not a disconnect');
+    assert.doesNotThrow(() => node._broadcastToPeers({ type: 'ping' }));
+    assert.doesNotThrow(() => node.remember({ focus: 'after the re-announce', issue: 'the room still sends', intent: 'regression check' }), 'a room send does not throw');
+
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('a LAN transport added to a peer first met over the relay becomes its active transport', async () => {
+    const { RelayPeerTransport } = require('../lib/transport');
+    const name = `test-relay-then-lan-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    const ws = { readyState: 1, send() {} };
+    const relay = new RelayPeerTransport(ws, 'peer-both');
+    const peer = node._createPeer(relay, 'peer-both', 'lan-and-relay', true, 'relay');
+    node._addPeer(peer);
+    const lan = { on() {}, send() { return true; }, close() {} };
+    node._createPeer(lan, 'peer-both', 'lan-and-relay', false, 'bonjour');
+    assert.strictEqual(peer.transport, lan, 'sends go over the LAN, not the relay (where a clear CMB is refused)');
+    await node.stop();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('stop() closes every peer and survives a peer without a transport', async () => {
+    const name = `test-stop-null-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    node._peers.set('ghost', { peerId: 'ghost', name: 'ghost', transport: null, transports: new Map() });
+    await assert.doesNotReject(() => node.stop());
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
   after(() => {
     fs.rmSync(nodeDir(nodeName), { recursive: true, force: true });
   });
