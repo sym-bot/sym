@@ -94,25 +94,24 @@ describe('inbox holder accountability (bl-a6e63608c8c, receiver half)', () => {
     });
   });
 
-  it('NEVER discards an undrained message silently when the ring overflows', async () => {
-    // A tiny ring makes the overflow reachable in a test; the semantics under
-    // test are the same ones that apply at the shipped _inboxMax.
+  it('NEVER discards an undrained message: past the unread bound a new delivery gets no id, and that is counted (inbox-id bug, 2026-10)', async () => {
+    // A tiny ring makes the bound reachable in a test; the semantics under test are the same ones that
+    // apply at the shipped _inboxMax. An announced, unread id must always fetch its record, so unread
+    // items are never evicted; past 4 x the ring, a new delivery is refused an id instead.
     await withNode('holder-overflow', async (node) => {
-      const dropped = [];
-      node.on('metric', (m) => { if (m.type === 'inbox-overflow-dropped') dropped.push(m); });
-
-      // Fill past the ring with nothing draining — the live sym-daemon-mac shape.
-      for (let i = 0; i < 5; i++) {
-        node.emit('cmb-accepted', arrival(`undrained ${i}`, { directed: i < 2 }));
+      const refused = [];
+      node.on('metric', (m) => { if (m.type === 'inbox-full-refused' || m.type === 'inbox-overflow-dropped') refused.push(m); });
+      const ids = [];
+      for (let i = 0; i < 14; i++) {
+        const e = arrival(`undrained ${i}`, { directed: i < 2 });
+        node.emit('cmb-accepted', e);
+        if (e.inboxId) ids.push(e.inboxId);
       }
-
-      assert.ok(dropped.length >= 1, 'discarding unread mail must not be silent');
-      assert.strictEqual(
-        dropped[0].directed, true,
-        'the first casualties are the oldest, which here are the DIRECTED ones',
-      );
-      assert.strictEqual(node.inboxStatus().dropped, dropped.length,
-        'the count must be answerable after the fact, not only observable live');
+      assert.strictEqual(ids.length, 12, 'unread items are held up to 4 x the ring');
+      for (const id of ids) assert.ok(node.inboxGet(id), `${id} still fetches its record`);
+      assert.ok(node.inboxGet(ids[0]).directed, 'the oldest, directed, were not the casualties');
+      assert.deepStrictEqual(refused.map((m) => m.type), ['inbox-full-refused', 'inbox-full-refused'], 'the refusals are not silent');
+      assert.strictEqual(node.inboxStatus().dropped, 2, 'and answerable after the fact');
     }, { inboxMax: 3 });
   });
 
