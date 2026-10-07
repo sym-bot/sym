@@ -124,24 +124,65 @@ ever overrides a different key**; the old code's "strictly stronger source overr
 - **Every confirmed session runs with a binding:** the key it proved, held for that nodeId while
   the session lives. That table is bounded by the session caps. A second key for a nodeId with a
   live session binding is a conflict (sealed 1009 `IDENTITY_CONFLICT`), recorded.
-- **The durable registry takes only earned bindings:** an admitted verified record, an
-  out-of-band pin (an invite, a Legacy Import route), an anchor-rooted grant in effect now (a
-  view, never stored), or the anchor. A handshake, or a second one, earns nothing, so identity
-  churn cannot fill the registry. Nothing is evicted before it expires. A newcomer to a full
-  registry keeps its session binding and gets no durable one.
-- **Residual, kept on purpose (decided by agent-a under the user's 2026-10-02 delegation):** a
-  nodeId that never earned a durable binding is first contact again once its sessions end, so
-  another key may then claim it. Such a node left nothing this node protects: no admitted record,
-  no grant, no pin, so no history or standing to take. Hosts show signers by key fingerprint
+- **The durable registry takes only earned bindings:** an admitted verified record, a verified
+  record its author signed to this node and this node accepted for delivery (stored or surfaced
+  `remixed: false`; corrected in the 0.14.0 re-review, N3), an out-of-band pin (an invite, a
+  Legacy Import route), an anchor-rooted grant in effect now (a view, never stored), or the
+  anchor. A handshake, or a second one, earns nothing, so identity churn cannot fill the registry.
+  Nothing is evicted before it expires. A newcomer to a full registry keeps its session binding
+  and gets no durable one.
+- **The rule: a binding is earned by a relationship (corrected in the 0.14.0 re-review, N3; it
+  replaces the "residual, kept on purpose" paragraph of 9305836).** That paragraph said a nodeId
+  that never earned a durable binding "left nothing this node protects". That was wrong. A peer
+  that only exchanged directed records (a conversation: requests, replies, messages, none admitted
+  to memory) earned nothing, so once its sessions ended a squatter could claim its nodeId, be
+  bound, and receive this node's further directed records to it (the addressee is a nodeId, not a
+  key), while the genuine peer, refused with 1009, did not retry until it restarted. A
+  conversation is exactly what the binding protects. So the rule is: **a binding is earned by what
+  this node accepted from that key** — a record it admitted (history), or a record the author
+  signed to this node and this node accepted for delivery (a relationship) — or by a pin or a
+  grant. What stays first contact, on purpose: a nodeId this node never accepted anything from (a
+  peer that only handshook, or only broadcast records SVAF refused) has nothing here to take, and
+  another key may claim it after its sessions end. Hosts show signers by key fingerprint
   (mesh-channel 0.11.0), so a change of key under one nodeId is visible. An expiring first-contact
-  binding was rejected: any table a stranger can fill is a table a stranger can use to push honest
-  bindings out.
+  binding stays rejected: any table a stranger can fill is a table a stranger can use to push
+  honest bindings out.
+- **A failed signature is charged only to its signer's own session (0.14.0 re-review, N1).**
+  Bindings are local views: a statement relayed on a session (a record, an attestation, a
+  checkpoint, a witness, a grant) is verified under this node's binding for its signer, which may
+  be a squatter's session-scoped binding, or may lack a vouch the relayer holds. So a session is
+  closed and refused for a bad signature only when the statement names that session's own proven
+  peer as its signer and the key that failed is the one the session proved. A relayed statement
+  that fails is dropped and counted (`relayed-signature-unverified`), never charged to the
+  relayer: the old penalty closed every honest peer that relayed the genuine statements of a node
+  whose nodeId a squatter held here.
 - "Last verified" and "last seen" persist with each durable binding.
 - Test: a flood of 20,000 one-shot identities ages out, and an honest long-lived peer survives.
 
 **Authority follows the key.**
 - `resolveRole(nodeId, key, at)`: a grant confers its role only when its `granteeKey` equals the
   grantee's bound key.
+- **A revoke carries a cutoff; receipt time is no part of authority (0.14.0 re-review, N2; the
+  founder's ruling).** The security round's "both times" rule (a statement counts only if its
+  signer was authorised when it signed and when this node received it; draft spec PR #33) failed
+  open: a validator's genuine revoke, received after the validator was itself revoked (by a
+  newcomer, an anti-entropy sync, or a store upgraded from 0.13), no longer counted, so authority
+  depended on arrival order. Now a revocation of a validator signs a cutoff, an invalidity date at
+  or before the revoke's own time (by default that time). What the validator signed before the
+  cutoff stands for every receiver, whenever it arrives; what it signed at or after the cutoff
+  never counts, even at times before the revoke was signed. That stops backdating without
+  depending on arrival: the revoker chooses how far back trust is withdrawn. A revoke counts only
+  when its revoker held the rank both at the revoke's signed time and at its cutoff, so a revoker
+  reaches back only over time it was itself authorised for. Grants keep §6.6's cascade (a grant
+  confers only while its grantor holds rank). Every time in the rule is signed; nothing stores a
+  receipt time, and the 0.13 grant file needs no rewrite (0.14.0 re-review, N5: the rewrite lost
+  the records skipped at load). The exact rule for the spec PR is in `docs/WIRE-0.14.0.md` §6 on
+  the release branch.
+- **No cap refuses a revoke (0.14.0 re-review, N4).** Grant caps (per grantor, per pair, in all)
+  bound grants only: a revoke refused by a full store leaves authority standing, which fails open.
+  Revokes are bounded by their grants: a non-anchor revoker keeps at most as many revokes for a
+  grantee as the node holds grants for it, and one that arrives before the grant waits for it
+  (`role-chain-fetch` naming the grantee).
 - Grant chains are verified top-down **with the key each verified grant vouches** (§6.6: "using
   each verified grant's vouched key to reach the next"), not with whatever key the registry
   holds for the grantor.
@@ -408,3 +449,8 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
 8. §16: register `sym-attest-v1` (attestation, checkpoint, witness, node-stats).
 9. §14.12: a member is a node, and a session is a trail within it.
 10. §6.6/§7.1: `role-chain-fetch`, a directed request for the grant chain that roots a record.
+11. §6.6: the revoke's signed `cutoff` and the resolution rule without receipt time (replaces draft
+    #33's both-times rule; text in `docs/WIRE-0.14.0.md` §6).
+12. §6.6/§18: a failed signature is attributable only to the session that signed in its own name
+    (`docs/WIRE-0.14.0.md` §7).
+13. §8.8.6: record size limits that fit one sealed frame (draft #37: 256 KiB, 512 KiB, 720 KiB).
