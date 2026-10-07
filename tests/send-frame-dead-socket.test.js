@@ -85,26 +85,28 @@ describe('a send that is not made says why (0.14.0 review B-F6)', () => {
       // bounds did not see, or a long relay envelope), and one whose transport only says whether.
       // (Admitted sessions, as a confirmed handshake leaves them; their sends are made to fail.)
       const { admitAs } = require('./_core-secure');
-      const tooLarge = admitAs(node, { nodeId: 'peer-LARGE000', name: 'peer-large' });
+      // nodeIds are lowercase UUIDs (§3.1.1): remember() refuses a `to` spelled otherwise.
+      const LARGE = '0190aaaa-0000-7000-8000-000000000001', OPAQUE = '0190bbbb-0000-7000-8000-000000000002', ABSENT = '0190cccc-0000-7000-8000-000000000003';
+      const tooLarge = admitAs(node, { nodeId: LARGE, name: 'peer-large' });
       tooLarge.trySend = () => ({ ok: false, reason: SEND_FAILURE.TOO_LARGE, bytes: MAX_FRAME_SIZE + 1 });
-      const opaque = admitAs(node, { nodeId: 'peer-OPAQUE00', name: 'peer-opaque' });
+      const opaque = admitAs(node, { nodeId: OPAQUE, name: 'peer-opaque' });
       delete opaque.trySend;
       opaque.send = () => false;
 
-      const a = node.remember({ focus: 'a directed send the transport refuses as too large' }, { to: 'peer-LARGE000' });
+      const a = node.remember({ focus: 'a directed send the transport refuses as too large' }, { to: LARGE });
       assert.strictEqual(a.delivery.undelivered, true);
       assert.strictEqual(a.delivery.reason, SEND_FAILURE.TOO_LARGE);
-      assert.ok(lines.some((l) => /UNDELIVERED \(directed\): peer-LAR frame too large/.test(l)), lines.join('\n'));
+      assert.ok(lines.some((l) => /UNDELIVERED \(directed\): 0190aaaa frame too large/.test(l)), lines.join('\n'));
       assert.ok(!lines.some((l) => /UNDELIVERED.*not connected/.test(l)), 'not reported as not connected');
-      assert.ok(metrics.some((m) => m.type === 'cmb-frame-too-large' && m.to === 'peer-LARGE000'));
+      assert.ok(metrics.some((m) => m.type === 'cmb-frame-too-large' && m.to === LARGE));
       assert.ok(metrics.some((m) => m.type === 'cmb-undelivered' && m.reason === SEND_FAILURE.TOO_LARGE));
 
-      const b = node.remember({ focus: 'a directed send to a transport that says only whether' }, { to: 'peer-OPAQUE00' });
+      const b = node.remember({ focus: 'a directed send to a transport that says only whether' }, { to: OPAQUE });
       assert.strictEqual(b.delivery.reason, 'send-failed');
 
-      const c = node.remember({ focus: 'a directed send to nobody connected' }, { to: 'peer-ABSENT00' });
+      const c = node.remember({ focus: 'a directed send to nobody connected' }, { to: ABSENT });
       assert.strictEqual(c.delivery.reason, SEND_FAILURE.NOT_CONNECTED);
-      assert.ok(lines.some((l) => /UNDELIVERED \(directed\): peer-ABS not connected/.test(l)));
+      assert.ok(lines.some((l) => /UNDELIVERED \(directed\): 0190cccc not connected/.test(l)));
     } finally { await node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 });

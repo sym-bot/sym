@@ -33,9 +33,11 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   (a broadcast, an anchor replay, a fetch answer, a queued frame).
 - **One key per nodeId.** Every confirmed session runs with a binding: the key it proved, held for
   that nodeId while the session lives. The durable key registry binds a nodeId only when the
-  binding is earned — an admitted verified record, an out-of-band pin (invite, Legacy Import route),
-  or an anchor-rooted grant in effect now (a grant binding is a view over the grants in effect,
-  never stored, and ends with them) — and never replaces it: a different key, from any source or
+  binding is earned — an admitted verified record, a verified record its author signed to this
+  node and this node accepted for delivery (directed exchange is a relationship, so a squatter
+  cannot take over a conversation once its peer's sessions end), an out-of-band pin (invite, Legacy
+  Import route), or an anchor-rooted grant in effect now (a grant binding is a view over the grants
+  in effect, never stored, and ends with them) — and never replaces it: a different key, from any source or
   while a session holds the nodeId, is a recorded conflict an operator resolves (a session
   proving it is closed with error 1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one,
   earns nothing; nothing is evicted before it expires; a `proven` binding that verified nothing
@@ -52,14 +54,22 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   `lineage.method`) are dropped, and what is stored, delivered and served is the projection.
   Directed versus room-bound delivery is decided by the signed `metadata.to`, never by a relay
   envelope; a directed record older than 24 h by its signed time is refused.
-- **Authority follows the key, and counts both when signed and when received.** A role grant must
-  name `granteeKey`; it confers its role only on that key, and a chain is verified top-down with
-  each grant's vouched key. A grant, its key vouch, a revoke and an attestation count only if the
-  signer was authorised at its signed time and when this node received it (the receipt time is
-  persisted), so a revoked validator cannot backdate any of them into its old window. A grantor
-  whose nodeId an impostor holds keeps exactly its vouched authority; the impostor gets none.
-- **A forgery ends its session.** A signature that does not verify on a proven session closes it,
-  and its nodeId is not admitted again for 60 s.
+- **Authority follows the key; a revoke carries a cutoff.** A role grant must name `granteeKey`; it
+  confers its role only on that key, and a chain is verified top-down with each grant's vouched key.
+  A revoke signs a cutoff (by default its own time; a revoker may set it earlier, back to when the
+  revoked node stopped being trustworthy, but never before the revoker itself held rank). What the
+  revoked node signed before its cutoff — grants, key vouches, revokes, attestations — counts by
+  its rank when signed, for every node whenever it arrives; what it signed at or after the cutoff
+  never counts. When a node received a statement is no part of the rule, so nodes that learn a
+  history in different orders resolve the same authority. A grant also confers only while its
+  grantor still holds rank (MMP §6.6's cascade). A grantor whose nodeId an impostor holds keeps
+  exactly its vouched authority; the impostor gets none.
+- **A forgery in a session's own name ends the session.** A statement that names the session's own
+  peer as its signer and does not verify under the key that session proved closes it, and its
+  nodeId is not admitted again for 60 s. A statement the session relays for another signer is
+  verified under this node's binding for that signer, which may differ from the relayer's (a local
+  view); one that fails is dropped and counted (`relayed-signature-unverified`), and the relayer is
+  not charged.
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
@@ -90,8 +100,11 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   a newcomer is refused a durable binding and its live session still verifies what it signs. Key
   conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
   (`status().coreSecure.keyConflicts`).
-- **Role grants**: at most 65,536 records, 1,024 per grantor and 16 per (grantor, grantee) pair
-  (the anchor's own are not limited); a nodeId in a grant is canonical lowercase of at most 128
+- **Role grants**: at most 65,536 grants, 1,024 per grantor and 16 per (grantor, grantee) pair
+  (the anchor's own are not limited). No cap refuses a revoke: a revoker keeps at most as many
+  revokes for one grantee as this node holds grants for it (a revoke that arrives first waits for
+  the grant through `role-chain-fetch`), so revokes are bounded by grants and a revoker can fill
+  only its own allowance; a nodeId in a grant is canonical lowercase of at most 128
   characters, a role name at most 32. A delegation reaches at most 8 grants from the anchor, and
   role resolution is memoised (linear in the records). A record that arrives before its root is
   held only while its chain is fetched from the session that delivered it (`role-chain-fetch`): at
@@ -103,8 +116,12 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   4,000 verified statements a second in all (burst 20,000), spent only after it; checkpoints at most
   4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
   per position.
-- **Records**: a category at most 256 KiB and the seven at most 960 KiB of text, refused before
-  anything encodes them; at most 8 new records a second per session are evaluated (burst 32).
+- **Records** (MMP §8.8.6 as draft spec PR #37 states it): a category's text at most 256 KiB after
+  NFC, the seven at most 512 KiB, the record's JSON encoding at most 720 KiB, so every record fits
+  one sealed frame. This node mints nothing larger, and refuses a received record over any limit
+  before anything validates, verifies or encodes it; a sealed frame longer than a 720 KiB record can
+  produce (983,062 base64url characters) is refused before it is opened. At most 8 new records a
+  second per session are evaluated (burst 32).
 - **Wake channels**: at most 1,024, learned only from a confirmed session's own nodeId (a peer's
   word about another node is never stored), dropped after 30 days unseen; when the table is full a
   new first-hand channel displaces the least recently seen one of the weakest source, so many
@@ -144,7 +161,14 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 
 - **First contact is trust on first proven use.** Without an anchor, an invite carrying the
   issuer's key, or a grant, the first key a session proves for a nodeId is the one bound. The
-  handshake proves possession, not intent.
+  handshake proves possession, not intent. A nodeId that never earned a durable binding here (no
+  admitted record, no directed exchange, no pin, no grant) is first contact again once its
+  sessions end. While another key's session holds a nodeId, the genuine node is refused with 1009,
+  and a node refused with 1009 does not retry until it restarts.
+- **A cutoff is the revoker's judgement.** Statements the revoked node signed before its revoke's
+  cutoff stand, so a revoked node can still backdate a statement to before the cutoff. A revoker
+  that suspects an earlier compromise sets the cutoff earlier; nothing can tell a backdated
+  statement from a timely one.
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no

@@ -13,6 +13,58 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### The re-review at 72daeb6 — what changed
+
+Five findings and the open leads, each fixed where its assumption was made (the design is
+`docs/DESIGN-core-secure-identity.md` on branch `design/0.14.0-core-secure-identity`; the wire text
+for the spec PRs is `docs/WIRE-0.14.0.md` §6 and §7):
+
+- **A failed signature is charged only to a session that signed in its own name (N1).** Bindings are
+  local views: a relayed statement is verified under this node's binding for its signer, which may
+  be a squatter's session-scoped binding or lack a vouch the relayer holds. The forgery penalty used
+  to close the relaying session and refuse it for 60 s, so an honest peer relaying the genuine
+  statements of a node whose nodeId a squatter held here was cut off on every one. Now a session is
+  closed (`forged-signature`) only when the statement names its own proven peer as signer and the
+  key that failed is the key it proved; any other failure is dropped and counted
+  (`relayed-signature-unverified`), never charged to the relayer.
+- **A revoke carries a cutoff; receipt time is no part of authority (N2; replaces draft spec PR
+  #33's both-times rule).** The both-times rule voided a genuine revoke for every node that received
+  it after its revoker was itself revoked (a newcomer, an anti-entropy sync, a store upgraded from
+  0.13), so authority depended on arrival order. Now a `role-revoke` signs a `cutoff` (by default its
+  own time; `revokeRole(id, { cutoff })` sets an earlier one, never before the revoker held rank):
+  what the revoked node signed before the cutoff stands for every receiver whenever it arrives, and
+  what it signed at or after it never counts, even before the revoke itself was signed. A revoke
+  without a cutoff signs the bytes it always signed. Grants keep §6.6's cascade. Attestations count
+  at their signer's role at their signed time. Nothing stores a receipt time any more.
+- **Directed exchange earns a durable binding (N3).** A peer that only exchanged directed records
+  never earned one, so once it left, a squatter claiming its nodeId was bound and received this
+  node's further directed records to it, while the genuine peer, refused with 1009, did not retry.
+  A verified record its author signed to this node, accepted for delivery (surfaced, stored or not),
+  now earns the binding, as an admitted record does.
+- **No cap refuses a revoke (N4).** The per-grantor, per-pair and store caps refused revokes too,
+  so past them a grant could no longer be revoked except by the anchor, and a validator filling the
+  store with sybil grants stopped every honest revoke. The caps now bound grants only; a revoker
+  keeps at most as many revokes for a grantee as this node holds grants for it (`nothing-to-revoke`
+  past that, held for a `role-chain-fetch` naming the grantee when it arrives first), the
+  whole-store sync sends grants before revokes, and held records are re-offered in passes.
+- **A 0.13 grant store is never rewritten (N5).** The one-time rewrite into the 0.14 form dropped
+  the records skipped at load (those whose root was not yet held), for good. With receipt time gone
+  the file needs no rewrite: lines are the bare record, as 0.13 wrote them, appended only, and a
+  skipped line loads at the next start once its root is held.
+- **Record size limits fit one sealed frame (draft spec PR #37).** A sealed frame carries its
+  plaintext as base64url, so about 768 KiB is the most one 1 MiB frame can carry, and the previous
+  960 KiB text bound could not be met. Now a category's text is at most 256 KiB after NFC, the seven
+  at most 512 KiB, and the record's JSON encoding at most 720 KiB, both when minting (`ECMBSIZE`) and
+  at ingress, where a record over any limit is refused before anything validates or verifies it,
+  and a sealed frame longer than a 720 KiB record can produce is refused before it is opened.
+- **The open leads.** A record without `metadata.to` stays refused: the MMP v2.0 record schema
+  requires it (null for a room-bound record). Attestation, checkpoint and witness rooms are
+  compared in NFC, as they are signed. `remember()` and `send()` refuse an addressee that is not a
+  lowercase UUID (`EBADTO`) instead of minting a record no session can carry. A node whose own
+  nodeId is not a lowercase UUID says so at start (`node-id-not-canonical`): every Core Secure peer
+  refuses its records. The wake queue and `sym emit` were confirmed to send through the one seal
+  point.
+
 ### The independent security review (BLOCK at 341dafb) — what changed
 
 Seven design assumptions, each changed where it was made, not patched where it showed:
@@ -26,28 +78,28 @@ Seven design assumptions, each changed where it was made, not patched where it s
   `createdByNodeId` a lowercase UUID, each category's `meta.key` recomputed and a mismatch refused,
   an unrecognised category dropped, and the unsigned `valence`, `arousal` and `lineage.method`
   dropped. The node stores, emits, delivers and serves only that projection. **Release note:**
-  `mood-delivered` no longer carries `valence`/`arousal` (they were unsigned). A category over
-  256 KiB, or 960 KiB of text in all (what this release mints), is refused before anything encodes
-  it; this reverses the earlier acceptance of larger categories (C-F4). nodeIds are taken only in
+  `mood-delivered` no longer carries `valence`/`arousal` (they were unsigned). A record over the
+  size limits (256 KiB a category, 512 KiB of text, 720 KiB encoded, as the re-review above set
+  them) is refused before anything encodes it; this reverses the earlier acceptance of larger
+  categories (C-F4). nodeIds are taken only in
   canonical lowercase at every door: the hello, a relay `from` or announcement, a grant, an invite.
-- **Authority counts only if its signer was authorised when it signed and when it was received
-  (C; draft spec PR #33).** One rule for a grant and its key vouch, a revoke and an attestation,
-  each kept with its receipt time (a line with none is treated as received at load). A revoked
-  validator can no longer backdate grants, key vouches, revokes or attestations into its old
-  window. A grant binding is a view over the grants in effect now, never stored; no grant binds this
+- **A revoked validator cannot backdate authority (C).** The review's rule (a statement counts only
+  if its signer was authorised when it signed and when it was received, draft spec PR #33) is
+  replaced by the re-review's revoke cutoff above: no receipt time is kept. A grant binding is a view over the grants in effect now, never stored; no grant binds this
   node's own nodeId (one that vouches a foreign key for it is inert, and reported:
   `role-grant-foreign-self-key`); 0.13 `grant` roster entries migrate as legacy claims. Role
   resolution is memoised (linear in the records) and a delegation reaches at most 8 grants from the
-  anchor; a grantor holds at most 16 records per grantee (was 64).
+  anchor; a grantor holds at most 16 grants per grantee (was 64 records).
 - **No shared budget is spent before verification, and a forgery ends its session (D).** Only the
   peer's own lane is spent before a signature check; the shared ceiling is spent after it. A
-  signature that does not verify on a proven session closes it (`forged-signature`) and its nodeId
-  is not admitted again for 60 s. Grants and revokes have anti-entropy: a `role-digest` on every
+  signature in a session's own name that does not verify under the key it proved closes it
+  (`forged-signature`) and its nodeId is not admitted again for 60 s (a relayed one is only dropped,
+  since the re-review above). Grants and revokes have anti-entropy: a `role-digest` on every
   admission, and a paged whole-store sync when digests differ. A key binding is never evicted
   before it expires. **Every confirmed session runs with a session-scoped binding**, and a second
   key for that nodeId while it lives is a 1009 IDENTITY_CONFLICT; the durable registry takes only
-  an EARNED binding (an admitted verified record, a pin, a grant in effect, or the key a legacy claim
-  expects) — a handshake, or a re-handshake, earns nothing, and neither does a record refused for
+  an EARNED binding (an admitted verified record, a verified directed record accepted (since the
+  re-review), a pin, a grant in effect, or the key a legacy claim expects) — a handshake, or a re-handshake, earns nothing, and neither does a record refused for
   its room. Resource bounds: relay handshakes per relay `from` (one in flight, a hello rate) and
   for unknown candidates (32 of the 256 slots, the oldest evicted, a wait list served known peers
   first, failed ones backing off up to 10 min); the LAN listener (256 connections before their
@@ -224,7 +276,7 @@ Seven design assumptions, each changed where it was made, not patched where it s
 
 - **Binding lifetime (design D3, as the security review changed it).** A confirmed session runs
   with a session-scoped binding; the durable registry takes one only when it is earned (an
-  admitted verified record, a pin, a grant in effect). A `proven` binding that verified nothing and
+  admitted verified record, a verified directed record accepted, a pin, a grant in effect). A `proven` binding that verified nothing and
   was not seen for 30 days expires; nothing is evicted before it expires, and a full registry
   (65,536) refuses a newcomer a durable binding — its live session still verifies what it signs.
   The `seen` / `verified` facts are persisted with the binding.
@@ -408,16 +460,17 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   clock again, with a `clock-stepped-back` metric.
 - **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
   must be numbers in [-1, 1], and a mood given only as numbers keeps them.
-- **Records had no size bound below the 1 MiB frame (B-R13).** A category is at most 256 KiB of text
-  and the seven at most 960 KiB, and a record is minted only if the frame it travels in fits the
+- **Records had no size bound below the 1 MiB frame (B-R13).** (The limits are now those of the
+  re-review above: 256 KiB a category after NFC, 512 KiB of text, 720 KiB encoded, minted and
+  received alike. What follows is how 0.13.17 first bounded them.) A category is at most 256 KiB of
+  text and the seven at most 960 KiB, and a record is minted only if the frame it travels in fits the
   1 MiB frame bound with its categories sealed for a peer. Text bytes are not frame bytes: JSON
   writes a `"` as two bytes and a control character as six, and the end-to-end seal is base64, a 4/3
   expansion, so a record within the text bounds could be one no transport would carry. In plain text
   the frame bound allows about 766 KiB. An agent id is at most 64 bytes (§3.1.2). `createCMB` throws
   `ECMBSIZE`, and so does `remember()`, before anything is stored or sent, for a record or payload
-  that would not fit. These are minting rules. A receiver applies no record bound beyond the frame a
-  record arrives in: earlier releases minted larger categories and longer agent ids, and refusing
-  them would stop a node hearing such a peer at all.
+  that would not fit. In 0.13.17 these were minting rules only; 0.14.0 applies the record limits on
+  receipt too (an agent id over 64 bytes is still accepted on receipt).
 - **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's two
   sections exactly as signed, as a copy: the metadata whole, and each category with its `meta`. Text
   alone dropped the per-category parents the signature commits to, so a record that declared them

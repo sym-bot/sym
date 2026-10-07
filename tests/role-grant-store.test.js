@@ -29,8 +29,8 @@ function kp(nodeId) {
 
 const T = 1_000_000;
 // Since 0.14 every role-grant names the key it confers authority on (design D3).
-function grant(type, grantee, role, grantor, at) {
-  const g = { type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at };
+function grant(type, grantee, role, grantor, at, extra = {}) {
+  const g = { type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at, ...extra };
   if (type === 'role-grant') g.granteeKey = grantee.pub;
   return signGrant(g, grantor.priv);
 }
@@ -122,10 +122,15 @@ describe('RoleGrantStore — revocation actually contains a compromised grantor'
     const st = storeWith(A, [B, X]);
     st.record(grant('role-grant', B, 'validator', A, T));
     st.record(grant('role-revoke', B, undefined, A, T + 300));
-    // Since the security review (C; draft spec PR #33) the grantor must also be authorised when the
-    // grant is RECEIVED: B is revoked by then, so the backdated grant is not even kept.
-    assert.deepStrictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)), { stored: false, reason: 'unrooted' }, 'a backdated grant from a revoked grantor is refused at receipt');
-    assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'and it confers nothing — backdating cannot bypass revocation');
+    // Dated before B's cutoff (here the revoke's own time), the grant is a statement that stands and is
+    // kept (re-review N2: whenever it arrives); it confers nothing while B is revoked (the cascade).
+    assert.strictEqual(st.record(grant('role-grant', X, 'validator', B, T + 100)).stored, true);
+    assert.strictEqual(st.resolveRole(X.nodeId, T + 500), 'participant', 'it confers nothing — backdating cannot bypass revocation');
+    // A revoke whose cutoff reaches back over B's window: a grant B dated inside it is not even kept.
+    const st2 = storeWith(A, [B, X]);
+    st2.record(grant('role-grant', B, 'validator', A, T));
+    st2.record(grant('role-revoke', B, undefined, A, T + 300, { cutoff: T + 50 }));
+    assert.deepStrictEqual(st2.record(grant('role-grant', X, 'validator', B, T + 100)), { stored: false, reason: 'unrooted' }, 'signed after B\'s cutoff');
   });
 
   it('revoking a grantor cascades to everything it granted', () => {

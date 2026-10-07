@@ -69,7 +69,8 @@ function fieldsOf(focusText) {
   };
 }
 
-const ABSENT_PEER = 'peer-that-is-not-here-0000000000000000';
+// A nodeId is a lowercase UUID (MMP §3.1.1): remember() refuses a `to` spelled otherwise.
+const ABSENT_PEER = '0190dead-0000-7000-8000-000000000000';
 
 describe('directed delivery accountability (bl-a6e63608c8c)', () => {
   it('reports a directed send to an absent peer as UNDELIVERED', async () => {

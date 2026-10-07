@@ -218,7 +218,7 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
     });
   });
 
-  it('forgeries spend only their own peer\'s lane, never the shared ceiling, and a forgery on a session ends it (security review D, p7-ceiling)', () => {
+  it('forgeries spend only their own peer\'s lane, never the shared ceiling, and a forgery in a session\'s own name ends it (security review D, p7-ceiling; re-review N1)', () => {
     withNode({}, ({ node, metrics }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
@@ -229,12 +229,20 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
       assert.strictEqual(badSig, 300 * 100, 'each peer checks its own 100');
       assert.strictEqual(node._gossipGlobal.tokens, node._gossipGlobalBurst, 'no forgery spent the shared ceiling');
       assert.strictEqual(metrics.filter((m) => m.type === 'gossip-over-ceiling').length, 0);
-      // On a session, the first forgery is attributable: the session ends and its id waits out a penalty.
-      const s = admitAs(node, { nodeId: 'forger-1' });
-      assert.strictEqual(node._ingestAttestation(forged(A), 'forger-1', 'forger-1', s).reason, 'bad-signature');
-      assert.strictEqual(s.closed, true, 'a forged signature on a proven session closes it');
-      assert.strictEqual(node._penalised('forger-1'), true, 'and its nodeId is not admitted again for a while');
-      assert.ok(metrics.some((m) => m.type === 'forged-signature' && m.peer === 'forger-1'));
+      // A relayed statement that fails here is dropped, never charged to the relayer (0.14.0 re-review
+      // N1): its binding for the signer may differ from this node's.
+      const s = admitAs(node, { nodeId: 'relayer-1' });
+      assert.strictEqual(node._ingestAttestation(forged(A), 'relayer-1', 'relayer-1', s).reason, 'bad-signature');
+      assert.strictEqual(s.closed, false, 'a relayed statement that fails does not close the relayer\'s session');
+      assert.strictEqual(node._penalised('relayer-1'), false);
+      assert.ok(metrics.some((m) => m.type === 'relayed-signature-unverified' && m.peer === 'relayer-1' && m.author === A.id));
+      // A statement in the session's OWN name that its proven key did not sign is attributable: the
+      // session ends and its id waits out a penalty.
+      const own = admitAs(node, { nodeId: A.id, publicKey: A.pub });
+      assert.strictEqual(node._ingestAttestation(forged(A), A.id, A.id, own).reason, 'bad-signature');
+      assert.strictEqual(own.closed, true, 'a forged signature in its own name closes the session');
+      assert.strictEqual(node._penalised(A.id), true, 'and its nodeId is not admitted again for a while');
+      assert.ok(metrics.some((m) => m.type === 'forged-signature' && m.peer === A.id));
     });
   });
 

@@ -4,6 +4,11 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+// nodeIds are lowercase UUIDs (MMP §3.1.1): remember() refuses a `to` spelled otherwise.
+const PEER_A_ID = '0190aaaa-0000-7000-8000-00000000000a';
+const PEER_B_ID = '0190bbbb-0000-7000-8000-00000000000b';
+const PEER_C_ID = '0190cccc-0000-7000-8000-00000000000c';
+const PEER_ABSENT_ID = '0190ffff-0000-7000-8000-00000000000f';
 const { plantSession } = require('./_core-secure');
 const fs = require('fs');
 const { SymNode } = require('../lib/node');
@@ -42,9 +47,9 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       const tA = capturingTransport();
       const tB = capturingTransport();
       const tC = capturingTransport();
-      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
-      plantSession(node, tB, 'peer-BBBBBBBB', 'peer-b', 'bonjour');
-      plantSession(node, tC, 'peer-CCCCCCCC', 'peer-c', 'bonjour');
+      plantSession(node, tA, PEER_A_ID, 'peer-a', 'bonjour');
+      plantSession(node, tB, PEER_B_ID, 'peer-b', 'bonjour');
+      plantSession(node, tC, PEER_C_ID, 'peer-c', 'bonjour');
 
       const entry = node.remember({
         focus: 'broadcast fan-out regression check',
@@ -72,9 +77,9 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       const tA = capturingTransport();
       const tB = capturingTransport();
       const tC = capturingTransport();
-      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
-      plantSession(node, tB, 'peer-BBBBBBBB', 'peer-b', 'bonjour');
-      plantSession(node, tC, 'peer-CCCCCCCC', 'peer-c', 'bonjour');
+      plantSession(node, tA, PEER_A_ID, 'peer-a', 'bonjour');
+      plantSession(node, tB, PEER_B_ID, 'peer-b', 'bonjour');
+      plantSession(node, tC, PEER_C_ID, 'peer-c', 'bonjour');
 
       const entry = node.remember({
         focus: 'targeted send to peer B',
@@ -84,7 +89,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
         commitment: 'frame reaches only the named peer',
         perspective: 'sender role',
         mood: { text: 'procedural', valence: 0, arousal: 0 },
-      }, { to: 'peer-BBBBBBBB' });
+      }, { to: PEER_B_ID });
 
       assert.ok(entry, 'targeted remember should return an entry');
       assert.strictEqual(tA.frames.filter(f => f.type === 'cmb').length, 0, 'peer A should receive NO CMB');
@@ -98,7 +103,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
   it('still writes locally when opts.to names a disconnected peer', async () => {
     await withNode('targeted-disconnected', async (node) => {
       const tA = capturingTransport();
-      plantSession(node, tA, 'peer-AAAAAAAA', 'peer-a', 'bonjour');
+      plantSession(node, tA, PEER_A_ID, 'peer-a', 'bonjour');
 
       const entry = node.remember({
         focus: 'targeted send to absent peer',
@@ -108,7 +113,7 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
         commitment: 'no fan-out but store intact',
         perspective: 'sender role',
         mood: { text: 'procedural', valence: 0, arousal: 0 },
-      }, { to: 'peer-ZZZZZZZZ-absent' });
+      }, { to: PEER_ABSENT_ID });
 
       assert.ok(entry, 'disconnected-target remember should still return an entry');
       assert.strictEqual(tA.frames.filter(f => f.type === 'cmb').length, 0, 'connected peer A should receive nothing');

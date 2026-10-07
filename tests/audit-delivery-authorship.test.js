@@ -24,6 +24,10 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
+// A record's `to` is a lowercase UUID (MMP §3.1.1, the cmb schema): remember() refuses any other.
+const TO_A = '0190a000-0000-7000-8000-00000000000a';
+const TO_B = '0190a000-0000-7000-8000-00000000000b';
+const TO_STALE = '0190a000-0000-7000-8000-00000000000c';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -627,10 +631,10 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
 
   it('re-review F2: a caller-supplied record that collapses is not sent unre-signed, and says so', async () => {
     await withNode('d5-caller', async (node) => {
-      const frames = fakePeer(node, 'peer-a');
-      const first = node.remember(cats('forwarded'), { to: 'peer-a' });
+      const frames = fakePeer(node, TO_A);
+      const first = node.remember(cats('forwarded'), { to: TO_A });
       const own = JSON.parse(JSON.stringify(first.cmb)); // a record the caller holds, already signed
-      const r = node.remember(null, { cmb: own, to: 'peer-a' }); // same content: collapses onto HEAD
+      const r = node.remember(null, { cmb: own, to: TO_A }); // same content: collapses onto HEAD
       assert.strictEqual(r.collapsed, true);
       assert.strictEqual(r.delivery.undelivered, true, 'not sent, and the caller is told');
       assert.strictEqual(frames.length, 1, 'only the first send went out');
@@ -639,12 +643,12 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
 
   it('re-review F5: a directed send matching a peer\'s stored CMB returns the caller\'s entry, not the peer\'s', async () => {
     await withNode('d5-peer-dup', async (node) => {
-      fakePeer(node, 'peer-a');
+      fakePeer(node, TO_A);
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const shared = { focus: 'shared words', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'peerA', mood: NEUTRAL };
       node._frameHandler.handle(from(node), frame(signed(core.createCMB({ categories: shared, createdBy: 'peerA', emitV2: true, createdByNodeId: A_ID.nodeId, room: 'default' }))));
       await settle();
-      const r = node.remember(shared, { to: 'peer-a' });
+      const r = node.remember(shared, { to: TO_A });
       assert.strictEqual(r.duplicate, true);
       for (const f of ['peerId', 'remixed', 'author', 'inboxId', 'svaf']) {
         assert.strictEqual(r[f], undefined, `no peer provenance field ${f} on the caller's result`);
@@ -657,9 +661,9 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
 
   it('r3 F3: a send whose store write failed is not reported as a duplicate', async () => {
     await withNode('d5-persist', async (node) => {
-      fakePeer(node, 'peer-a');
+      fakePeer(node, TO_A);
       node._store._persist = () => false;
-      const r = node.remember(cats('cannot store'), { to: 'peer-a' });
+      const r = node.remember(cats('cannot store'), { to: TO_A });
       assert.ok(r, 'a result');
       assert.strictEqual(r.duplicate, false);
       assert.strictEqual(r.persisted, false);
@@ -669,22 +673,22 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
 
   it('r3 F6: a caller-supplied record that collapses is returned unmodified', async () => {
     await withNode('d5-unmodified', async (node) => {
-      fakePeer(node, 'peer-a');
-      const first = node.remember(cats('forwarded'), { to: 'peer-a' });
+      fakePeer(node, TO_A);
+      const first = node.remember(cats('forwarded'), { to: TO_A });
       const own = JSON.parse(JSON.stringify(first.cmb));
       own.metadata.lineage = { parents: ['cmb-' + 'e'.repeat(64)], method: 'rule-a' };
       const before = JSON.stringify(own);
-      node.remember(null, { cmb: own, to: 'peer-a' });
+      node.remember(null, { cmb: own, to: TO_A });
       assert.strictEqual(JSON.stringify(own), before, 'the caller\'s signed record is not mutated');
     });
   });
 
   it('F12: a directed send of an already-stored record returns an entry with its delivery result', async () => {
     await withNode('d5-dup', async (node) => {
-      fakePeer(node, 'peer-a');
-      node.remember(cats('first'), { to: 'peer-a' });
-      node.remember(cats('second'), { to: 'peer-a' });
-      const again = node.remember(cats('first'), { to: 'peer-a' }); // stored, but not HEAD
+      fakePeer(node, TO_A);
+      node.remember(cats('first'), { to: TO_A });
+      node.remember(cats('second'), { to: TO_A });
+      const again = node.remember(cats('first'), { to: TO_A }); // stored, but not HEAD
       assert.ok(again && typeof again.content === 'string', 'entry-shaped, not a bare {key, cmb}');
       assert.strictEqual(again.duplicate, true);
       assert.strictEqual(again.delivery.dispatched, 1);
@@ -693,23 +697,23 @@ describe('B-D5: directed sends that mint nothing still deliver (MMP §4.4.4)', (
 
   it('the same words sent to a second peer are sent, not collapsed into silence', async () => {
     await withNode('d5', async (node) => {
-      const a = fakePeer(node, 'peer-a');
-      const b = fakePeer(node, 'peer-b');
-      const first = node.remember(cats('review request'), { to: 'peer-a' });
-      const second = node.remember(cats('review request'), { to: 'peer-b' });
+      const a = fakePeer(node, TO_A);
+      const b = fakePeer(node, TO_B);
+      const first = node.remember(cats('review request'), { to: TO_A });
+      const second = node.remember(cats('review request'), { to: TO_B });
       assert.strictEqual(first.delivery.dispatched, 1);
       assert.ok(second, 'a result, not null');
       assert.strictEqual(second.delivery.undelivered, false);
       assert.strictEqual(a.length, 1);
       assert.strictEqual(b.length, 1);
-      assert.strictEqual(b[0].cmb.metadata.to, 'peer-b', 'directed by its signed addressee');
+      assert.strictEqual(b[0].cmb.metadata.to, TO_B, 'directed by its signed addressee');
     });
   });
 
   it('a transport that refuses the frame makes the send undelivered', async () => {
     await withNode('d6', async (node) => {
-      fakePeer(node, 'peer-stale', { accept: false });
-      const r = node.remember(cats('are you there'), { to: 'peer-stale' });
+      fakePeer(node, TO_STALE, { accept: false });
+      const r = node.remember(cats('are you there'), { to: TO_STALE });
       assert.strictEqual(r.delivery.dispatched, 0);
       assert.strictEqual(r.delivery.undelivered, true);
     });

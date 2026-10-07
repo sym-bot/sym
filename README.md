@@ -127,8 +127,9 @@ participant.
   1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to resolve
   (`sym keys <name> resolve`). No source overrides a different key. A handshake alone binds a
   key only for its session; the binding becomes durable when it is earned (an admitted verified
-  record, a pin, an anchor-rooted grant in effect), so churning identities cannot fill the
-  registry, and nothing is ever evicted to make room.
+  record, a verified record its author signed to this node, a pin, an anchor-rooted grant in
+  effect), so churning identities cannot fill the registry, and nothing is ever evicted to make
+  room.
 - **Every record is signed, and verified by its author's node id.** A record is accepted only
   if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
   `createdByNodeId` — a key it proved, pinned from an invite, or holds from an anchor-rooted
@@ -141,7 +142,10 @@ participant.
   fresh for each handshake (X25519, HKDF-SHA256, ChaCha20-Poly1305). A relay sees routing
   envelopes and ciphertext. There is no long-lived encryption key to steal later.
 - **Authority follows the key.** A role grant names the key it confers authority on, and a
-  grant chain is checked with the keys each grant vouches, from the anchor down.
+  grant chain is checked with the keys each grant vouches, from the anchor down. A revoke signs a
+  cutoff: what the revoked node signed before it stands for every node, and what it signed from
+  the cutoff on never counts, so every node resolves the same authority whatever order it learned
+  the history in.
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
   evaluation on every record it hears and stores only what it admits.
 - **Bounded.** Every store a peer can feed — key bindings, grants, wake channels, gossip, relay
@@ -152,6 +156,10 @@ What this does not solve, said plainly:
 - **First contact** with a node you hold no anchor, invite or grant for is *trust on first
   proven use*: the handshake proves the peer holds the key it presents, not that the key is
   the one you meant. Pin it out of band (an invite carries the issuer's key) when that matters.
+  A node whose records yours never admitted, and that never signed a record to yours, is first contact
+  again once it leaves.
+- **A revoke's cutoff is a judgement.** A revoked node can still date a statement before its
+  cutoff, and that statement stands; set the cutoff back to when you stopped trusting it.
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
   replace another node's connection (close 4004). A squatter gets no Core Secure session — it
   cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
