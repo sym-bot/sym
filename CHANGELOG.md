@@ -13,6 +13,16 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### `message` and `mood-delivered` carry their provenance
+
+- **The `message` event's meta and the `mood-delivered` event carry `verified`, `profile`,
+  `verification` and `session`**, the same frozen facts, by the same field names, as an inbox entry,
+  so a host decides from the event alone (mesh-channel 0.11.0 resolved the signer's key through
+  `node.keyBindings()`, a separate and later view). A message and a mood from a record that verified
+  carry both; a mood frame (no record, nothing signed) carries `verification: null` and the facts of
+  the session it travelled sealed on; a record that did not verify, or a Legacy Import one, carries
+  neither, as its inbox entry does.
+
 ### The loaded version, and hot-swap
 
 - **`node.version`** (and `status().version`, and `require('@sym-bot/sym').version`) is the
