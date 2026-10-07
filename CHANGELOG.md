@@ -13,6 +13,28 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### Redelivery and inbox ids (founder's bug report, 2026-10)
+
+- **A delivery is surfaced once for the life of the store.** After a hot-swap (a new SymNode for the
+  same identity, as mesh-channel's `sym_join_room` builds) or a reconnect, records already received
+  and read came back as new deliveries with new inbox ids: the receive dedup was a TTL cache written
+  to disk at most every 5 s, so it did not outlive the instance. A delivery ledger
+  (`cmbs/.delivered-marks`, append-only, written before the delivery is announced) now keys every
+  surfaced record by its author and incoming key (the CMB key; for a directed record also its
+  assertion, so a new assertion of the same words is still a new delivery), and nothing in it is
+  surfaced again, by any instance or transport.
+- **An inbox id is assigned only once the item is durably in the inbox, and is never reused.** The
+  inbox was a snapshot written at most once a second, so a process that ended after announcing an id
+  lost the item ("not found") and the next instance announced the same id for another record. Every
+  inbox change (a delivery, a drain, an ack) is now appended to `inbox.log` before it takes effect,
+  and folded into `inbox.json` on start and on each snapshot.
+- **An unread item is never evicted.** The ring dropped its oldest item whatever it was; it now drops
+  only read ones, and past 4 x the ring of unread items a new delivery gets no id (counted,
+  `inbox-full-refused`, and said).
+- **One owner per inbox in a process.** A node built for an identity while another instance of it is
+  alive owns the inbox; the older assigns no ids and writes nothing, so a fetch reads the inbox the
+  announcement came from.
+
 ### The final re-review of f0d936a (BLOCK) — what changed
 
 The founder ruled three design changes; each is made where its assumption was, and the rule is in
