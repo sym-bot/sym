@@ -155,34 +155,56 @@ ever overrides a different key**; the old code's "strictly stronger source overr
   peer as its signer and the key that failed is the one the session proved. A relayed statement
   that fails is dropped and counted (`relayed-signature-unverified`), never charged to the
   relayer: the old penalty closed every honest peer that relayed the genuine statements of a node
-  whose nodeId a squatter held here.
+  whose nodeId a squatter held here. Not charging the relayer must not make forgeries free (final
+  re-review, Finding 3): a per-session record lane is spent before any work on a record, a
+  (relayer, signer) pair that fails 8 times in a minute has its statements for that signer
+  dropped unverified for the rest of the minute, and refusals are logged and recorded at most once
+  a minute per peer and reason.
+- **First contact is trust on first use, and one directed record makes it permanent (final
+  re-review, Finding 5).** A squatter that reaches a node first under a nodeId, and signs it one
+  directed record, holds that nodeId there durably; the genuine node is then refused with 1009.
+  That is the price of a nodeId that is not derived from its key. A key-derived nodeId (the nodeId
+  a hash of the identity key) would remove the squat entirely; it is a future spec change, noted in
+  §9.
 - "Last verified" and "last seen" persist with each durable binding.
 - Test: a flood of 20,000 one-shot identities ages out, and an honest long-lived peer survives.
 
 **Authority follows the key.**
 - `resolveRole(nodeId, key, at)`: a grant confers its role only when its `granteeKey` equals the
   grantee's bound key.
-- **A revoke carries a cutoff; receipt time is no part of authority (0.14.0 re-review, N2; the
-  founder's ruling).** The security round's "both times" rule (a statement counts only if its
-  signer was authorised when it signed and when this node received it; draft spec PR #33) failed
-  open: a validator's genuine revoke, received after the validator was itself revoked (by a
-  newcomer, an anti-entropy sync, or a store upgraded from 0.13), no longer counted, so authority
-  depended on arrival order. Now a revocation of a validator signs a cutoff, an invalidity date at
-  or before the revoke's own time (by default that time). What the validator signed before the
-  cutoff stands for every receiver, whenever it arrives; what it signed at or after the cutoff
-  never counts, even at times before the revoke was signed. That stops backdating without
-  depending on arrival: the revoker chooses how far back trust is withdrawn. A revoke counts only
-  when its revoker held the rank both at the revoke's signed time and at its cutoff, so a revoker
-  reaches back only over time it was itself authorised for. Grants keep §6.6's cascade (a grant
-  confers only while its grantor holds rank). Every time in the rule is signed; nothing stores a
-  receipt time, and the 0.13 grant file needs no rewrite (0.14.0 re-review, N5: the rewrite lost
-  the records skipped at load). The exact rule for the spec PR is in `docs/WIRE-0.14.0.md` §6 on
-  the release branch.
-- **No cap refuses a revoke (0.14.0 re-review, N4).** Grant caps (per grantor, per pair, in all)
-  bound grants only: a revoke refused by a full store leaves authority standing, which fails open.
-  Revokes are bounded by their grants: a non-anchor revoker keeps at most as many revokes for a
-  grantee as the node holds grants for it, and one that arrives before the grant waits for it
-  (`role-chain-fetch` naming the grantee).
+- **The kept set is a function of the records held (final re-review, Findings 1 and 2; the
+  founder's ruling A).** The 0.14.0 re-review still decided at ingest whether a record was rooted,
+  and bounded records with caps that refused newcomers, so two honest nodes holding the same records
+  kept different subsets by arrival order, their digests never converged, and every session between
+  them ran a whole-store sync. The assumption that changes: *a store decides at ingest what a record
+  means*. It decides only whether the record is verifiable; meaning is decided at resolution.
+  - Keep every verifiable record: its signature verifies under the anchor's key or a key a kept
+    grant vouches for its grantor. Rootedness is never asked at ingest, so `unrooted` is gone.
+  - Bound by a budget per delegation subtree: everything an anchor grantee and its descendants sign
+    counts against that one subtree (4,096 records); the anchor's own records are unbounded. A
+    compromised subtree fills only its own budget, so an honest revoke from another subtree is never
+    refused. The per-grantor, per-pair and store caps go (each could evict a voucher whose
+    dependents then freed room, which made the result depend on order).
+  - Inside a full budget the kept records are chosen by one total order on signed fields (signer
+    depth, revokes before grants, earliest cutoff or grant time, then signature), and a record that
+    loses is replaced. A revoker tightens its cutoff by signing another revoke; both are kept.
+  - Residual, said: a record refused for a budget is not kept for later; if a signer later gains a
+    shallower chain through another subtree, records refused in the budget it left come back only
+    when a peer offers them again (the next sync after digests differ).
+- **A revoke carries a cutoff; receipt time is no part of authority (0.14.0 re-review N2; the
+  founder's ruling).** The security round's "both times" rule (draft spec PR #33) failed open for
+  late receivers. A revoke signs a cutoff, required on every revoke this release signs (no
+  default). What the revoked node signs at or after the cutoff never counts.
+- **The anchor ratifies; a revoked key gains nothing by backdating (final re-review, Finding 4;
+  the founder's ruling B).** With a cutoff alone, a revoked key could still sign statements dated
+  before its cutoff after it was revoked, and they stood. Now a revoke may list (`ratify`) the
+  revoked node's earlier statements that stay valid. Any other statement it signed before the
+  cutoff counts only while it still holds the rank it needs: one ratified, or one whose signer is
+  not revoked, stands; anything else from a revoked key is void however it is dated. A revoker is
+  checked at every breakpoint from its cutoff to its signed time, not only at the two ends. An
+  attestation dated before the record it attests is refused. Grants keep §6.6's cascade unless
+  ratified. Every time in the rule is signed, or now; nothing stores a receipt time, and the grant
+  file is never rewritten (N5). The exact rule is `docs/WIRE-0.14.0.md` §6 on the release branch.
 - Grant chains are verified top-down **with the key each verified grant vouches** (§6.6: "using
   each verified grant's vouched key to reach the next"), not with whatever key the registry
   holds for the grantor.
@@ -301,6 +323,14 @@ ported under the XMesh design: each becomes a real node or goes.
      relies on the bundle's own signature.
    - The relay's 4004 replacement cannot produce two live copies, because the source is
      tombstoned before the bundle exists.
+   - **What "moved" needs (final re-review, Finding 7).** A passphrase bundle opens on every host
+     that has the passphrase, so it is a copy: bundles are sealed to the target host's key by
+     default, and a passphrase bundle needs an explicit `--allow-copies`. Each host refuses a
+     bundle it imported before and one exported at or before its own tombstone of that node (a
+     replay of an older move). The clear header carries the node's key and its signature and is
+     checked against the pin before its scrypt parameters are used. An import is staged and renamed
+     into place last, keeping file modes. Export refuses while a node in the same process holds the
+     identity, and a same-process re-acquire of its lock gets a release that does nothing.
 3. **The interior submission path (review H13).** A node exposes a local submission socket to
    its interior. A submission carries a **per-mind capability**: a random token the node issues
    when it starts a mind for one mission, revoked when that mind exits. A submission without a
@@ -318,6 +348,13 @@ ported under the XMesh design: each becomes a real node or goes.
      SVAF. The node does all three.
    - The 2026-08-02 Q1a fallback (a scoped signing grant to a worker) is superseded by this
      path, and recorded as such.
+   - **The read side is scoped to the mind's mission (final re-review, Finding 6; the founder's
+     ruling C).** A mind reads only what its mission may see: its own read view and cursor, holding
+     the deliveries that arrived while it runs, directed ones only from nodes in its `allowTo`
+     and room broadcasts; `recall` returns only the records in that view and the ones the mind
+     submitted; a `parents` key outside it is refused as if absent. `ack` acks only in the mind's
+     view, and a mind's reads never move the host's inbox cursor. Read requests are rate-limited
+     per mind. A mind for mission B therefore never sees mission A's deliveries or notes.
 
 ### D10. The 0.13.17 hotfix comes first (review H10)
 
@@ -347,7 +384,9 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
 
 ## 5. What this does not solve (said in README and SECURITY.md)
 
-- **First contact with no anchor, invite or grant** is trust on first proven use.
+- **First contact with no anchor, invite or grant** is trust on first proven use, and one
+  accepted directed record makes it permanent: a squatter that arrives first holds the nodeId.
+  Key-derived nodeIds would end this; a future spec change.
 - **Relay eviction:** `relay-auth` is unproven (§4.4.1), and 4004 lets a token holder evict a
   node (§4.4.7). §10 drafts the fix. Until then the session layer limits the damage: an evicted
   node re-handshakes, and a squatter gets no session.
@@ -434,6 +473,8 @@ which §6.6 requires. The Legacy Import interop test runs against a real 0.13.17
 - §3.4 rejects a duplicate nodeId, while §4.4.7 replaces it.
 - §17.3 names no wire format, selection or window for Legacy Import.
 - §14.12 "one member per session" against reused cognitive nodes (XMesh design).
+- §3.1: a nodeId is not bound to a key, so first contact is trust on first use. A nodeId derived
+  from the identity key would make a squat impossible (a future spec change).
 
 ## 10. Spec pull requests to draft (meshcognition-website; none merged without the user)
 
