@@ -13,6 +13,17 @@ key bindings (a lockout anyone on the LAN could fill) by the binding lifetime be
 in-memory pending set for grants that arrive before their root (which could be flooded) by
 `role-chain-fetch`.
 
+### The loaded version, and hot-swap
+
+- **`node.version`** (and `status().version`, and `require('@sym-bot/sym').version`) is the
+  `version` of the package.json loaded with the node: the string its hello announces as its
+  implementation, for a host's status line (mesh-channel's `sym_status`).
+- **Hot-swap is tested end to end** (`tests/hot-swap.test.js`): a host stops its node and builds the
+  next for the same identity in the same room, four times, over TCP on the loopback and over a relay.
+  Every round delivers and fetches the peer's new records by the ids announced, sends this node's
+  own, redelivers nothing the peer re-pushes, keeps every earlier id fetching its record, and logs no
+  null dereference (on 0.13 this broke as "Cannot read properties of null (reading 'close')").
+
 ### Redelivery and inbox ids (founder's bug report, 2026-10)
 
 - **A delivery is surfaced once for the life of the store.** After a hot-swap (a new SymNode for the
