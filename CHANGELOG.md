@@ -22,6 +22,11 @@ in-memory pending set for grants that arrive before their root (which could be f
   carry both; a mood frame (no record, nothing signed) carries `verification: null` and the facts of
   the session it travelled sealed on; a record that did not verify, or a Legacy Import one, carries
   neither, as its inbox entry does.
+- **`session` without `verification` means less than both.** An inbox entry never has one without
+  the other. A mood frame's `session` with `verification: null` says only that this session's proven
+  peer sent it, under the key that session proved (the frame is sealed on the session); it is not a
+  signed record. Nothing about it can be verified again later, relayed with its author's signature,
+  or attributed to anyone but that peer. A host shows it as the peer's word, not as a verified record.
 
 ### The loaded version, and hot-swap
 
