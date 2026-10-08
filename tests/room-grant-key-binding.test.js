@@ -43,8 +43,8 @@ const invitee = ed25519();         // the node the owner MEANT to admit
 const impostor = ed25519();        // anyone who sees the invite URL
 
 const ROOM = 'first-scar-strike';
-const OWNER_ID = 'node-owner-0001';
-const INVITEE_ID = 'node-invitee-0002';
+const OWNER_ID = '018f47a0-7b21-7abc-8def-0000000000a1'; // lowercase UUIDs: MMP §5.8.1's grant schema
+const INVITEE_ID = '018f47a0-7b21-7abc-8def-0000000000a2';
 
 let failures = 0;
 const check = (name, got, want) => {

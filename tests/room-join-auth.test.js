@@ -30,6 +30,14 @@ function keypair() {
 
 const ROOM = 'x-review--team-02779b950c3d8d7378fd11d6';
 
+// MMP §5.8.1's grant schema: grantee and grantedBy are lowercase UUIDs, and a grant names the key
+// it binds. A readable name in these tests stands for a fixed UUID; a grant minted without a key
+// binds a fresh one.
+const U = (name) => { if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(name))) return name; const h = crypto.createHash('sha256').update(String(name)).digest('hex'); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`; };
+function mint(fields, priv) {
+  return signRoomGrant({ ...fields, grantee: U(fields.grantee), grantedBy: U(fields.grantedBy), granteeKey: fields.granteeKey || keypair().pub }, priv);
+}
+
 describe('room ownability — derived from the mapping, not a hardcoded list', () => {
   it('ordinary and tenant-suffixed rooms are ownable', () => {
     assert.strictEqual(isOwnableRoom('backend-team'), true);
@@ -56,40 +64,40 @@ describe('room ownability — derived from the mapping, not a hardcoded list', (
 describe('the grant — mint and verify', () => {
   it('a grant minted by the owner verifies against the owner key', () => {
     const owner = keypair(), grantee = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'node-b', granteeKey: grantee.pub, grantedBy: 'node-a' }, owner.priv);
-    assert.deepStrictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'node-b', provenKey: grantee.pub }), { ok: true });
+    const g = mint({ room: ROOM, grantee: U('node-b'), granteeKey: grantee.pub, grantedBy: 'node-a' }, owner.priv);
+    assert.deepStrictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('node-b'), provenKey: grantee.pub }), { ok: true });
   });
 
   it('a DIFFERENT key never verifies it — the signature is the whole gate', () => {
     const owner = keypair(), impostor = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'node-b', grantedBy: 'node-a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, impostor.pub, { room: ROOM, grantee: 'node-b', provenKey: 'proof-not-under-test' }).ok, false);
+    const g = mint({ room: ROOM, grantee: U('node-b'), grantedBy: 'node-a' }, owner.priv);
+    assert.strictEqual(verifyRoomGrant(g, impostor.pub, { room: ROOM, grantee: U('node-b'), provenKey: 'proof-not-under-test' }).ok, false);
   });
 
   it('a grant for one room cannot be replayed into another', () => {
     const owner = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'node-b', grantedBy: 'node-a' }, owner.priv);
+    const g = mint({ room: ROOM, grantee: U('node-b'), grantedBy: 'node-a' }, owner.priv);
     const moved = { ...g, room: 'other-room--team-0123456789abcdef01234567' };
-    assert.strictEqual(verifyRoomGrant(moved, owner.pub, { room: moved.room, grantee: 'node-b', provenKey: 'proof-not-under-test' }).ok, false, 'signature binds the room');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: 'other-room', grantee: 'node-b', provenKey: 'proof-not-under-test' }).reason, 'room-mismatch');
+    assert.strictEqual(verifyRoomGrant(moved, owner.pub, { room: moved.room, grantee: U('node-b'), provenKey: 'proof-not-under-test' }).ok, false, 'signature binds the room');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: 'other-room', grantee: U('node-b'), provenKey: 'proof-not-under-test' }).reason, 'room-mismatch');
   });
 
   it('a grant for one grantee cannot be presented by another', () => {
     const owner = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'node-b', grantedBy: 'node-a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'node-c', provenKey: 'proof-not-under-test' }).reason, 'grantee-mismatch');
+    const g = mint({ room: ROOM, grantee: U('node-b'), grantedBy: 'node-a' }, owner.priv);
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('node-c'), provenKey: 'proof-not-under-test' }).reason, 'grantee-mismatch');
   });
 
   it('the grantee key is bound: swapping it breaks the signature', () => {
     const owner = keypair(), a = keypair(), b = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'node-b', granteeKey: a.pub, grantedBy: 'node-a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant({ ...g, granteeKey: b.pub }, owner.pub, { room: ROOM, grantee: 'node-b', provenKey: 'proof-not-under-test' }).ok, false);
+    const g = mint({ room: ROOM, grantee: U('node-b'), granteeKey: a.pub, grantedBy: 'node-a' }, owner.priv);
+    assert.strictEqual(verifyRoomGrant({ ...g, granteeKey: b.pub }, owner.pub, { room: ROOM, grantee: U('node-b'), provenKey: 'proof-not-under-test' }).ok, false);
   });
 
   it('an unownable room cannot be granted at all, at mint or at verify', () => {
     const owner = keypair();
-    assert.throws(() => signRoomGrant({ room: 'sym', grantee: 'n', grantedBy: 'o' }, owner.priv), /cannot be owned/);
-    assert.throws(() => signRoomGrant({ room: 'default', grantee: 'n', grantedBy: 'o' }, owner.priv), /cannot be owned/);
+    assert.throws(() => mint({ room: 'sym', grantee: U('n'), grantedBy: 'o' }, owner.priv), /cannot be owned/);
+    assert.throws(() => mint({ room: 'default', grantee: U('n'), grantedBy: 'o' }, owner.priv), /cannot be owned/);
   });
 });
 
@@ -103,11 +111,9 @@ describe('the payload is injective — a delimiter cannot shift a field boundary
     assert.ok(!a.equals(b), 'distinct grants must never share a preimage');
   });
 
-  it('a grant signed for one grantee does not verify when re-split across the key field', () => {
+  it('a grant cannot even be minted for a grantee that is not a UUID, so there is nothing to re-split', () => {
     const owner = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'x|y', granteeKey: 'z', grantedBy: 'o' }, owner.priv);
-    const resplit = { ...g, grantee: 'x', granteeKey: 'y|z' };
-    assert.strictEqual(verifyRoomGrant(resplit, owner.pub, { room: ROOM, grantee: 'x' }).ok, false);
+    assert.throws(() => signRoomGrant({ room: ROOM, grantee: 'x|y', granteeKey: keypair().pub, grantedBy: U('o') }, owner.priv), /not be well formed/);
   });
 
   it('the domain separator keeps a room grant from being read as any other signed object', () => {
@@ -120,7 +126,7 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
   it('the minter clamps a longer request to the cap', () => {
     const owner = keypair();
     const now = 1_700_000_000_000;
-    const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a', grantedAt: now, expiresAt: now + 365 * 86400_000 }, owner.priv);
+    const g = mint({ room: ROOM, grantee: U('b'), grantedBy: 'a', grantedAt: now, expiresAt: now + 365 * 86400_000 }, owner.priv);
     assert.strictEqual(g.expiresAt, now + MAX_GRANT_LIFETIME_MS, 'clamped at mint');
   });
 
@@ -129,12 +135,12 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
     // the clamp (or a hostile one) must not buy a longer window from this receiver
     const owner = keypair();
     const now = 1_700_000_000_000;
-    const g = { type: 'room-join', room: ROOM, grantee: 'b', granteeKey: 'k', grantedBy: 'a', grantedAt: now, expiresAt: now + 30 * 86400_000 };
-    g.sig = crypto.sign(null,
-      Buffer.from(`room-join|${g.room}|${g.grantee}||${g.grantedBy}|${g.grantedAt}|${g.expiresAt}`, 'utf8'),
+    const k = keypair().pub;
+    const g = { type: 'room-join', room: ROOM, grantee: U('b'), granteeKey: k, grantedBy: U('a'), grantedAt: now, expiresAt: now + 30 * 86400_000 };
+    g.sig = crypto.sign(null, roomGrantPayload(g),
       crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(owner.priv, 'base64url')]), format: 'der', type: 'pkcs8' })).toString('base64url');
     g.sigAlg = 'ed25519';
-    const v = verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', provenKey: 'k', now: now + 1000 });
+    const v = verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b'), provenKey: k, now: now + 1000 });
     assert.strictEqual(v.ok, false);
     assert.strictEqual(v.reason, 'lifetime-exceeds-cap', 'refused outright — the window is never the sender\'s choice');
   });
@@ -142,26 +148,26 @@ describe('the 24h cap IS the offline-revocation window — enforced by the recei
   it('an expired grant is refused, and skew is tolerated at the boundary', () => {
     const owner = keypair(), inv = keypair();
     const now = 1_700_000_000_000;
-    const g = signRoomGrant({ room: ROOM, grantee: 'b', granteeKey: inv.pub, grantedBy: 'a', grantedAt: now, expiresAt: now + 60_000 }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', provenKey: inv.pub, now: now + 30_000 }).ok, true, 'live');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', provenKey: inv.pub, now: now + 60_000 + EXPIRY_SKEW_MS - 1 }).ok, true, 'inside skew');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', provenKey: inv.pub, now: now + 60_000 + EXPIRY_SKEW_MS + 1 }).reason, 'expired');
+    const g = mint({ room: ROOM, grantee: U('b'), granteeKey: inv.pub, grantedBy: 'a', grantedAt: now, expiresAt: now + 60_000 }, owner.priv);
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b'), provenKey: inv.pub, now: now + 30_000 }).ok, true, 'live');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b'), provenKey: inv.pub, now: now + 60_000 + EXPIRY_SKEW_MS - 1 }).ok, true, 'inside skew');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b'), provenKey: inv.pub, now: now + 60_000 + EXPIRY_SKEW_MS + 1 }).reason, 'expired');
   });
 
   it('a grant from the future is refused beyond skew', () => {
     const owner = keypair(), inv = keypair();
     const now = 1_700_000_000_000;
-    const g = signRoomGrant({ room: ROOM, grantee: 'b', granteeKey: inv.pub, grantedBy: 'a', grantedAt: now, expiresAt: now + 3600_000 }, owner.priv);
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b', provenKey: inv.pub, now: now - EXPIRY_SKEW_MS - 1 }).reason, 'not-yet-valid');
+    const g = mint({ room: ROOM, grantee: U('b'), granteeKey: inv.pub, grantedBy: 'a', grantedAt: now, expiresAt: now + 3600_000 }, owner.priv);
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b'), provenKey: inv.pub, now: now - EXPIRY_SKEW_MS - 1 }).reason, 'not-yet-valid');
   });
 
   it('unsigned, wrong-typed and key-less inputs all fail closed', () => {
     const owner = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a' }, owner.priv);
-    assert.strictEqual(verifyRoomGrant({ ...g, sig: undefined }, owner.pub, { room: ROOM, grantee: 'b' }).reason, 'unsigned');
-    assert.strictEqual(verifyRoomGrant({ ...g, type: 'role-grant' }, owner.pub, { room: ROOM, grantee: 'b' }).reason, 'not-a-room-join-grant');
-    assert.strictEqual(verifyRoomGrant(g, null, { room: ROOM, grantee: 'b' }).reason, 'no-owner-key-pinned');
-    assert.strictEqual(verifyRoomGrant(null, owner.pub, { room: ROOM, grantee: 'b' }).ok, false);
+    const g = mint({ room: ROOM, grantee: U('b'), grantedBy: 'a' }, owner.priv);
+    assert.strictEqual(verifyRoomGrant({ ...g, sig: undefined }, owner.pub, { room: ROOM, grantee: U('b') }).reason, 'unsigned');
+    assert.strictEqual(verifyRoomGrant({ ...g, type: 'role-grant' }, owner.pub, { room: ROOM, grantee: U('b') }).reason, 'not-a-room-join-grant');
+    assert.strictEqual(verifyRoomGrant(g, null, { room: ROOM, grantee: U('b') }).reason, 'no-owner-key-pinned');
+    assert.strictEqual(verifyRoomGrant(null, owner.pub, { room: ROOM, grantee: U('b') }).ok, false);
   });
 });
 
@@ -252,13 +258,13 @@ describe('end to end: the incident this exists to make impossible', () => {
 
     // the stranger presents nothing — there is no path to admission
     assert.strictEqual(reg.isGated(ROOM), true);
-    assert.strictEqual(verifyRoomGrant(null, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: 'stranger-node', provenKey: 'anything' }).ok, false);
+    assert.strictEqual(verifyRoomGrant(null, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: U('stranger-node'), provenKey: 'anything' }).ok, false);
 
     // the owner deliberately admits a FOREIGN crew — sharing as an act
-    const grant = signRoomGrant(
+    const grant = mint(
       { room: ROOM, grantee: 'volunteer-node', granteeKey: volunteer.pub, grantedBy: 'owner-node' }, owner.priv);
     assert.strictEqual(
-      verifyRoomGrant(grant, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: 'volunteer-node', provenKey: volunteer.pub }).ok, true,
+      verifyRoomGrant(grant, reg.ownerOf(ROOM).publicKey, { room: ROOM, grantee: U('volunteer-node'), provenKey: volunteer.pub }).ok, true,
       'an open room stays possible — it is now a decision someone made');
   });
 });
@@ -266,17 +272,17 @@ describe('end to end: the incident this exists to make impossible', () => {
 describe('review folds — the guard cannot be defeated by how it is CALLED', () => {
   it('F2: omitting the expectation is a refusal, never a pass — no bearer tokens', () => {
     const owner = keypair();
-    const g = signRoomGrant({ room: ROOM, grantee: 'b', grantedBy: 'a' }, owner.priv);
+    const g = mint({ room: ROOM, grantee: U('b'), grantedBy: 'a' }, owner.priv);
     // the old default returned ok here: any copy of any unexpired grant, presented by anyone
     assert.strictEqual(verifyRoomGrant(g, owner.pub).reason, 'no-expectation');
     assert.strictEqual(verifyRoomGrant(g, owner.pub, {}).reason, 'no-expectation');
     assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM }).reason, 'no-expectation', 'room alone is not enough');
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { grantee: 'b' }).reason, 'no-expectation', 'grantee alone is not enough');
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { grantee: U('b') }).reason, 'no-expectation', 'grantee alone is not enough');
     // AND THE HALF THIS TEST WAS NAMED FOR BUT DID NOT COVER (2026-09-16): room + grantee alone
     // used to admit, which made the grant a bearer token for anyone holding the string. A proven
     // key is now part of the expectation, and its absence is a refusal like any other.
-    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b' }).ok, false, 'room + grantee alone is a bearer token');
-    assert.match(String(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: 'b' }).reason), /no-proven-key/);
+    assert.strictEqual(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b') }).ok, false, 'room + grantee alone is a bearer token');
+    assert.match(String(verifyRoomGrant(g, owner.pub, { room: ROOM, grantee: U('b') }).reason), /no-proven-key/);
   });
 });
 

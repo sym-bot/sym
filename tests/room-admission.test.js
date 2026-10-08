@@ -25,6 +25,8 @@ function keypair() {
 }
 
 const ROOM = 'x-review--team-02779b950c3d8d7378fd11d6';
+// MMP §5.8.1's grant schema: nodeIds are lowercase UUIDs. A readable name stands for a fixed one.
+const U = (name) => { const h = crypto.createHash('sha256').update(String(name)).digest('hex'); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`; };
 
 /** A receiver in `room`, optionally gating it with `owner`. */
 function receiver(room, owner) {
@@ -45,62 +47,64 @@ describe('ungated rooms admit every confirmed session', () => {
 describe('gated rooms — fail closed on proven keys, and the owner is never locked out', () => {
   it('a stranger with no grant is pending (refused when its handshake timeout passes)', () => {
     const owner = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    assert.deepStrictEqual(decide(r, 'stranger', keypair().pub), { pending: true });
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    assert.deepStrictEqual(decide(r, U('stranger'), keypair().pub), { pending: true });
   });
 
   it('the OWNER needs no grant in its own room — recognised by its pinned key, not its id', () => {
     const owner = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    assert.strictEqual(decide(r, 'owner-node', owner.pub).admit, true);
-    const imp = decide(r, 'owner-node', keypair().pub);
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    assert.strictEqual(decide(r, U('owner-node'), owner.pub).admit, true);
+    const imp = decide(r, U('owner-node'), keypair().pub);
     assert.strictEqual(imp.admit, false, 'the owner\'s id under another key is not the owner');
     assert.match(imp.reason, /under another key/);
   });
 
   it('a grantee is admitted when the grant binds the key its session proved; an impostor proving its own key is not', () => {
     const owner = keypair(), volunteer = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const grant = signRoomGrant({ room: ROOM, grantee: 'volunteer', granteeKey: volunteer.pub, grantedBy: 'owner-node' }, owner.priv);
-    assert.strictEqual(decide(r, 'volunteer', volunteer.pub, grant).admit, true, 'sharing stays possible, as an act');
-    const imp = decide(r, 'volunteer', keypair().pub, grant);
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    const grant = signRoomGrant({ room: ROOM, grantee: U('volunteer'), granteeKey: volunteer.pub, grantedBy: U('owner-node') }, owner.priv);
+    assert.strictEqual(decide(r, U('volunteer'), volunteer.pub, grant).admit, true, 'sharing stays possible, as an act');
+    const imp = decide(r, U('volunteer'), keypair().pub, grant);
     assert.strictEqual(imp.admit, false, 'a copied grant admits nobody: the binding is enforced');
     assert.match(String(imp.reason), /grantee-key-mismatch/);
   });
 
   it('a grant minted by someone who is NOT the owner is refused', () => {
     const owner = keypair(), impostor = keypair(), evil = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const forged = signRoomGrant({ room: ROOM, grantee: 'evil', granteeKey: evil.pub, grantedBy: 'owner-node' }, impostor.priv);
-    const d = decide(r, 'evil', evil.pub, forged);
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    const forged = signRoomGrant({ room: ROOM, grantee: U('evil'), granteeKey: evil.pub, grantedBy: U('owner-node') }, impostor.priv);
+    const d = decide(r, U('evil'), evil.pub, forged);
     assert.strictEqual(d.admit, false);
     assert.match(d.reason, /grant refused/);
   });
 
   it('a valid grant issued to SOMEONE ELSE cannot be presented by this session', () => {
     const owner = keypair(), alice = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const grant = signRoomGrant({ room: ROOM, grantee: 'alice', granteeKey: alice.pub, grantedBy: 'owner-node' }, owner.priv);
-    const d = decide(r, 'mallory', keypair().pub, grant);
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    const grant = signRoomGrant({ room: ROOM, grantee: U('alice'), granteeKey: alice.pub, grantedBy: U('owner-node') }, owner.priv);
+    const d = decide(r, U('mallory'), keypair().pub, grant);
     assert.strictEqual(d.admit, false);
     assert.match(d.reason, /grantee-mismatch/);
   });
 
   it('a grant that binds no key is a bearer token and is refused (§5.8.1)', () => {
     const owner = keypair(), bob = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
-    const bearer = signRoomGrant({ room: ROOM, grantee: 'bob', grantedBy: 'owner-node' }, owner.priv);
-    assert.strictEqual(decide(r, 'bob', bob.pub, bearer).admit, false);
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
+    assert.throws(() => signRoomGrant({ room: ROOM, grantee: U('bob'), grantedBy: U('owner-node') }, owner.priv), /not be well formed/, 'never minted');
+    const keyed = signRoomGrant({ room: ROOM, grantee: U('bob'), granteeKey: bob.pub, grantedBy: U('owner-node') }, owner.priv);
+    const { granteeKey, ...bearer } = keyed; void granteeKey;
+    assert.strictEqual(decide(r, U('bob'), bob.pub, bearer).admit, false);
   });
 
   it('an expired grant is refused at join', () => {
     const owner = keypair(), late = keypair();
-    const r = receiver(ROOM, { nodeId: 'owner-node', publicKey: owner.pub });
+    const r = receiver(ROOM, { nodeId: U('owner-node'), publicKey: owner.pub });
     const longAgo = Date.now() - 48 * 3600_000;
     const grant = signRoomGrant(
-      { room: ROOM, grantee: 'late', granteeKey: late.pub, grantedBy: 'owner-node', grantedAt: longAgo, expiresAt: longAgo + 3600_000 },
+      { room: ROOM, grantee: U('late'), granteeKey: late.pub, grantedBy: U('owner-node'), grantedAt: longAgo, expiresAt: longAgo + 3600_000 },
       owner.priv);
-    assert.match(decide(r, 'late', late.pub, grant).reason, /expired/);
+    assert.match(decide(r, U('late'), late.pub, grant).reason, /expired/);
   });
 });
 
