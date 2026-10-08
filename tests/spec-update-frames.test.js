@@ -144,6 +144,27 @@ describe('D4: a fetched record is attributed only after the whole of §8.8.5 (#2
     } finally { await stopAll(); }
   });
 
+  it('a record whose signature does not verify under its proven author\'s key comes back unverified', async () => {
+    try {
+      const A = node('d4-sig');
+      const B = identity('author-b');
+      A._roster.bind(B.nodeId, B.publicKey, 'proven');
+      const s = admitAs(A, B);
+      const rec = signedRecord(B, { room: A._room, categories: { focus: 'signed by B, then its signature swapped' } });
+      const other = signedRecord(B, { room: A._room, categories: { focus: 'another record by B' } });
+      const forged = JSON.parse(JSON.stringify(rec));
+      forged.metadata.sig = other.metadata.sig; // B's signature, over other bytes: the key and the assertion still match
+      const p = A.fetchCMB(rec.metadata.key, { timeoutMs: 2000 });
+      const reqId = [...A._cmbFetchPending.keys()][0];
+      A._frameHandler.handle(s, { type: 'cmb', cmb: forged });
+      A._frameHandler.handle(s, { type: 'cmb-fetch-result', reqId, returned: [rec.metadata.key], missing: [] });
+      const r = await p;
+      assert.strictEqual(r.verified, false);
+      assert.strictEqual(r.reason, 'bad-signature');
+      assert.strictEqual(r.cmb, undefined);
+    } finally { await stopAll(); }
+  });
+
   it('a record it holds under Legacy Import answers as its categories only', async () => {
     try {
       const A = node('d4-local');
