@@ -72,9 +72,10 @@ B cannot mint an invite for any room xmesh actually creates.
   bindings (a handshake-learned key is trusted on first use until Core Secure proves possession)
   with source precedence — anchor (2) > handshake (1) > grant (0);
   a gossiped grant can never overwrite a handshake-learned key; the relayer never vouches.
-- **Signed grants** along the rooted authority chain (`lib/role-grant-store.js`): a grant
-  binds the grantee's key into the grantor's signed payload — tamper-evident vouching that
-  already teaches third parties a key they never handshook.
+- **Signed grants** along the rooted authority chain (then `lib/role-grant-store.js`; since 0.14.0
+  MMP §6.6 statements, `lib/authority-store.js`): a grant binds the grantee's key into the grantor's
+  signed payload — tamper-evident vouching that already teaches third parties a key they never
+  handshook.
 - **Frame-level shared-secret encryption** (consumed by xmesh's control plane: "opened with
   the peer's shared secret"). The crypto for content protection exists; this design does not
   add any.
@@ -95,7 +96,8 @@ nobody: `default` stays open BY DESIGN, it is the public square). Joining an own
 presenting a **room-join grant**: a signed statement by the owner — v1 is OWNER-ONLY; the
 draft's "or a member the owner authorized to invite" smuggled in delegation with no depth,
 no attenuation and no bound, and the review struck it (delegation is its own future design,
-and role-grant-store already shows the chain problems it must solve) — binding
+and the role-grant chain of the time showed the problems it must solve; MMP §6.6 has since given
+roles depth, attenuation and bounds, and room-join grants stay outside it) — binding
 `{room, grantee nodeId, grantee pubkey, expiry}`. Grants have a MAXIMUM lifetime of 24h:
 that number IS the revocation exposure window for an offline peer (review F3 — revocation is
 live gossip with no catch-up replay on reconnect, so an offline peer's stale binding survives

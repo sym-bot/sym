@@ -1,0 +1,9 @@
+{
+  "note": "MMP v2.0 conformance artifacts vendored for sym's tests. Copied unchanged from sym-bot/meshcognition-website main at 8c3381d (PR #40, head ef1b542), public/spec/mmp/. The sha256 values equal that commit's public/spec/mmp/artifact-manifest.json; tests/authority-vectors.test.js checks them before it reads anything.",
+  "source": "https://github.com/sym-bot/meshcognition-website/tree/8c3381d/public/spec/mmp",
+  "files": {
+    "authority-v2.json": { "from": "conformance/v2/authority-v2.json", "sha256": "3cd656cec2c85f1b5658901aa4ed5a4fe9357e761600c64435a324538f8d46ce" },
+    "ed25519-strict-v2.json": { "from": "conformance/v2/ed25519-strict-v2.json", "sha256": "323d8d9f1a4ab985a53e3c7031e39c004e456df74a87a48550761160e3c1997b" },
+    "authority-frame.schema.json": { "from": "schema/authority-frame.schema.json", "sha256": "0e9fa987e8d38351ab28755f57d413d354fabd92cf968365b10845924f573a95" }
+  }
+}

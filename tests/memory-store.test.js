@@ -239,8 +239,8 @@ describe('MemoryStore', () => {
       const canon = store.write('grounded knowledge', { tags: ['canon-test'] });
 
       // Promote one to the Canon tier (validator authority required).
-      const res = store.validateCMB(canon.key, { byRole: 'validator' });
-      assert.ok(res.ok, 'validateCMB should succeed with validator role');
+      const res = store.validateCMB(canon.key, { lifecycle: 'validated' });
+      assert.ok(res.ok, 'validateCMB succeeds with validated authority over the CMB');
       assert.strictEqual(store.getLifecycle(canon.key), 'validated');
 
       // Backdate both far past any freshness window.

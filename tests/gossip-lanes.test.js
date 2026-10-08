@@ -35,8 +35,8 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { RelayConnection } = require('../lib/relay');
-const { RoleGrantStore } = require('../lib/role-grant-store');
-const { signAttestation, signCheckpoint, signWitness, signGrant, verifyGrant } = require('../lib/core');
+const Auth = require('../lib/core/authority');
+const { signAttestation, signCheckpoint, signWitness } = require('../lib/core');
 const { admitAs } = require('./_core-secure');
 
 const ROOM = 'g';
@@ -53,9 +53,6 @@ const forged = (k) => ({ of: `cmb-${++n}`, by: k.id, at: 1, roster: ROOM, verdic
 const hex = () => crypto.randomBytes(32).toString('hex');
 const CATS7 = { focus: 'admit', issue: 'admit', intent: 'guard', motivation: 'admit', commitment: 'silent', perspective: 'admit', mood: 'admit' };
 const wireForged = (k, extra = {}) => ({ of: `cmb-${hex()}`, assertionId: `asrt-${hex()}`, by: k.id, at: 1, room: ROOM, method: 'heuristic', verdict: 'aligned', categories: CATS7, role: 'participant', seq: ++n + 1, prev: hex(), sigAlg: 'ed25519', sig: forgedSig(), ...extra });
-// Since 0.14 every role-grant names the key it confers authority on (design D3).
-const SOME_KEY = Buffer.alloc(32, 9).toString('base64url');
-const forgedGrant = (by, grantee) => ({ type: 'role-grant', grantee, granteeKey: SOME_KEY, role: 'validator', grantedBy: by, grantedAt: ++n, sig: forgedSig(), sigAlg: 'ed25519' });
 const respell = (s) => [`${s}=`, `${s}==`, ` ${s}`, `${s.slice(0, 40)}\n${s.slice(40)}`, s.replace(/-/g, '+').replace(/_/g, '/'), `${s}!`].filter((x) => x !== s);
 
 /** A node (not started) on an injected clock, with what it gossips captured. */
@@ -77,104 +74,32 @@ function withNode(opts, fn) {
   }
 }
 
-describe('role grants are gossip under the budget (F1)', () => {
-  it('a captured grant re-spelled is refused or a repeat: never stored, written or relayed again, and nothing is spent', () => {
-    const A = kp('anchor-A');
-    withNode({ anchor: { nodeId: A.id, publicKey: A.pub } }, ({ node, sent }) => {
-      const g = signGrant({ type: 'role-grant', grantee: 'node-v', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
-      assert.strictEqual(node._ingestRoleGrant(g, 'p').ok, true);
-      assert.strictEqual(sent.length, 1, 'relayed once');
+describe('authority statements are gossip under the budget (F1, MMP §6.6.8)', () => {
+  it('a captured statement re-spelled is refused before the budget; a repeat is free; neither is held, written or relayed again', () => {
+    const A = kp('018f47a0-7b21-7abc-8def-0000000000f1');
+    withNode({ anchor: { threshold: 1, keys: [{ key: A.pub }] } }, ({ node, sent }) => {
+      const peer = admitAs(node, { nodeId: 'p' });
+      const V = kp('018f47a0-7b21-7abc-8def-0000000000f2');
+      const g = Auth.signStatement({ kind: 'grant', authorisedBy: 'anchor', subject: { nodeId: V.id, key: V.pub }, role: 'validator', nonce: Auth.freshNonce(), sigs: [] }, A.priv, A.pub);
+      assert.strictEqual(node._ingestAuthority(g, peer).result, 'held');
+      node._authoritySettle();
+      assert.strictEqual(sent.filter((f) => f.type === 'authority-statement').length, 1, 'relayed once');
       const tokens = node._gossipBuckets.get('p').tokens;
-      assert.strictEqual(node._gossipNewLane - tokens, 1, 'a new grant spent one');
-      const spellings = respell(g.sig);
-      assert.ok(spellings.length >= 5 && spellings.every((sig) => verifyGrant({ ...g, sig }, A.pub).valid), 'every spelling verifies: that was the amplification');
+      const spellings = respell(g.sigs[0].sig);
+      assert.ok(spellings.length >= 5);
       const reasons = new Set();
-      for (let i = 0; i < 6000; i++) {
-        const r = node._ingestRoleGrant({ ...g, sig: spellings[i % spellings.length] }, 'p');
-        assert.strictEqual(r.ok, false);
-        reasons.add(r.reason);
-      }
-      for (let i = 0; i < 1000; i++) reasons.add(node._ingestRoleGrant({ ...g }, 'q').reason);
-      assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'non-canonical-signature']);
-      assert.strictEqual(node._roleGrants.size(), 1, 'one grant held');
-      assert.strictEqual(node._roleGrants.grantsFor('node-v').length, 1);
-      const file = path.join(node._dir, 'role-grants', 'role-grants.jsonl');
+      for (let i = 0; i < 6000; i++) reasons.add(node._ingestAuthority({ ...g, sigs: [{ key: A.pub, sig: spellings[i % spellings.length] }] }, peer).result);
+      const q = admitAs(node, { nodeId: 'q' });
+      for (let i = 0; i < 1000; i++) reasons.add(node._ingestAuthority({ ...g }, q).result);
+      assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'invalid'], 'a spelling is not of the shape; the id is a repeat');
+      assert.strictEqual(node._authority.size(), 1, 'one statement held');
+      const file = path.join(node._dir, 'authority', `statements-${Auth.pinDigest(node._pin)}.jsonl`);
       assert.strictEqual(fs.readFileSync(file, 'utf8').trim().split('\n').length, 1, 'one line written');
-      assert.strictEqual(sent.length, 1, 'and nothing relayed again');
+      node._authoritySettle();
+      assert.strictEqual(sent.filter((f) => f.type === 'authority-statement').length, 1, 'and nothing relayed again');
       assert.strictEqual(node._gossipBuckets.get('p').tokens, tokens, 'nothing spent');
       assert.strictEqual(node._gossipBuckets.has('q'), false);
-      assert.strictEqual(node.metrics().signaturesNotCanonical, 6000, 'the refusals are counted');
     });
-  });
-
-  it("new grants spend the lane's budget before their signatures are checked, and only a grant kept is relayed", () => {
-    const A = kp('anchor-A');
-    withNode({ anchor: { nodeId: A.id, publicKey: A.pub } }, ({ node, sent }) => {
-      const P = kp('grantor-P');
-      const Q = kp('grantor-Q');
-      node._roster.bind(P.id, P.pub, 'proven');
-      node._roster.bind(Q.id, Q.pub, 'proven');
-      // Since 0.13.17 only a record rooted at the anchor is kept, or checked at all: P and Q are
-      // validators by the anchor's grant, so their grants are rooted and reach the signature check.
-      for (const G of [P, Q]) {
-        assert.strictEqual(node._roleGrants.record(signGrant({ type: 'role-grant', grantee: G.id, granteeKey: G.pub, role: 'validator', grantedBy: A.id, grantedAt: 0 }, A.priv)).stored, true);
-      }
-      const reasons = {};
-      for (let i = 0; i < 300; i++) {
-        const r = node._ingestRoleGrant(forgedGrant(P.id, `x-${i}`), 'p');
-        reasons[r.reason] = (reasons[r.reason] || 0) + 1;
-      }
-      assert.deepStrictEqual(reasons, { 'bad-signature': 100, 'over-budget': 200 }, 'a new peer checks 100, then refuses unverified');
-      // A grantor whose key is not held costs nothing.
-      for (let i = 0; i < 100; i++) assert.strictEqual(node._ingestRoleGrant(forgedGrant('nobody', 'x'), 'p5').reason, 'unknown-grantor-key');
-      assert.strictEqual(node._gossipBuckets.has('p5'), false);
-      assert.strictEqual(sent.length, 0, 'nothing refused was relayed');
-      // Genuine grants from one grantor: kept within its delegation subtree's budget (final re-review
-      // ruling A), and only those relayed.
-      node._roleGrants._budget = 16;
-      let kept = 0;
-      for (let i = 0; i < 70; i++) {
-        const r = node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: P.id, grantedAt: i }, P.priv), 'p2');
-        if (r.ok) kept++; else assert.strictEqual(r.reason, 'outranked');
-      }
-      assert.strictEqual(kept, 16, 'P\'s subtree holds its budget: the 16 earliest');
-      assert.strictEqual(sent.length, 16);
-      // Another subtree's grant to the same grantee is not kept out by P's.
-      assert.strictEqual(node._ingestRoleGrant(signGrant({ type: 'role-grant', grantee: 'node-x', granteeKey: SOME_KEY, role: 'validator', grantedBy: Q.id, grantedAt: 1 }, Q.priv), 'p3').ok, true);
-    });
-  });
-
-  it("the store dedups by the signature's bytes, keeps the canonical spelling, and keeps each subtree within its budget by one order", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grants-'));
-    try {
-      const A = kp('A');
-      const P = kp('P');
-      const Q = kp('Q');
-      const opts = { anchor: { nodeId: A.id, publicKey: A.pub }, dir, subtreeBudget: 3 };
-      const st = new RoleGrantStore(opts);
-      const keyOf = (grantee) => ({ [P.id]: P.pub, [Q.id]: Q.pub })[grantee] || SOME_KEY;
-      const grant = (by, grantee, at) => signGrant({ type: 'role-grant', grantee, granteeKey: keyOf(grantee), role: 'validator', grantedBy: by.id, grantedAt: at }, by.priv);
-      const g = grant(A, 'v', 1);
-      assert.strictEqual(st.record({ ...g, sig: `${g.sig}=` }).stored, true, 'a direct caller may hand over another spelling');
-      assert.strictEqual(st.grantsFor('v')[0].sig, g.sig, 'it is kept as its signer wrote it');
-      for (const sig of [g.sig, ...respell(g.sig)]) assert.strictEqual(st.record({ ...g, sig }).reason, 'duplicate');
-      assert.strictEqual(st.has(` ${g.sig}`), true);
-      assert.strictEqual(st.size(), 1);
-      for (const G of [P, Q]) assert.strictEqual(st.record(grant(A, G.id, 0)).stored, true);
-
-      const r = (by, grantee, at) => st.record(grant(by, grantee, at)).reason ?? 'stored';
-      assert.deepStrictEqual([r(P, 'x', 5), r(P, 'y', 6), r(P, 'z', 7)], ['stored', 'stored', 'stored']);
-      assert.strictEqual(r(P, 'w', 8), 'outranked', 'past the budget a later record loses');
-      assert.strictEqual(r(P, 'u', 2), 'stored', 'an earlier one replaces the last kept');
-      assert.deepStrictEqual(st.grantsFor('z'), [], 'the last-ranked record was replaced');
-      assert.strictEqual(st.record(forgedGrant(P.id, 'w')).reason, 'bad-signature', 'refused before it could rank');
-      assert.deepStrictEqual([r(Q, 'x', 6), r(Q, 'y', 7)], ['stored', 'stored'], 'Q\'s subtree has its own budget');
-      assert.deepStrictEqual([r(A, 'x', 8), r(A, 'z', 9)], ['stored', 'stored'], "the anchor's own are never bounded");
-      const again = new RoleGrantStore(opts);
-      assert.strictEqual(again.size(), st.size(), 'a restart keeps what the rule keeps');
-      assert.strictEqual(again.digest().digest, st.digest().digest);
-      assert.strictEqual(again.resolveRole('x', 100), 'validator');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
 
@@ -201,7 +126,7 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
     });
   });
 
-  it('a peer\'s frames over any of its sessions spend one budget; checkpoints, witnesses and grants too', () => {
+  it('a peer\'s frames over any of its sessions spend one budget; checkpoints, witnesses and authority statements too', () => {
     withNode({}, ({ node }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
@@ -211,14 +136,19 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
       for (let i = 0; i < 10; i++) {
         node._frameHandler.handle(lan, { type: 'sym-attest-checkpoint', checkpoint: { by: A.id, room: ROOM, uptoSeq: i + 1, root: hex(), at: 1, sigAlg: 'ed25519', sig: forgedSig() } });
         node._frameHandler.handle(relay, { type: 'sym-attest-witness', witness: { attester: A.id, room: ROOM, uptoSeq: i + 1, root: hex(), by: A.id, role: 'participant', at: 1, sigAlg: 'ed25519', sig: forgedSig() } });
-        node._frameHandler.handle(lan, { type: 'role-grant', grant: forgedGrant(A.id, `x-${i}`) });
       }
       assert.deepStrictEqual([...node._gossipBuckets.keys()], ['peer-two-paths']);
-      // A role grant from a grantor no chain reaches costs nothing (0.13.17, 0.14 D3). The first 8
-      // statements for A that fail spend the one budget; past them this peer's statements for A are
-      // dropped unverified for the minute, spending nothing (final re-review, Finding 3).
+      // The first 8 statements for A that fail spend the one budget; past them this peer's statements
+      // for A are dropped unverified for the minute, spending nothing (final re-review, Finding 3).
       assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('peer-two-paths').tokens, 8, 'each spent one of the one budget, until the signer was muted');
       assert.strictEqual(node._relayMuted('peer-two-paths', A.id), true);
+      // Authority statements over either path draw on the same budget.
+      const before = node._gossipBuckets.get('peer-two-paths').tokens;
+      const stmt = () => ({ kind: 'grant', authorisedBy: 'anchor', subject: { nodeId: '018f47a0-7b21-7abc-8def-0000000000f3', key: A.pub }, role: 'admin', nonce: Auth.freshNonce(), sigs: [{ key: A.pub, sig: forgedSig() }] });
+      node._frameHandler.handle(lan, { type: 'authority-statement', statement: stmt() });
+      node._frameHandler.handle(relay, { type: 'authority-statement', statement: stmt() });
+      assert.deepStrictEqual([...node._gossipBuckets.keys()], ['peer-two-paths']);
+      assert.ok(node._gossipBuckets.get('peer-two-paths').tokens <= before - 2);
     });
   });
 
@@ -342,23 +272,25 @@ describe('an over-long signature (F5)', () => {
       let lookups = 0;
       const has = node._attestations.has.bind(node._attestations);
       node._attestations.has = (sig) => { lookups++; return has(sig); };
-      let grantLookups = 0;
-      const grantHas = node._roleGrants.has.bind(node._roleGrants);
-      node._roleGrants.has = (sig) => { grantLookups++; return grantHas(sig); };
       const att = signed({ of: 'cmb-1', by: A.id, at: 1, roster: ROOM, method: 'heuristic', verdict: 'aligned', categories: {}, role: 'participant', seq: 1, prev: 'p' }, A.priv, signAttestation);
       const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
       const w = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
-      const g = signGrant({ type: 'role-grant', grantee: 'v', granteeKey: SOME_KEY, role: 'validator', grantedBy: A.id, grantedAt: 1 }, A.priv);
       const ingest = (sig) => [
         node._ingestAttestation({ ...att, sig }, 'p', 'p').reason,
         node._ingestCheckpoint({ ...cp, sig }, 'p').reason,
         node._ingestWitness({ ...w, sig }, 'p').reason,
-        node._ingestRoleGrant({ ...g, sig }, 'p').reason,
       ];
-      for (const sig of [`${att.sig}${'A'.repeat(900_000)}`, 'A'.repeat(129), '', undefined, 42]) assert.deepStrictEqual(ingest(sig), ['malformed', 'malformed', 'malformed', 'malformed']);
-      assert.deepStrictEqual(ingest('A'.repeat(128)), Array(4).fill('non-canonical-signature'), '128 characters is not too long');
-      assert.deepStrictEqual(ingest(`${att.sig}=`), Array(4).fill('non-canonical-signature'));
-      assert.deepStrictEqual([lookups, grantLookups], [0, 0], 'none was looked up');
+      for (const sig of [`${att.sig}${'A'.repeat(900_000)}`, 'A'.repeat(129), '', undefined, 42]) assert.deepStrictEqual(ingest(sig), ['malformed', 'malformed', 'malformed']);
+      assert.deepStrictEqual(ingest('A'.repeat(128)), Array(3).fill('non-canonical-signature'), '128 characters is not too long');
+      assert.deepStrictEqual(ingest(`${att.sig}=`), Array(3).fill('non-canonical-signature'));
+      assert.strictEqual(lookups, 0, 'none was looked up');
+      // An authority statement's signature is exactly 86 canonical characters (§6.6.3): anything else is
+      // not of the shape, refused before the budget, any decoding or the store.
+      const session = admitAs(node, { nodeId: 'p' });
+      const stmt = { kind: 'grant', authorisedBy: 'anchor', subject: { nodeId: '018f47a0-7b21-7abc-8def-0000000000f4', key: A.pub }, role: 'admin', nonce: Auth.freshNonce() };
+      for (const sig of [`${att.sig}${'A'.repeat(900_000)}`, 'A'.repeat(129), 'A'.repeat(128), `${att.sig}=`, '', 42]) {
+        assert.strictEqual(node._ingestAuthority({ ...stmt, sigs: [{ key: A.pub, sig }] }, session).result, 'invalid');
+      }
       assert.strictEqual(node._ingestAttestation(att, 'p', 'p').ok, true);
       assert.strictEqual(lookups, 1, 'a canonical one is');
     });

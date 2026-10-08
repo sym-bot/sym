@@ -10,8 +10,75 @@ to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm f
 follow-ups). **0.13.17 was never released:** its fixes and their tests ship in 0.14.0 (no more
 0.13.x releases), except two mechanisms 0.14's design replaces — the cap of 16,384 never-evicted
 key bindings (a lockout anyone on the LAN could fill) by the binding lifetime below, and the
-in-memory pending set for grants that arrive before their root (which could be flooded) by
-`role-chain-fetch`.
+in-memory pending set for grants that arrive before their root (which could be flooded), now by
+§6.6's bounded pending statements (below).
+
+### Authority: MMP §6.6 as merged (supersedes every grant rule further down)
+
+The founder merged the spec's new §6.6 (sym-bot/meshcognition-website main at 8c3381d, PR #40):
+authority is a function of a set of hash-linked signed statements, with no time in it. sym 0.14.0
+implements it as written and drops the time-replay rule the sections below built up during this
+release: cutoffs, ratification, budgets per delegation subtree, `role-chain-fetch`, `role-chain`
+and `role-digest`. Where a section below describes grants or revokes, this section is what holds.
+
+- **Statements (§6.6.3).** `grant`, `revoke` and `endorse`, each identified by `auth-` + SHA-256
+  of its canonical bytes (`mmp-authority-v1`), naming its authority in `authorisedBy` and its
+  targets by id, with a 16-byte nonce; `issuedAt` is signed and never read. Validity is static:
+  well formed (a subject key of prime order included), rooted within 4 links, signed, permitted.
+  (lib/core/authority.js)
+- **The anchor (§6.6.1)** is a pinned key set with a threshold:
+  `anchor: { threshold, keys: [{ key, nodeId? }] }`; the old `{ nodeId, publicKey }`, a
+  `"nodeId:publicKey"` string and `SYM_FOUNDER_ANCHOR` are the 1-of-1 set. An anchor-level statement
+  needs t distinct pinned keys that verify, each copy judged on its own entries. A pin that does not
+  parse stops the node; with none pinned nothing is in force and the configured `lifecycleRole`
+  stands (a closed development mode).
+- **Roles (§6.6.2).** admin, validator, issuer and non-authority roles (participant, extension
+  roles), with the spec's table for who may grant, revoke and endorse; an optional scope that only
+  narrows, by whole segments, compared exactly.
+- **Resolution (§6.6.4 to §6.6.7).** Per depth, revokes and endorses, then grants; a bucket keeps
+  its own first, by ascending id, within 256 statements (the anchor's 4,096) and 16 delegating
+  grants; a statement a revoke cut off is rescued only by an in-force endorse from above, charged to
+  the endorser's bucket and falling through by id; a quota cut is never rescued. The live set and
+  the authority root. (lib/authority-store.js)
+- **Frames (§6.6.8).** `authority-statement`, `authority-digest` (on confirm, and after a change at
+  most once a second per session), `authority-fetch` (by ids, or a page after a cursor) and
+  `authority-set` (at most 64, in authority order); pending statements per session (at most 64, 10
+  s, one fetch in flight per missing id). Answers are paced at 4 a second per session (burst 16) by
+  waiting, not refusing; a pull is paced by the work it causes and never cut short; a key not seen
+  before costs the gossip lane 16 checks (§6.6.12). `role-grant`, `role-revoke`, `role-chain-fetch`,
+  `role-chain` and `role-digest` are retired: ignored, counted, never sent (§6.6.11). `cmb-anchors`
+  is now sent on every admitted session (`keys: []` when nothing is replayed), so a relay client
+  still hears a sealed frame before its new session supersedes the old. (lib/node-authority.js;
+  docs/WIRE-0.14.0.md §1, §3)
+- **Using authority (§6.6.9, §6.6.10).** Roles follow the key: a grant names a nodeId and a key and
+  confers its role on that pair. An in-force grant is a key-registry view for an unbound nodeId; a
+  grant naming this node with a foreign key confers nothing and is reported
+  (`authority-foreign-self-key`). A received record's origin weight, `validateCMB` and `canonizeCMB`
+  (judged on that CMB's own fields; a scoped grant only inside its scope, through the host's
+  `authorityScopes`) and attestation weights are judged against the in-force set when applied.
+- **One Ed25519 rule (§18.3.2)** for every signature sym checks: records, handshake proofs,
+  attestations, checkpoints, witnesses, room-join grants, tether attestations, relocation bundles
+  and authority statements (lib/core/ed25519.js).
+- **Migration (§6.6.11).** A flag day: role grants signed by 0.13 or earlier 0.14 builds confer
+  nothing, and every node resolves as a participant until the anchor and each grantor re-issue what
+  should stand. `node.legacyRoleGrants()` lists the old store as plain data for that. 0.13 `grant`
+  roster entries stay legacy claims.
+- **API.** `node.grant(subject, role, { scope })`, `revoke(ids)`, `endorse(ids)`,
+  `authorityStatement(fields, opts)`, `cosignAuthority(statement)`, `submitAuthority(statement)`,
+  `authorityRoles(nodeId, key?)`, `authorityRoot()`, `authorityStatus()`,
+  `lifecycleAuthority(nodeId, key, cmb)`, `resolveRole(nodeId, { key, cmb })` (no time argument);
+  `grantRole(nodeId, role, opts)` and `revokeRole(nodeId)` keep their names, with no cutoff.
+  `roleStatementsBy`, `ECUTOFF` and `ratify` are gone; `status().coreSecure.authority` replaces
+  `roleChain`; the `authority-changed` event says when the root moves.
+- **Gone with the time rule.** An attestation dated before the record it attests is no longer
+  refused: no authority is judged at a time, so an attestation's time is no part of its weight.
+- **Tests.** The published vectors are vendored in tests/fixtures with their sha256 recorded
+  (SOURCES.json, checked before use): every authority case resolved as listed, reversed, shuffled
+  and with forged copies, and every Ed25519 case (authority-vectors). The review attacks at full
+  scale and the old faces (arrival order, backdating, floods, cycles) in authority-attacks; two
+  nodes reaching one root over TCP, the frames and their bounds, persistence in authority-node;
+  the one rule at every verification site in ed25519-strict; roles and weights in
+  earned-authority-node.
 
 ### `message` and `mood-delivered` carry their provenance
 
@@ -62,6 +129,9 @@ in-memory pending set for grants that arrive before their root (which could be f
   announcement came from.
 
 ### The final re-review of f0d936a (BLOCK) — what changed
+
+(Rulings A and B below, and the grant rules they describe, are superseded by MMP §6.6: see
+"Authority: MMP §6.6 as merged" above.)
 
 The founder ruled three design changes; each is made where its assumption was, and the rule is in
 `docs/WIRE-0.14.0.md` §6 and §7 and the design doc (branch `design/0.14.0-core-secure-identity`).
@@ -117,6 +187,9 @@ The founder ruled three design changes; each is made where its assumption was, a
 
 ### The re-review at 72daeb6 — what changed
 
+(N2, N4 and N5 below, on grants and revokes, are superseded by MMP §6.6: see "Authority: MMP §6.6
+as merged" above.)
+
 Five findings and the open leads, each fixed where its assumption was made (the design is
 `docs/DESIGN-core-secure-identity.md` on branch `design/0.14.0-core-secure-identity`; the wire text
 for the spec PRs is `docs/WIRE-0.14.0.md` §6 and §7):
@@ -170,6 +243,9 @@ for the spec PRs is `docs/WIRE-0.14.0.md` §6 and §7):
   point.
 
 ### The independent security review (BLOCK at 341dafb) — what changed
+
+(What this section says about role grants, revokes, `role-chain-fetch` and `role-digest` is
+superseded by MMP §6.6: see "Authority: MMP §6.6 as merged" above.)
 
 Seven design assumptions, each changed where it was made, not patched where it showed:
 
@@ -260,6 +336,9 @@ Seven design assumptions, each changed where it was made, not patched where it s
 
 ### Core Secure — breaking
 
+(Where this section speaks of role grants, revokes or their frames, MMP §6.6 supersedes it: see
+"Authority: MMP §6.6 as merged" above.)
+
 - **A peer is a proven session.** A sym peer used to exist before anything was proven about it: on
   TCP connect, on any first `handshake` frame (whose keys were pinned), on a relay's
   `relay-peer-joined`. Now every transport — LAN TCP, loopback, relay — runs the MMP §5.2
@@ -345,6 +424,9 @@ Seven design assumptions, each changed where it was made, not patched where it s
   a node in another room refuses it at the handshake.
 
 ### Core Secure — new API (for hosts: XMesh, mesh-channel)
+
+(Where this section speaks of role grants, revokes or their frames, MMP §6.6 supersedes it: see
+"Authority: MMP §6.6 as merged" above.)
 
 - `node.on('verified-record', ({ record, session, verification }) => …)`: every record that
   passed §8.8.5, with the proven session facts (`nodeId`, `name`, `identityKey`, `sessionId`,
@@ -731,6 +813,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   the oldest from the head.
 
 ### Fixed — signed gossip is budgeted, per connection and per attester
+
+(Where this section speaks of role grants, revokes or their frames, MMP §6.6 supersedes it: see
+"Authority: MMP §6.6 as merged" above.)
 
 - **New signed statements are budgeted (0.13.15's other known limit).** The attestations,
   checkpoints, witnesses and role grants that arrive on one connection may make this node check at most

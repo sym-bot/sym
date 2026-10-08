@@ -36,8 +36,8 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   binding is earned — an admitted verified record, a verified record its author signed to this
   node and this node accepted for delivery (directed exchange is a relationship, so a squatter
   cannot take over a conversation once its peer's sessions end), an out-of-band pin (invite, Legacy
-  Import route), or an anchor-rooted grant in effect now (a grant binding is a view over the grants
-  in effect, never stored, and ends with them) — and never replaces it: a different key, from any source or
+  Import route), or an in-force grant (MMP §6.6.9: a view over the in-force set, never stored, binding
+  only an unbound nodeId, and ending with the grant) — and never replaces it: a different key, from any source or
   while a session holds the nodeId, is a recorded conflict an operator resolves (a session
   proving it is closed with error 1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one,
   earns nothing; nothing is evicted before it expires; a `proven` binding that verified nothing
@@ -54,22 +54,45 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   `lineage.method`) are dropped, and what is stored, delivered and served is the projection.
   Directed versus room-bound delivery is decided by the signed `metadata.to`, never by a relay
   envelope; a directed record older than 24 h by its signed time is refused.
-- **Authority follows the key, and every node that holds the same grants resolves the same
-  authority.** A role grant must name `granteeKey`; it confers its role only on that key, and a chain
-  is verified top-down with each kept grant's vouched key. A store keeps every grant or revoke whose
-  signature it can verify, and decides its effect only when it resolves a role, so what it keeps
-  and what it resolves depend on the records it holds, never on the order they arrived in
-  (docs/WIRE-0.14.0.md §6).
-- **A revoke carries a cutoff, and a revoked key gains nothing by backdating.** Every revoke this
-  release signs names its cutoff (no default). What the revoked node signed at or after the cutoff
-  never counts. What it signed before the cutoff counts only while it still holds the rank the
-  statement needs, or when an effective revoke of it ratifies that statement by its signature (the
-  revoker lists the statements that stay valid). So a key signing after its revoke, dated before it,
-  achieves nothing. A revoker counts only if it held the rank at every point from its cutoff to its
-  signed time. A grant also confers only while its grantor still holds rank (MMP §6.6's cascade),
-  unless ratified. An attestation counts with its signer's role when it signed, by the same rule,
-  and one dated before the record it attests is refused. A grantor whose nodeId an impostor holds
-  keeps exactly its vouched authority; the impostor gets none.
+- **Authority is a function of a set of signed statements (MMP §6.6, as merged at
+  meshcognition-website 8c3381d).** Grants, revokes and endorses are identified by the SHA-256 of
+  their canonical signed bytes and name one another by those ids (`authorisedBy`, `targets`), so the
+  graph is fixed when it is signed. They root at a pinned anchor: a key set with a threshold
+  (`anchor` option or `SYM_FOUNDER_ANCHOR`; a pin that does not parse stops the node, and with none
+  pinned nothing is in force). A node resolves what it holds by §6.6.4's two-phase, depth-ordered
+  rule, and nothing else enters: no clock, no receipt time, no arrival order, no session. `issuedAt`
+  is signed and ignored. Two nodes holding the same statements under the same pin compute the same
+  in-force set and the same authority root. Tested: every case of the published vectors
+  (authority-v2.json, vendored with its hash) resolved as listed, reversed, shuffled and with forged
+  copies mixed in; random meshes in many orders; two nodes fed in different orders over TCP.
+- **Roles follow the key.** A grant names a nodeId and a key, and confers its role on that pair only.
+  A statement's signing key comes from its authorising grant, or the pin, never from the key
+  registry, so every node verifies it alike. A grant naming this node's nodeId with a foreign key
+  confers nothing here and is reported (`authority-foreign-self-key`).
+- **Delegation is bounded by the rule, not by arrival.** At most 4 links from the anchor. An admin
+  grants any role and revokes and endorses below itself; a validator or an issuer grants
+  non-authority roles only and revokes below itself. A scope only narrows, by whole path segments,
+  compared exactly (`w1/../w2`, `w1/./x` are not well formed; `w10` is not inside `w1`). A bucket
+  (the statements one grant authorises) keeps at most 256 (the anchor's 4,096), of them at most 16
+  delegating grants, its revokes and endorses first, then by ascending id. A revoke removes only
+  below its signer. A statement a quota cut off is never rescued; one a revoke cut off is kept only
+  by an in-force endorse from above, charged to the endorser's own bucket, falling through to the
+  next endorser when that bucket is full. So the reviewers' attacks fail: admins hung under
+  over-quota grants stay dead, a self-revoke cannot launder them past a full delegate quota, and 17
+  issuers in one bucket leave 16 in force. What one depth-1 grant can hold in force below it is at
+  most 69,888 statements, 4,368 of them delegating.
+- **Authority is judged when it is used.** The origin weight of a received record, this node's
+  lifecycle transitions on a CMB (`validateCMB`, `canonizeCMB`: judged on that CMB's own signed
+  fields, a scoped grant only inside its scope) and the weight of an attestation are each judged
+  against the in-force set at the moment they are applied. There is no role "at a time": once a
+  signer's grant is not in force, nothing it signs carries authority, whatever time it claims.
+- **One Ed25519 rule (MMP §18.3.2).** Every signature sym checks (records, handshake proofs,
+  attestations, checkpoints, witnesses, room-join grants, tether attestations, relocation bundles,
+  authority statements) goes through one verifier: A a canonical encoding of a point of prime order
+  (cached per key), R not the identity's encoding, S < L, then OpenSSL's check. A grant's subject key
+  must be of prime order too. Tested with the published vectors (ed25519-strict-v2.json) and, at each
+  of those sites, with two signatures Node's `crypto.verify` accepts and the rule rejects (the
+  identity key's universal forgery, and R = identity with S = k·a).
 - **A forgery in a session's own name ends the session.** A statement that names the session's own
   peer as its signer and does not verify under the key that session proved closes it, and its
   nodeId is not admitted again for 60 s. A statement the session relays for another signer is
@@ -79,7 +102,10 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   verification lane (32 a second, burst 128) before any work is done on them, and once 8 of one
   peer's statements for one signer have failed within a minute, that peer's statements for that
   signer are dropped unverified for the rest of the minute. A refused record is logged and recorded
-  in the decision log at most once a minute per peer and reason.
+  in the decision log at most once a minute per peer and reason. Authority statements are verified
+  under the keys their own chains name, so this question does not arise for them: one that fails is
+  dropped and counted against the delivering session, and past 8 failures a minute under one signing
+  key that session's statements under that key are dropped unread.
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
@@ -119,21 +145,22 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   a newcomer is refused a durable binding and its live session still verifies what it signs. Key
   conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
   (`status().coreSecure.keyConflicts`).
-- **Role grants**: the anchor's own records are not limited; everything else is bounded per
-  delegation subtree: everything an anchor grantee and its descendants sign shares one budget of
-  4,096 records. A compromised subtree fills only its own budget, so a revoke from another subtree
-  is never refused. Inside a full budget the records kept are chosen by one order on signed fields
-  (shallower signers first, revokes before grants, earlier cutoffs and grants first, then the
-  signature), and a record that ranks above the last one kept replaces it. A revoke lists at most
-  64 ratified statements. A nodeId in a grant is canonical lowercase of at most 128 characters, a
-  role name at most 32. A delegation reaches at most 8 grants from the anchor, and
-  role resolution is memoised. A record whose grantor no kept grant vouches is held only while its
-  chain is fetched from the session that delivered it (`role-chain-fetch`): at
-  most 64 records and 64 KiB per session, for at most 10 s; a fetch names at most 16 grantors, an
-  answer carries at most 64 grants, and a node answers at most 4 fetches a second per session
-  (burst 16). A whole-store sync (on a differing `role-digest`) is at most 1,024 pages of 64.
-- **Gossip** (attestations, checkpoints, witnesses, grants): 2,000 new statements a second per
-  proven peer (burst 10,000; a new peer starts at 100), spent before a signature is checked, and
+- **Authority statements** (MMP §6.6): what is in force is bounded by the quotas above. What is
+  held: at most 200,000 statements; past that the ones not in the live set go first (highest id
+  first), and a new one is refused only when the live set alone fills the store. A statement is at
+  most 16 signature entries, 64 targets and a 256-character scope, in the schema's shape (anything
+  else is refused before any work). A statement whose chain is not held is pending: its own
+  signature checked first, at most 64 held per session, keyed by id and signing key, for at most
+  10 s or until the session closes, never persisted, relayed or counted, with one fetch in flight per
+  missing id. An `authority-set` carries at most 64 statements. A node answers `authority-fetch` at 4
+  a second per session (burst 16); over that a request waits, at most 64 of them, and past that one
+  is dropped. One pull in flight per session.
+- **Gossip** (attestations, checkpoints, witnesses, authority statements): 2,000 new statements a
+  second per proven peer (burst 10,000; a new peer starts at 100), spent before a signature is
+  checked (an authority statement also spends 16 for each key it makes this node check for the first
+  time, since that check is a scalar multiplication; a repeat or a statement not of the shape spends
+  nothing; an answer to this node's own pull is charged as a debt that paces the next page, never
+  dropped), and
   4,000 verified statements a second in all (burst 20,000), spent only after it; checkpoints at most
   4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
   per position.
@@ -189,14 +216,31 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   restarts. A nodeId that never earned a durable binding is first contact again once its sessions
   end. Pin a key out of band (an invite) where that matters. Deriving a nodeId from its key would
   remove the squat; it is a future MMP change, not this release.
-- **A ratification is the revoker's judgement.** A revoked node's statements before its cutoff
-  stand only if its revoker ratified them, so a revoker that ratifies too much keeps them standing,
-  and one that ratifies too little voids honest ones. The revoker sees what it holds
-  (`node.roleStatementsBy`).
-- **The kept set can lag after a reshaped tree.** Records are chosen within a budget from the
-  records held; one refused for its budget is not kept for later. If a signer later gains a
-  shallower chain through another subtree, records refused earlier in the budget it left return
-  only when a peer offers them again (the next whole-store sync after two nodes' digests differ).
+- **The revoke window (MMP §6.6.12).** Until a node holds a revoke it treats the removed grant as
+  in force. A revoke is relayed as it enters, and a digest exchange reconciles the rest when a
+  session is confirmed and whenever a set changes; a partitioned node stays exposed until it
+  reconnects.
+- **The threshold holders are the root.** Any t pinned keys together can grant, revoke and endorse
+  anything; under a threshold of 1 every pinned key alone is the root. Compromise of t keys is
+  recovered only by pinning again, out of band.
+- **A compromised authority holder acts until it is removed.** Within its quotas it can grant,
+  revoke and endorse below itself until a signer above revokes its grant; endorsements then keep
+  what should stand.
+- **Grants are visible.** Every node that holds the set can read who holds which role.
+- **A new key costs a scalar multiplication.** The prime-order check of a key not seen before
+  (§18.3.2) is one multiplication by L, about fifteen signature checks here. The gossip lane is
+  charged for it before it is done; a flood of fresh keys buys a sixteenth of a lane's checks.
+- **The upgrade is a flag day (MMP §6.6.11).** sym 0.14 resolves no authority from the role grants
+  0.13 (and earlier 0.14 builds) signed: until the anchor and each grantor re-issue what should stand
+  as §6.6 grants, every node resolves as a participant. `node.legacyRoleGrants()` lists the old store
+  as plain data (never verified, never resolved, never sent) for the operator who re-issues.
+- **Scopes need their namespace.** sym implements no scope namespace by itself: a scoped grant
+  confers nothing on any CMB until the host passes the extension's resolver (`authorityScopes`).
+- **A received validation CMB advances its parent only to remixed.** MMP §6.5 has a receiver advance
+  a parent to validated (action completed) or dismissed (not actionable) when a validator or above
+  authored the CMB naming it; a record carries no signed field saying which, so sym does not. It
+  weighs the author's authority on each parent (the feedback flag) and leaves validation to the
+  node's own `validateCMB`, gated on its own authority over that CMB.
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no

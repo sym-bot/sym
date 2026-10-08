@@ -37,10 +37,16 @@ carried an `_anchor: true` flag. In Core Secure the record frame is fixed by §1
 **Sealing and signing.** Sealed on the session (`control-encrypted`), unsigned. It is
 session-bound: it speaks only for the session's proven peer, about records that peer authored.
 
-**When it is sent.** At most once a minute per peer, when a session is admitted. It goes
-immediately before the replayed records, which follow it on the same session as ordinary
-`cmb-encrypted` frames. Only records the sender itself authored are replayed (anti-echo,
-§15.7), and only signed `mmp-sig-v2.0` records.
+**When it is sent.** To every admitted session, first: with the keys of the records about to be
+replayed (at most once a minute per peer), or with `keys: []` when none follow. It goes immediately
+before the replayed records, which follow it on the same session as ordinary `cmb-encrypted`
+frames. Only records the sender itself authored are replayed (anti-echo, §15.7), and only signed
+`mmp-sig-v2.0` records. Because it is always sent, it is also the first authenticated frame a relay
+client hears from its server on a new session: a client that re-handshakes while it holds a
+confirmed session keeps the old one until the new one carries a sealed frame from the server (it
+cannot otherwise know the server took its `client-finish`), and closes a new one that hears nothing
+within the handshake timeout (`unconfirmed-by-peer`). (0.14.0 used `role-digest` for this until
+§6.6 retired it; with no anchor pinned there is no `authority-digest` to send.)
 
 **Receiver.**
 - Keeps the key set for that session, replacing any earlier set from the same session. It keeps
@@ -68,89 +74,44 @@ behaviour beyond the draft: an admitted session whose grant expires is closed wh
 
 ---
 
-## 3. `role-chain-fetch` and `role-chain`: fetching the chain a grant needs
+## 3. `role-chain-fetch`, `role-chain`, `role-digest`: retired
 
-**Why.** A role grant or revoke is kept only when it is rooted at the anchor (§6.5, §6.6).
-Gossip has no order, so a grant can arrive before the grant that roots its grantor. A pending set
-that holds whatever might later be rooted can be flooded. Instead, the receiver asks the session
-that delivered the record for the missing chain.
+sym 0.14.0 carried role grants and revokes with three frames of its own (`role-chain-fetch`,
+`role-chain` and `role-digest`) and resolved them by replaying signed times (the earlier sections 3,
+5 and 6 of this file). MMP §6.6 as merged (meshcognition-website main at 8c3381d, PR #40) replaces
+that rule and its frames: authority is a function of a set of hash-linked statements with no time in
+it, carried by `authority-statement`, `authority-digest`, `authority-fetch` and `authority-set`
+(§6.6.8, authority-frame.schema.json). sym implements §6.6 as written (lib/core/authority.js,
+lib/authority-store.js, lib/node-authority.js) and treats `role-grant`, `role-revoke`,
+`role-chain-fetch`, `role-chain` and `role-digest` as retired (§6.6.11): received, they are ignored and
+counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in this file adds to
+§6.6; where sym chooses among what §6.6 allows, it is said here.
 
-**Request** (sealed control frame, sent to the delivering session only):
-
-```json
-{ "type": "role-chain-fetch", "reqId": "rc-<16 hex>", "grantees": ["<grantor nodeId>"] }
-```
-
-- `reqId`: a correlation id of at most 128 characters.
-- `grantees`: the nodeIds whose own rooting grants are missing (the `grantedBy` of the record that
-  could not be rooted). At most 16 are read.
-
-**Answer** (sealed control frame, on the same session):
-
-```json
-{ "type": "role-chain", "reqId": "<the request's reqId>",
-  "grants": [ { "type": "role-grant", "grantee": "...", "role": "validator", "grantedBy": "...",
-                "grantedAt": 1786611600000, "granteeKey": "...", "sigAlg": "ed25519", "sig": "..." } ] }
-```
-
-- `grants`: at most 64 role-grant or role-revoke records, each the canonical object of its signed
-  fields only (`type, grantee, role?, grantedBy, grantedAt, granteeKey?, cutoff?, ratify?, sig,
-  sigAlg`; `cutoff` and `ratify` on a revoke only, section 6). They are
-  ordered top-down: each record comes after the records that root its grantor, up to the anchor
-  (depth at most 8). For each named grantee the answer holds the records the server holds whose
-  grantee it is, revokes included, each preceded by its grantor's chain.
-
-**Whole-store sync** (anti-entropy, security review D). The same pair carries a paged copy of the
-server's whole store:
-
-```json
-{ "type": "role-chain-fetch", "reqId": "rs-<16 hex>", "sync": true, "after": 0 }
-{ "type": "role-chain", "reqId": "<the request's reqId>", "grants": [ ... ], "next": 64 }
-```
-
-- `after`: where the page starts, in the server's sync order: the anchor's records first, then
-  those of each grantor the earlier ones reach, breadth first, each grantor's own records by
-  signed time; records no chain reaches come last. A page holds at most 64 records.
-- `next`: present when another page follows; the client asks for it with `after: next`. A client
-  asks for at most 1,024 pages per session, one page in flight at a time.
-
-**Signing.** Neither frame is signed. Each grant in `grants` keeps its grantor's signature
-(§6.5) and is verified as gossip is: top-down, against the key that the chain vouches for its
-grantor, or the anchor's configured key. Its authority never comes from the session that served
-it.
-
-**When they are sent.**
-- A node sends a whole-store `role-chain-fetch` when a peer's `role-digest` (section 5) differs
-  from its own.
-- A node sends `role-chain-fetch` when a role grant or revoke that arrived on a session is refused
-  as `unknown-grantor-key` (no record it holds vouches a key for its grantor), naming the grantor.
-  That is the only reason a verifiable record waits: no record is refused for its authority
-  (section 6).
-  - It sends at most one fetch in flight per (session, grantor). Further early records for the
-    same grantor join the fetch already in flight.
-  - The early record is held in memory only for that fetch, as its signed fields only, under a key
-    made of every signed field plus the signature, so a forged copy cannot displace the genuine
-    one. At most 64 records, and at most 64 KiB, are held per session. A held record is never
-    written and never relayed. A record whose fields are malformed (a nodeId that is not canonical
-    lowercase or is over 128 characters, a role name over 32) is never held.
-- A node answers `role-chain` for each fetch it receives, paced per session by a token bucket of
-  4 a second (burst 16). Fetches past that are dropped and counted.
-
-**Receiver of the answer.**
-- Reads an answer only if it matches a fetch in flight on that same session. An answer that
-  nobody asked for, or that arrives on another session, is ignored.
-- Offers the grants to its store until a pass stores nothing, so their order does not matter.
-  Each goes through the ordinary ingest: the gossip budget, verification with the vouched key and
-  the cutoff rule (section 6), storing as its signed fields only, and relaying once. A grant in the
-  answer whose signature does not verify ends the session only when its grantor is the session's
-  own peer and the key that failed is the one the session proved; any other is dropped and counted,
-  since it was verified under this node's view of its grantor's keys, which the server's may not
-  share (section 7).
-- Then offers the held records again, in passes until one stores nothing (a held record can wait
-  for another held record that vouches its grantor's key), and drops what is left. Neither the answer's grants nor the held records
-  start a further fetch.
-- A fetch that is not answered within 10 s, or whose session closes, releases its held records.
-  They are dropped.
+- **Pacing (§6.6.8).** A responder answers `authority-fetch` at 4 a second per session (burst 16).
+  Over the rate a request waits its turn (at most 64 wait; past that one is dropped), so an asker
+  that keeps one pull in flight gets every page. sym does not take the MAY to refuse a fresh full
+  pull within 60 s: the pacing bounds the work, and a refused pull would leave differing roots
+  apart until the peer's set next changed.
+- **The cost of a new key (§6.6.12).** Every statement a session delivers spends that peer's gossip
+  lane before it is checked: one check, plus 16 for each key it names that this node has not seen
+  (a grant's subject key; the signing key, when it will be verified; pinned keys an anchor-level
+  statement's entries name). Rules 1 and 2 of §18.3.2 cost one scalar multiplication for a new key,
+  about fifteen signature checks here. A statement not of the schema's shape, and a repeat of one
+  held, cost nothing. Unsolicited statements over the lane are dropped (a pull brings them later);
+  an answer to this node's own fetch or pull is never dropped: its cost is charged as a debt, and
+  the next page is asked for only once the debt is repaid.
+- **Pulls.** An unanswered page is asked again from the same cursor, up to 3 times. A digest that
+  arrives during a pull is remembered, and if the roots still differ when the pull ends, the pull
+  starts again.
+- **Persistence (§6.6.8).** Held statements are written as their canonical members only, to
+  `authority/statements-<pin digest>.jsonl` in the node's directory: a statement means something only
+  under the pin it was verified against, so a node started under another pin reads another file and
+  leaves this one as it was. At load every statement is verified again, chain by chain, and the set
+  resolved afresh; no status, root or receipt time is stored.
+- **Scopes (§6.6.2).** A scope's namespace is implemented by an extension. sym implements none by
+  itself: a host passes `authorityScopes: { <namespace>: (path, cmb, scope) => boolean }`, judged on
+  the CMB's own signed fields. Where a namespace is not implemented a scoped grant is still resolved
+  (it counts toward quotas and roots), and confers nothing on any CMB.
 
 ---
 
@@ -209,143 +170,10 @@ at most once a second. A live peer answers `pong`; a restarted one answers 1011.
 
 ---
 
-## 5. `role-digest`: anti-entropy for grants and revokes
+## 5. Who a failed signature is charged to
 
-**Why.** Gossip is relay-once. A grant or revoke dropped on its way (a full hold, a budget, a
-session that ended) was never sent again, and a revoke lost that way left a revoked node's
-authority standing (security review D, p7-ceiling).
-
-**Frame** (sealed control frame):
-
-```json
-{ "type": "role-digest", "count": 12, "digest": "<64 lowercase hex>" }
-```
-
-- `count`: the role-grant and role-revoke records the sender holds.
-- `digest`: lowercase hex SHA-256 over the canonical spellings of those records' signatures,
-  sorted, each followed by `\n`. Two nodes holding the same records give the same digest.
-
-**When it is sent.** To every newly admitted session, after `cmb-anchors`, whatever the sender
-holds (`count` 0 for an empty store). It is therefore also the first authenticated frame a relay
-client hears from its server on a new session: a client that re-handshakes while it holds a
-confirmed session keeps the old one until the new one carries such a frame (it cannot otherwise
-know the server took its `client-finish`), and closes a new one that hears nothing within the
-handshake timeout (`unconfirmed-by-peer`).
-
-**Receiver.** If `count` is above 0, the digest differs from its own, and no whole-store sync is
-in flight on that session, it asks for the sender's store with a whole-store `role-chain-fetch` (section 3), page
-by page. Each record goes through the ordinary ingest, so what the receiver already holds costs
-nothing and what is new is relayed once. A digest is a hint: nothing is taken on its word.
-
----
-
-## 6. Grants and revokes: what is kept, and what counts (replaces draft spec PR #33's rule)
-
-**Why.** Two things went wrong in 0.14.0's first two designs, and both made the mesh disagree.
-Draft spec PR #33 counted a statement only if its signer was authorised both at its signed time and
-when the receiver received it, so nodes that received a genuine revoke at different times resolved
-different authority. Its first replacement still decided at ingest whether a record was rooted, and
-bounded records with caps that refused newcomers, so two nodes holding the same records kept
-different subsets depending on arrival order, their digests never matched, and every session between
-them ran a whole-store sync. The rule below makes the kept set and the resolved authority functions
-of the records held: no receipt time, no arrival order. (The founder's rulings, 2026-10.)
-
-### 6.1 Fields
-
-A `role-revoke` carries:
-
-- `cutoff`: an integer, milliseconds since the epoch, `0 <= cutoff <= grantedAt`: the time from
-  which the revoked node is no longer trusted. sym 0.14.0 requires it on every revoke it signs
-  (`revokeRole(nodeId, { cutoff })` has no default). A revoke without one (0.13) has
-  `cutoff = grantedAt`.
-- `ratify` (optional): the revoked node's statements that stay valid, as their canonical signatures
-  (86 unpadded base64url characters), sorted ascending, no repeats, 1 to 64 entries. Only on a revoke
-  that carries `cutoff`. A revoker that must ratify more issues several revokes; each counts.
-
-Both are signed. The §6.5 grant payload gains `|<cutoff>` at its end when the revoke carries a
-cutoff, and then `|<ratify joined by ",">` when it carries `ratify`:
-
-```
-role-revoke|<grantee>|<role or empty>|<grantedBy>|<grantedAt>|<granteeKey or empty>|<cutoff>|<sig1>,<sig2>
-```
-
-A revoke without `cutoff` signs exactly the bytes MMP v2.0 signs today. Malformed: a `cutoff` or
-`ratify` on a `role-grant`; a cutoff after `grantedAt`; `ratify` without `cutoff`, empty, unsorted,
-repeated, over 64 entries or holding anything but a canonical signature; a revoke `granteeKey` that
-is neither empty nor a 43-character key; a `role` containing `|`. So no two records sign the same
-bytes.
-
-### 6.2 What is kept: a deterministic function of the records held
-
-1. **Verifiable.** A record is kept only when its signature verifies under the anchor's configured
-   key (its grantor is the anchor) or under a key that a kept `role-grant` vouches for its grantor
-   (`granteeKey`). Whether the grantor had authority is not asked here: a verifiable record is kept
-   and its effect is decided at resolution (6.3), so no record is refused for an order in which
-   records happened to arrive. A record whose grantor no kept grant vouches is refused
-   (`unknown-grantor-key`) and held for a `role-chain-fetch` (section 3).
-2. **Depth and subtree.** The anchor signs at depth 0. A grant kept at depth d makes its
-   (grantee, granteeKey) a signer at depth d + 1, in the subtree of the anchor grantee at the top of
-   that chain. A signer reachable by several chains takes the shallowest, then the one whose subtree
-   root has the smallest nodeId.
-3. **Budget per delegation subtree.** The anchor's own records are not bounded. Every other record
-   counts against the subtree of its signer: everything an anchor grantee and its descendants sign
-   shares that one budget (sym: 4,096 records). One subtree, however compromised, cannot fill
-   another's budget, so a revoke signed in another subtree is never refused by it.
-4. **Selection.** Inside a subtree the kept records are the first, up to the budget, in this total
-   order on signed fields: the signer's depth (shallower first); revokes before grants; a revoke's
-   cutoff, or a grant's `grantedAt` (earlier first); the canonical signature (smaller first). A
-   record that loses is replaced: a record that ranks above the last one kept takes its place, and
-   one that ranks below it is refused (`outranked`). Several revokes by one revoker for one grantee
-   are all kept while they fit; the earliest cutoff is the one that matters, so a revoker can always
-   tighten its cutoff by signing another revoke.
-5. **Equal stores.** Two nodes that hold the same records keep the same records and give the same
-   `role-digest`, whatever order they learned them in.
-
-Selection is computed over the records held: a record refused or replaced is not kept for later.
-Where a later grant gives a signer a shallower chain through another subtree, that signer's
-records move between budgets, and a record refused earlier in the budget they left is not
-reconsidered until a peer offers it again (the next whole-store sync after `role-digest`s differ).
-
-### 6.3 What counts: resolution
-
-For a node N holding key K, its role at time T is resolved from the kept records. "Now" is the
-resolving node's clock.
-
-1. The anchor holding its configured key is `anchor`.
-2. Otherwise take N's grants with `granteeKey = K` and `grantedAt <= T`, and N's revokes with
-   `cutoff <= T`. Replay them in `grantedAt` order (a revoke at its own `grantedAt`, even when that
-   is after T), from `participant`.
-3. **Every statement by a signer S (key k), signed at s, counts only if S held the rank it needs at
-   s** (a revoke of S whose cutoff is at or before s has already cleared S there, so a statement
-   S signs at or after its cutoff never counts), **and either S still holds that rank now, or an
-   effective revoke of S ratifies it** (lists its signature, with s before that revoke's cutoff).
-   So a revoked key gains nothing by backdating: what it signs after its revoke, dated before its
-   cutoff, is not ratified and its signer no longer holds rank.
-4. A grant G by S confers G's role if step 3 holds and, unless G is ratified, S holds at least G's
-   role at T as well (§6.6's cascade). A ratified grant keeps conferring after its grantor's
-   revoke.
-5. A revoke R by revoker Q clears N to `participant` if step 3 holds for R and Q's rank is at least
-   `validator`, and at least the role being cleared, **at every time from R's cutoff to R's signed
-   time** (roles change only where some record's time is crossed, so it is checked at each of those
-   breakpoints in that span): a revoker reaches back only over time it was itself authorised for. An
-   effective revoke is one for which this holds; only an effective revoke ratifies.
-6. A rank is 0 when the resolved node already sits at the delegation depth (8, draft spec PR #36).
-   Cycles and chains that do not reach the anchor confer nothing.
-
-Every time in the rule is a signed time, or now. Nothing depends on when a node received a record.
-
-**Attestations.** An attestation's signer counts with its role at the attestation's signed time,
-under step 3: if it no longer holds that role now and no effective revoke of it ratifies the
-attestation (by its signature), it counts as `participant`. An attestation dated before the attested
-record's signed `createdTimestamp` is refused where the record is known (it attests to what did not
-yet exist).
-
----
-
-## 7. Who a failed signature is charged to
-
-**Why.** A statement relayed on a session (a record, an attestation, a checkpoint, a witness, a
-grant) is verified under the receiver's binding for its signer, and bindings are local views: the
+**Why.** A statement relayed on a session (a record, an attestation, a checkpoint, a witness) is
+verified under the receiver's binding for its signer, and bindings are local views: the
 receiver may hold a squatter's session-scoped binding for that nodeId, or lack a vouch the relayer
 holds. Closing the relayer's session for a statement that fails there closed honest relaying peers
 whenever a squatter held a signer's nodeId (sym 0.14.0 re-review N1).
@@ -365,3 +193,10 @@ from another peer is still taken.
   until the minute ends. The peer is not blamed and its other statements are taken;
 - says each refused record at most once a minute per peer and reason, and records it in its
   decision log at most as often.
+
+**Authority statements are not charged this way.** An `authority-statement` is verified under the
+key its own chain names (the subject key of its authorising grant, or the pinned keys), never a
+registry binding (MMP §6.6.9), so the views above cannot differ and no session is closed for one.
+One that fails is dropped and counted against the delivering session (§6.6.8: rate-limited): past 8
+failures in a minute for one signing key, that session's statements under that key are dropped
+unread for the rest of the minute.

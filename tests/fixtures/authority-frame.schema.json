@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/authority-frame.schema.json",
+  "title": "MMP v2.0 authority statements and frames (§6.6)",
+  "description": "Grant, revoke and endorse statements, each identified by the SHA-256 of its canonical signed bytes (mmp-authority-v1) and linked to others by those ids, and the four frames that carry them. The schema accepts exactly the shapes the reference construction (scripts/mmp/lib.mjs) accepts, with one exception no JSON Schema can express: a subject key must also be the encoding of an Ed25519 point of prime order (§18.3.2). Whether a statement is valid and in force is decided by §6.6 resolution against the pinned anchor.",
+  "oneOf": [
+    { "$ref": "#/$defs/statementFrame" },
+    { "$ref": "#/$defs/digestFrame" },
+    { "$ref": "#/$defs/fetchFrame" },
+    { "$ref": "#/$defs/setFrame" }
+  ],
+  "$defs": {
+    "statementId": { "type": "string", "pattern": "^auth-[0-9a-f]{64}$" },
+    "authorisedBy": {
+      "anyOf": [
+        { "const": "anchor" },
+        { "$ref": "#/$defs/statementId" }
+      ]
+    },
+    "publicKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$", "description": "Canonical unpadded base64url of 32 bytes." },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$", "description": "Canonical unpadded base64url of 64 bytes." },
+    "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{21}[AQgw]$", "description": "Canonical unpadded base64url of 16 bytes." },
+    "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Canonical lowercase RFC 4122 text form; these exact characters are signed." },
+    "role": {
+      "anyOf": [
+        { "enum": ["admin", "validator", "issuer", "participant"] },
+        { "type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)+$" }
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*:(?!\\.+(/|$))[A-Za-z0-9._~-]+(/(?!\\.+(/|$))[A-Za-z0-9._~-]+)*$",
+      "description": "Optional. An extension namespace and a path of segments separated by '/'; no segment consists only of dots. Paths are opaque and compared exactly, never normalised. A grant's scope must equal or narrow (add path segments to) its authorising grant's; no scope is the whole mesh, so a grant under a scoped grant must carry a scope."
+    },
+    "sigEntry": {
+      "type": "object",
+      "required": ["key", "sig"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "#/$defs/publicKey" },
+        "sig": { "$ref": "#/$defs/signature" }
+      }
+    },
+    "signedBase": {
+      "type": "object",
+      "required": ["kind", "authorisedBy", "nonce", "sigs"],
+      "properties": {
+        "kind": { "enum": ["grant", "revoke", "endorse"] },
+        "authorisedBy": { "$ref": "#/$defs/authorisedBy" },
+        "nonce": { "$ref": "#/$defs/nonce" },
+        "issuedAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "Information only. Signed and part of the id; never used by resolution." },
+        "sigs": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/sigEntry" } }
+      },
+      "if": { "type": "object", "properties": { "authorisedBy": { "$ref": "#/$defs/statementId" } } },
+      "then": { "type": "object", "properties": { "sigs": { "type": "array", "maxItems": 1 } } }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/statementId" }
+    },
+    "grant": {
+      "allOf": [
+        { "$ref": "#/$defs/signedBase" },
+        {
+          "type": "object",
+          "required": ["subject", "role"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "grant" },
+            "authorisedBy": true,
+            "nonce": true,
+            "issuedAt": true,
+            "sigs": true,
+            "subject": {
+              "type": "object",
+              "required": ["nodeId", "key"],
+              "additionalProperties": false,
+              "properties": {
+                "nodeId": { "$ref": "#/$defs/nodeId" },
+                "key": { "$ref": "#/$defs/publicKey" }
+              }
+            },
+            "role": { "$ref": "#/$defs/role" },
+            "scope": { "$ref": "#/$defs/scope" }
+          }
+        }
+      ]
+    },
+    "revoke": {
+      "allOf": [
+        { "$ref": "#/$defs/signedBase" },
+        {
+          "type": "object",
+          "required": ["targets"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "revoke" },
+            "authorisedBy": true,
+            "nonce": true,
+            "issuedAt": true,
+            "sigs": true,
+            "targets": { "$ref": "#/$defs/targets", "description": "Ids of the grants this revoke removes." }
+          }
+        }
+      ]
+    },
+    "endorse": {
+      "allOf": [
+        { "$ref": "#/$defs/signedBase" },
+        {
+          "type": "object",
+          "required": ["targets"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "endorse" },
+            "authorisedBy": true,
+            "nonce": true,
+            "issuedAt": true,
+            "sigs": true,
+            "targets": { "$ref": "#/$defs/targets", "description": "Ids of the grants and revokes this endorse keeps alive when a revoke has cut them off from the anchor. An endorse is never itself rescued." }
+          }
+        }
+      ]
+    },
+    "statement": {
+      "oneOf": [
+        { "$ref": "#/$defs/grant" },
+        { "$ref": "#/$defs/revoke" },
+        { "$ref": "#/$defs/endorse" }
+      ]
+    },
+    "reqId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "cursor": { "type": "string", "maxLength": 128 },
+    "statementFrame": {
+      "type": "object",
+      "required": ["type", "statement"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "authority-statement" },
+        "statement": { "$ref": "#/$defs/statement" }
+      }
+    },
+    "digestFrame": {
+      "type": "object",
+      "required": ["type", "root", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "authority-digest" },
+        "root": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "fetchFrame": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "reqId", "ids"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "authority-fetch" },
+            "reqId": { "$ref": "#/$defs/reqId" },
+            "ids": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/statementId" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "reqId", "after"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "authority-fetch" },
+            "reqId": { "$ref": "#/$defs/reqId" },
+            "after": { "$ref": "#/$defs/cursor" }
+          }
+        }
+      ]
+    },
+    "setFrame": {
+      "type": "object",
+      "required": ["type", "reqId", "statements"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "authority-set" },
+        "reqId": { "$ref": "#/$defs/reqId" },
+        "statements": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/statement" } },
+        "missing": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/statementId" } },
+        "next": { "$ref": "#/$defs/cursor" }
+      }
+    }
+  }
+}

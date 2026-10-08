@@ -25,11 +25,13 @@ const U = { toString: 1 };                 // unprintable
 const deepArr = (d) => { let a = []; for (let i = 0; i < d; i++) a = [a]; return a; };
 const VALS = { U, num: 42, arr: [1, 2], obj: {}, nul: null, bool: true, deep: deepArr(100), long: 'x'.repeat(5000) };
 const TYPES = ['handshake', 'cmb', 'mood', 'wake-channel', 'peer-info', 'attestation', 'cmb-fetch', 'cmb-fetch-result',
-  'checkpoint', 'witness', 'role-grant', 'role-revoke', 'role-chain-fetch', 'role-chain', 'node-stats', 'message',
+  'checkpoint', 'witness', 'role-grant', 'role-revoke', 'role-chain-fetch', 'role-chain', 'role-digest', 'node-stats', 'message',
+  'authority-statement', 'authority-digest', 'authority-fetch', 'authority-set',
   'xmesh-insight', 'cmb-anchors', 'mesh-room-join', 'ping', 'pong', 'error', 'state-sync', 'zzz'];
 const FIELDS = ['nodeId', 'name', 'publicKey', 'room', 'roomGrant', 'grant', 'cmb', 'content', 'mood', 'fromName', 'platform',
   'token', 'environment', 'peers', 'attestation', 'key', 'keys', 'reqId', 'found', 'notFound', 'grantees', 'grants', 'checkpoint',
-  'witness', 'stats', 'trajectory', 'anomaly', 'remixScore', 'coherence', 'timestamp', 'directed', 'to', 'code', 'detail', 'message'];
+  'witness', 'stats', 'trajectory', 'anomaly', 'remixScore', 'coherence', 'timestamp', 'directed', 'to', 'code', 'detail', 'message',
+  'statement', 'root', 'count', 'ids', 'after', 'statements', 'missing', 'next'];
 
 function corpus() {
   const out = [];
@@ -111,7 +113,7 @@ describe('fuzz: malformed frames of every type (port of fuzz-relay.js)', () => {
       assert.ok(node._relay.present.has('0'.repeat(8) + '-sentinel'), 'the relay link keeps working');
       assert.strictEqual(node._peers.size, 0, 'no peer from anything sent in the clear');
       assert.strictEqual(node._roster.size(), 0, 'and no key bound');
-      assert.strictEqual(node._roleGrants.size(), 0);
+      assert.strictEqual(node._authority.size(), 0);
       assert.strictEqual(node._peerWakeChannels.size, 0);
     } finally { w.stop(); await node.stop(); await new Promise((r) => wss.close(() => r())); fs.rmSync(nodeDirById(node.nodeId), { recursive: true, force: true }); }
   });

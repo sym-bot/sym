@@ -8,8 +8,7 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
  * /private/tmp/claude-501/-Users-hongwei-sym-agent-a/sym-014-final-review/ (grant-probes.js P1-P4,
  * node-probes.js Q1, digest-churn.js, fork-a, fork-b).
  *
- *   A  the kept grant set is a function of the records held (Findings 1, 2)
- *   B  the anchor ratifies; a revoked key gains nothing by backdating (Finding 4, Low 8a)
+ *   A, B  retired with the time-replay grant rule (MMP §6.6; see below)
  *   C  the interior read side is scoped to the mind's mission (Finding 6)
  *   3  the cost of relayed forgeries is bounded without blaming the relayer
  *   7  relocation: in-process locks, replays, staging, modes, the header checked first
@@ -28,8 +27,6 @@ const relocation = require('../lib/relocation');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDirById } = require('../lib/config');
-const { RoleGrantStore } = require('../lib/role-grant-store');
-const { signGrant, signAttestation } = require('../lib/core');
 const { identity, connectNodes, until, signedRecord, admitAs, deliver } = require('./_core-secure');
 
 const uniq = (b) => `${b}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -37,228 +34,14 @@ function mk(base, extra = {}) { return new SymNode({ name: uniq(base), silent: t
 async function stopAll(...nodes) {
   for (const n of nodes) { try { await n.stop(); } catch { /* */ } try { fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } catch { /* */ } }
 }
-function kp() {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-  return { nodeId: crypto.randomUUID(), priv: privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(16).toString('base64url'), pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url') };
-}
-const grantOf = (type, grantee, role, grantor, at, extra = {}) => signGrant({ type, grantee: grantee.nodeId, ...(role ? { role } : {}), grantedBy: grantor.nodeId, grantedAt: at, ...(type === 'role-grant' ? { granteeKey: grantee.pub } : {}), ...extra }, grantor.priv);
-const DAY = 86_400_000;
 
-/** Offer `records` in `order` until a pass keeps nothing (as a load, or a chain fetch, does). */
-function feed(store, records) {
-  let left = records;
-  for (let progress = true; progress && left.length;) {
-    progress = false;
-    const next = [];
-    for (const g of left) {
-      const r = store.record(g);
-      if (r.stored) progress = true;
-      else if (r.reason === 'unknown-grantor-key') next.push(g);
-    }
-    left = next;
-  }
-}
-/** A deterministic shuffle. */
-function shuffled(list, seed) {
-  const a = [...list];
-  let x = seed;
-  for (let i = a.length - 1; i > 0; i--) { x = (x * 1103515245 + 12345) & 0x7fffffff; const j = x % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
-  return a;
-}
-
-describe('A: the kept grant set is a function of the records held (Findings 1 and 2)', () => {
-  it('stores fed the same records in different orders keep the same records and resolve the same authority, with full budgets, cutoffs and ratifications', () => {
-    const A = kp(), V = kp(), Q = kp(), W = kp(), X = kp(), M = kp();
-    const t0 = Date.now() - 30 * DAY;
-    const sybils = Array.from({ length: 5 }, () => kp());
-    const rVW = grantOf('role-revoke', W, undefined, V, t0 + 2 * DAY, { cutoff: t0 + 2 * DAY });
-    const records = [
-      grantOf('role-grant', V, 'validator', A, t0),
-      grantOf('role-grant', Q, 'validator', A, t0),
-      grantOf('role-grant', M, 'validator', A, t0),
-      grantOf('role-grant', W, 'validator', A, t0 + 1),
-      grantOf('role-grant', X, 'validator', V, t0 + 5 * DAY),
-      rVW,
-      grantOf('role-revoke', V, undefined, A, t0 + 10 * DAY, { cutoff: t0 + 3 * DAY, ratify: [rVW.sig] }),
-      grantOf('role-revoke', X, undefined, Q, t0 + 11 * DAY, { cutoff: t0 + 11 * DAY }),
-      grantOf('role-revoke', X, undefined, Q, t0 + 12 * DAY, { cutoff: t0 + 6 * DAY }),
-      ...sybils.map((y, i) => grantOf('role-grant', y, 'validator', M, t0 + 20 + i)),
-      ...sybils.flatMap((y, i) => [grantOf('role-revoke', W, undefined, y, t0 + 30 + i, { cutoff: t0 + 30 + i }), grantOf('role-grant', kp(), 'validator', y, t0 + 40 + i)]),
-    ];
-    const roles = (s) => [V, Q, W, X, M, ...sybils].map((n) => [s.resolveRole(n.nodeId, n.pub, Date.now()), s.resolveRole(n.nodeId, n.pub, t0 + 4 * DAY)].join('/'));
-    let first = null;
-    for (let seed = 1; seed <= 12; seed++) {
-      const s = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, subtreeBudget: 6 });
-      feed(s, seed === 1 ? records : shuffled(records, seed));
-      const view = { digest: s.digest().digest, size: s.size(), roles: roles(s) };
-      if (!first) first = view;
-      else assert.deepStrictEqual(view, first, `order ${seed}`);
-    }
-    assert.ok(first.size < records.length, 'the budget bound M\'s subtree');
-  });
-
-  it('a grant and a revoke signed in the same millisecond resolve alike whichever was kept first', () => {
-    const A = kp(), V = kp();
-    const t = Date.now() - DAY;
-    const g = grantOf('role-grant', V, 'validator', A, t);
-    const r = grantOf('role-revoke', V, undefined, A, t, { cutoff: t });
-    const X = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    const Y = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    X.record(g); X.record(r);
-    Y.record(r); Y.record(g);
-    assert.deepStrictEqual([X.resolveRole(V.nodeId, V.pub, Date.now()), Y.resolveRole(V.nodeId, V.pub, Date.now())], ['participant', 'participant']);
-  });
-
-  it('P2: a grant signed by a grantor revoked from before it is kept by every store, whatever arrived first (equal digests)', () => {
-    const A = kp(), P = kp(), X = kp();
-    const t0 = Date.now() - 30 * DAY;
-    const gP = grantOf('role-grant', P, 'validator', A, t0);
-    const gX = grantOf('role-grant', X, 'validator', P, t0 + 5 * DAY);
-    const rP = grantOf('role-revoke', P, undefined, A, t0 + 10 * DAY, { cutoff: t0 + 3 * DAY });
-    const B = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    const C = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    for (const g of [gP, gX, rP]) assert.strictEqual(B.record(g).stored, true);
-    for (const g of [gP, rP, gX]) assert.strictEqual(C.record(g).stored, true, 'never refused as unrooted');
-    assert.strictEqual(B.digest().digest, C.digest().digest);
-    assert.deepStrictEqual([B.resolveRole(X.nodeId, X.pub, Date.now()), C.resolveRole(X.nodeId, X.pub, Date.now())], ['participant', 'participant']);
-  });
-
-  it('P4 / revoke-tighten: a revoker tightens its cutoff with a second revoke, and stores agree whichever came first', () => {
-    const A = kp(), Q = kp(), P = kp();
-    const t = (n) => 1_000_000 + n * 1000;
-    const base = [grantOf('role-grant', Q, 'validator', A, t(0)), grantOf('role-grant', P, 'validator', Q, t(1))];
-    const r5 = grantOf('role-revoke', P, undefined, Q, t(5), { cutoff: t(5) });
-    const r2 = grantOf('role-revoke', P, undefined, Q, t(6), { cutoff: t(2) });
-    const X = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    const Y = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    for (const b of base) { X.record(b); Y.record(b); }
-    assert.deepStrictEqual([X.record(r5).stored, X.record(r2).stored], [true, true]);
-    assert.deepStrictEqual([Y.record(r2).stored, Y.record(r5).stored], [true, true]);
-    assert.strictEqual(X.digest().digest, Y.digest().digest);
-    assert.deepStrictEqual([X.resolveRole(P.nodeId, P.pub, t(3)), Y.resolveRole(P.nodeId, P.pub, t(3))], ['participant', 'participant'], 'P untrusted from t2, as Q meant');
-  });
-
-  it('P3: one validator\'s sybil tree stays inside its subtree budget, and resolution of its target stays bounded', () => {
-    const A = kp(), M = kp(), T = kp();
-    const s = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub }, subtreeBudget: 8 });
-    const t0 = Date.now() - 30 * DAY;
-    s.record(grantOf('role-grant', M, 'validator', A, t0));
-    s.record(grantOf('role-grant', T, 'validator', A, t0));
-    const sybils = [];
-    for (let i = 0; i < 3; i++) { const y = kp(); sybils.push(y); s.record(grantOf('role-grant', y, 'validator', M, t0 + 1 + i)); }
-    for (const y of sybils) for (let j = 0; j < 2; j++) s.record(grantOf('role-grant', { nodeId: T.nodeId, pub: kp().pub }, 'validator', y, t0 + 10 + j));
-    for (const sg of [M, ...sybils]) for (let k = 0; k < 50; k++) s.record(grantOf('role-revoke', T, undefined, sg, t0 + 1000 + k, { cutoff: t0 + 1000 + k }));
-    assert.strictEqual(s.size(), 2 + 8, 'the anchor\'s two, and M\'s subtree at its budget');
-    assert.ok(s.grantsFor(T.nodeId).length <= 1 + 8, 'what a resolution of T replays is bounded by the budget');
-  });
-
-  it('digest-churn: two nodes that learned the same records in different orders run no whole-store sync', async () => {
-    const A = kp(), P = kp(), X = kp();
-    const t0 = Date.now() - 30 * DAY;
-    const gP = grantOf('role-grant', P, 'validator', A, t0);
-    const gX = grantOf('role-grant', X, 'validator', P, t0 + 5 * DAY);
-    const rP = grantOf('role-revoke', P, undefined, A, t0 + 10 * DAY, { cutoff: t0 + 3 * DAY });
-    const B = mk('churn-b', { anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    const C = mk('churn-c', { anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    try {
-      await B.start(); await C.start();
-      for (const g of [gP, gX, rP]) B._roleGrants.record(g);
-      for (const g of [gP, rP, gX]) C._roleGrants.record(g);
-      await connectNodes(B, C);
-      await new Promise((r) => setTimeout(r, 300));
-      assert.strictEqual(B._roleGrants.digest().digest, C._roleGrants.digest().digest);
-      assert.deepStrictEqual([B._chainStats.synced || 0, C._chainStats.synced || 0], [0, 0], 'no whole-store sync');
-    } finally { await stopAll(B, C); }
-  });
-});
-
-describe('B: the anchor ratifies; a revoked key gains nothing by backdating (Finding 4)', () => {
-  it('P1: a revoke a revoked validator signs later, dated before its cutoff, changes nothing at any time', () => {
-    const A = kp(), V = kp(), W = kp();
-    const t0 = Date.now() - 30 * DAY;
-    const s = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    s.record(grantOf('role-grant', V, 'validator', A, t0));
-    s.record(grantOf('role-grant', W, 'validator', A, t0 + 1));
-    s.record(grantOf('role-revoke', V, undefined, A, t0 + 20 * DAY)); // a 0.13 revoke: cutoff = its time
-    assert.strictEqual(s.record(grantOf('role-revoke', W, undefined, V, t0 + 2 * DAY, { cutoff: t0 + DAY })).stored, true, 'kept: verifiable');
-    for (const at of [Date.now(), t0 + 10 * DAY, t0 + 1.5 * DAY]) assert.strictEqual(s.resolveRole(W.nodeId, W.pub, at), 'validator', `W at ${at}`);
-  });
-
-  it('the revoker is checked at every breakpoint from its cutoff to its signed time (Low 8a), and at resolution, not only when kept (M7)', () => {
-    const A = kp(), Q = kp(), W = kp();
-    const t = (n) => 1_000_000 + n * 1000;
-    const st = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    st.record(grantOf('role-grant', W, 'validator', A, t(0)));
-    st.record(grantOf('role-grant', Q, 'validator', A, t(1)));
-    st.record(grantOf('role-revoke', Q, undefined, A, t(2), { cutoff: t(2) }));
-    st.record(grantOf('role-grant', Q, 'validator', A, t(3)));
-    st.record(grantOf('role-revoke', W, undefined, Q, t(4), { cutoff: t(1.5) }));
-    assert.strictEqual(st.resolveRole(W.nodeId, W.pub, t(2.5)), 'validator', 'Q was not authorised over all of [t1.5, t4]: no effect');
-    assert.strictEqual(st.resolveRole(W.nodeId, W.pub, t(10)), 'validator');
-    // M7: a revoke effective when kept loses its effect when a later record shows its revoker had no
-    // rank at its cutoff.
-    const B = kp(), Z = kp();
-    const s2 = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    s2.record(grantOf('role-grant', Z, 'validator', A, t(0)));
-    s2.record(grantOf('role-grant', B, 'validator', A, t(0)));
-    s2.record(grantOf('role-revoke', Z, undefined, B, t(10), { cutoff: t(5) }));
-    assert.strictEqual(s2.resolveRole(Z.nodeId, Z.pub, t(20)), 'participant', 'effective as kept');
-    s2.record(grantOf('role-revoke', B, undefined, A, t(30), { cutoff: t(3) }));
-    s2.record(grantOf('role-grant', B, 'validator', A, t(31)));
-    assert.strictEqual(s2.resolveRole(B.nodeId, B.pub, t(40)), 'validator', 'B holds rank again now');
-    assert.strictEqual(s2.resolveRole(Z.nodeId, Z.pub, t(40)), 'validator', 'but B had none at its revoke\'s cutoff: re-checked at resolution');
-  });
-
-  it('revokeRole requires a cutoff and checks its ratify list; the anchor\'s ratification keeps a revoked validator\'s statement', async () => {
-    const node = mk('ratify', {});
-    const A = { nodeId: node.nodeId, pub: node._identity.publicKey };
-    const anchored = mk('ratify-a', { anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    try {
-      const V = kp(); const W = kp();
-      anchored._roster.bind(V.nodeId, V.pub, 'pinned');
-      anchored._roster.bind(W.nodeId, W.pub, 'pinned');
-      const s = anchored._roleGrants;
-      const t0 = Date.now() - 10 * DAY;
-      s.record(signGrant({ type: 'role-grant', grantee: V.nodeId, role: 'validator', grantedBy: A.nodeId, grantedAt: t0, granteeKey: V.pub }, node._identity.privateKey));
-      s.record(signGrant({ type: 'role-grant', grantee: W.nodeId, role: 'validator', grantedBy: A.nodeId, grantedAt: t0, granteeKey: W.pub }, node._identity.privateKey));
-      const rVW = grantOf('role-revoke', W, undefined, V, t0 + DAY, { cutoff: t0 + DAY });
-      s.record(rVW);
-      assert.strictEqual(anchored.resolveRole(W.nodeId), 'participant');
-      assert.throws(() => node.revokeRole(V.nodeId), (e) => e.code === 'ECUTOFF', 'no default cutoff');
-      assert.throws(() => node.revokeRole(V.nodeId, { cutoff: Date.now() + 60_000 }), (e) => e.code === 'ECUTOFF', 'not in the future');
-      assert.throws(() => node.revokeRole(V.nodeId, { cutoff: t0, ratify: ['x'] }), (e) => e.code === 'ERATIFY');
-      assert.deepStrictEqual(anchored.roleStatementsBy(V.nodeId, Date.now()).map((g) => g.sig), [rVW.sig], 'what V signed, for the revoker to review');
-      // The anchor's node signs the revoke; the anchored node keeps it.
-      const plain = signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: A.nodeId, grantedAt: Date.now(), cutoff: t0 + 2 * DAY }, node._identity.privateKey);
-      s.record(plain);
-      assert.strictEqual(anchored.resolveRole(W.nodeId), 'validator', 'V revoked without ratifying its revoke of W: it lapses');
-      const ratifying = signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: A.nodeId, grantedAt: Date.now() + 1, cutoff: t0 + 2 * DAY, ratify: [rVW.sig] }, node._identity.privateKey);
-      s.record(ratifying);
-      assert.strictEqual(anchored.resolveRole(W.nodeId), 'participant', 'ratified: it stands');
-    } finally { await stopAll(node, anchored); }
-  });
-
-  it('an attestation dated before the record it attests is refused at ingest and excluded from the aggregate', async () => {
-    const b = mk('att-date', {});
-    try {
-      await b.start();
-      const X = identity('x');
-      const sX = admitAs(b, X);
-      b._roster.bind(X.nodeId, X.publicKey, 'pinned');
-      const rec = b.remember({ focus: 'a record attested later' });
-      const key = rec.cmb.metadata.key;
-      const created = rec.cmb.metadata.createdTimestamp;
-      const att = (at, seq) => { const o = { of: key, by: X.nodeId, at, roster: b._room, verdict: 'aligned', categories: {}, seq, prev: 'genesis' }; signAttestation(o, X.privateKey); return o; };
-      assert.strictEqual(b._ingestAttestation(att(created - 1000, 1), X.nodeId, X.name, sX).reason, 'dated-before-record');
-      const late = att(created + 1, 2);
-      b._attestations.record(att(created - 5, 3)); // as if held from before
-      b._attestations.record(late);
-      const agg = b.aggregateAttestations(key);
-      assert.ok(agg.excluded.some((e) => e.reason === 'dated-before-record'));
-      void sX;
-    } finally { await stopAll(b); }
-  });
-});
+// A (the kept grant set as a function of the records held: Findings 1, 2) and B (ratification and
+// backdating: Finding 4, Low 8a) tested the time-replay grant rule that MMP §6.6 retired. The new rule
+// is a function of the set by construction: authority-vectors.test.js resolves every published case in
+// every order and with forged copies; authority-attacks.test.js holds backdating, arrival order and the
+// review attacks; authority-node.test.js shows two nodes reaching one root over real sessions. B's
+// last test (an attestation dated before the record it attests) went with the rule: authority carries
+// no time, so an attestation's time is no part of its weight (§6.6.10).
 
 describe('C: the interior read side is scoped to the mind\'s mission (Finding 6)', () => {
   function conn(p) {

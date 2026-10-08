@@ -127,29 +127,29 @@ participant.
   1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to resolve
   (`sym keys <name> resolve`). No source overrides a different key. A handshake alone binds a
   key only for its session; the binding becomes durable when it is earned (an admitted verified
-  record, a verified record its author signed to this node, a pin, an anchor-rooted grant in
-  effect), so churning identities cannot fill the registry, and nothing is ever evicted to make
-  room.
+  record, a verified record its author signed to this node, a pin, an in-force grant), so
+  churning identities cannot fill the registry, and nothing is ever evicted to make room.
 - **Every record is signed, and verified by its author's node id.** A record is accepted only
   if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
-  `createdByNodeId` — a key it proved, pinned from an invite, or holds from an anchor-rooted
-  grant in effect. An unsigned, legacy or unresolvable record is refused. What is kept, delivered
+  `createdByNodeId` — a key it proved, pinned from an invite, or holds from an in-force grant.
+  An unsigned, legacy or unresolvable record is refused. What is kept, delivered
   and served is the record's signed projection: members no signature covers are dropped.
 - **A record goes only where its author signed it to.** A record signed to one node is sealed to
   that node's session and no other's, whichever path offers it.
 - **Content is sealed per session.** Records travel only as `cmb-encrypted` frames, and every
-  other frame (mood, gossip, grants) as a sealed control frame, under directional keys derived
+  other frame (mood, gossip, authority statements) as a sealed control frame, under directional keys derived
   fresh for each handshake (X25519, HKDF-SHA256, ChaCha20-Poly1305). A relay sees routing
   envelopes and ciphertext. There is no long-lived encryption key to steal later.
-- **Authority follows the key.** A role grant names the key it confers authority on, and a
-  grant chain is checked with the keys each grant vouches, from the anchor down. A revoke signs a
-  cutoff: what the revoked node signed from the cutoff on never counts, and what it signed before
-  counts only if the revoker ratified it (or the node still holds its rank), so a revoked key gains
-  nothing by backdating. Nodes holding the same grants keep the same ones and resolve the same
-  authority, whatever order they learned them in.
+- **Authority is a function of a set, and follows the key (MMP §6.6).** Grants, revokes and
+  endorses are signed statements that name one another by the hash of their signed bytes, rooted
+  at a pinned anchor key set with a threshold. A grant names a nodeId and a key and confers its role
+  on that pair only. What is in force is computed from the statements a node holds and nothing
+  else (no clock, no arrival order), so nodes holding the same statements resolve the same
+  authority and the same root. Delegation is at most 4 links, scopes only narrow, and every bucket
+  has a quota. Every signature sym checks, here and everywhere, uses one Ed25519 rule (§18.3.2).
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
   evaluation on every record it hears and stores only what it admits.
-- **Bounded.** Every store a peer can feed — key bindings, grants, wake channels, gossip, relay
+- **Bounded.** Every store a peer can feed — key bindings, authority statements, wake channels, gossip, relay
   candidates, per-peer state — has a fixed bound; [SECURITY.md](SECURITY.md) lists each one.
 
 What this does not solve, said plainly:
@@ -160,8 +160,12 @@ What this does not solve, said plainly:
   A node whose records yours never admitted, and that never signed a record to yours, is first contact
   again once it leaves; and whoever reaches yours first under a nodeId and has one record accepted
   holds that nodeId there for good (a nodeId is not derived from its key).
-- **A ratification is a judgement.** A revoked node's earlier statements stand only where its
-  revoker lists them; list too much and they stand, too little and honest ones lapse.
+- **A revoke takes effect where it has arrived.** Until a node holds a revoke it treats the grant
+  as in force; gossip and digest exchanges carry it, and a partitioned node stays exposed until it
+  reconnects. The anchor's threshold holders are the root of authority.
+- **Upgrading from 0.13 is a flag day for authority.** Old role grants confer nothing under §6.6;
+  the anchor and each grantor re-issue what should stand (`node.legacyRoleGrants()` lists the old
+  ones).
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
   replace another node's connection (close 4004). A squatter gets no Core Secure session — it
   cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.

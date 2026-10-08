@@ -19,10 +19,11 @@ const { SymNode } = require('../lib/node');
 const { NullDiscovery, BonjourDiscovery } = require('../lib/discovery');
 const { nodeDirById } = require('../lib/config');
 const { PeerSession, freshX25519 } = require('../lib/session');
-const { RoleGrantStore } = require('../lib/role-grant-store');
+const A = require('../lib/core/authority');
+const { AuthorityStore } = require('../lib/authority-store');
 const { RosterKeyRegistry } = require('../lib/roster-keys');
 const { canonicalRecordV2_0, signedProjection } = require('../lib/core/record-canonical');
-const { verifyCMB, signGrant, verifyAttestationRole, categoryKeyV1 } = require('../lib/core');
+const { verifyCMB, categoryKeyV1 } = require('../lib/core');
 const { clientHello } = require('../lib/core/handshake-v2-flow');
 const { buildControlFrame, openControlFrame } = require('../lib/core/sealed-control');
 const { assertNoDowngrade } = require('../lib/core/mmp-extensions');
@@ -37,11 +38,6 @@ function mk(base, extra = {}) { return new SymNode({ name: uniq(base), silent: t
 async function stopAll(...nodes) {
   for (const n of nodes) { try { await n.stop(); } catch { /* */ } try { fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } catch { /* */ } }
 }
-function kp(nodeId) {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-  return { nodeId, priv: privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(16).toString('base64url'), pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url') };
-}
-const grantOf = (type, grantee, role, grantor, at, extra = {}) => signGrant({ type, grantee: grantee.nodeId, role, grantedBy: grantor.nodeId, grantedAt: at, ...(type === 'role-grant' ? { granteeKey: grantee.pub } : {}), ...extra }, grantor.priv);
 
 describe('A. the signed audience governs every send (cs-review-P)', () => {
   it('anchor-leak / anchor-leak-b: a record A sent directed to B is never replayed to a later peer M, nor served to it by cmb-fetch', async () => {
@@ -174,171 +170,67 @@ describe('B. a record is its signed projection (cs-review-B/p3-unsigned, cs-revi
   });
 });
 
-describe('C. a revoke carries a cutoff; a revoked key gains nothing by backdating; the anchor ratifies (cs-review-B; re-review N2; final re-review ruling B)', () => {
-  const ANC = kp('anchor'), V = kp('validator-v'), W = kp('validator-w'), H = kp('honest-h'), ATT = kp('attacker');
-  const t0 = Date.now() - 100_000;
-  // V was granted at t0 and revoked at t0+50 s, its trust withdrawn from t0+500 ms (the cutoff).
-  const CUT = t0 + 500;
-  function world() {
-    const roster = new RosterKeyRegistry({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub }, self: { nodeId: 'receiver', publicKey: kp('receiver').pub } });
-    const store = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub }, keys: roster, selfId: 'receiver' });
-    roster.setGrantView((id) => store.vouchedKey(id));
-    store.record(grantOf('role-grant', V, 'validator', ANC, t0));
-    store.record(grantOf('role-grant', W, 'validator', ANC, t0 + 10));
-    store.record(grantOf('role-revoke', V, undefined, ANC, t0 + 50_000, { cutoff: CUT }));
-    return { roster, store };
-  }
-
-  it('p2-revoked-vouch: a revoked validator\'s grants are kept (verifiable) but confer nothing, before or after its cutoff; no key is bound', () => {
-    const { roster, store } = world();
-    assert.strictEqual(store.resolveRole(V.nodeId, V.pub, Date.now()), 'participant');
-    for (const at of [t0 + 1000, t0 + 100]) {
-      const H2 = kp(`h-${at}`);
-      assert.strictEqual(store.record(grantOf('role-grant', { nodeId: H2.nodeId, pub: ATT.pub }, 'validator', V, at)).stored, true, 'verifiable: kept, decided at resolution (final re-review ruling A)');
-      assert.strictEqual(store.resolveRole(H2.nodeId, ATT.pub, Date.now()), 'participant', 'V no longer holds rank, and nothing ratifies it (ruling B)');
-      assert.strictEqual(store.resolveRole(H2.nodeId, ATT.pub, t0 + 200), 'participant', 'not even back then');
-      assert.strictEqual(roster.get(H2.nodeId), undefined, 'the attacker key is bound to nobody');
-    }
-    const self = store.record(grantOf('role-grant', { nodeId: 'receiver', pub: ATT.pub }, 'validator', V, t0 + 1001));
-    assert.strictEqual(self.stored, true, 'kept as a statement; it binds nothing');
-    assert.strictEqual(roster.get('receiver'), roster._self.publicKey, 'this node\'s own id is always its own key');
-  });
-
-  it('p2c-backdate: a revoked validator\'s revoke strips nothing and its attestation weighs as a participant, however it is dated, unless the anchor ratified it', () => {
-    const { store } = world();
-    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, V, t0 + 1000, { cutoff: t0 + 1000 })).stored, true);
-    assert.strictEqual(store.record(grantOf('role-revoke', W, undefined, V, t0 + 100, { cutoff: t0 + 100 })).stored, true, 'backdated before V\'s cutoff');
-    assert.strictEqual(store.resolveRole(W.nodeId, W.pub, Date.now()), 'validator', 'W keeps its role');
-    assert.strictEqual(store.resolveRole(W.nodeId, W.pub, t0 + 300), 'validator', 'throughout');
-    const sig = 'A'.repeat(85) + 'A';
-    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 1000, sig), 'participant', 'dated after the cutoff');
-    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 100, sig), 'participant', 'dated before it: V holds no rank now and nothing ratifies it');
-    store.record(grantOf('role-revoke', V, undefined, ANC, t0 + 60_000, { cutoff: CUT, ratify: [sig] }));
-    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 100, sig), 'validator', 'ratified by the anchor\'s revoke: it stands');
-    assert.strictEqual(store.statementRole(V.nodeId, V.pub, t0 + 1000, sig), 'participant', 'ratifying cannot reach past the cutoff');
-  });
-
-  it('a revoke signed before its revoker\'s cutoff stands, whichever arrives first, when the revoker\'s revoke ratifies it', () => {
-    const ANC2 = kp('anchor-2'), V2 = kp('v-2'), X = kp('x-2');
-    const t = Date.now() - 10_000;
-    const rVX = grantOf('role-revoke', X, undefined, V2, t + 2, { cutoff: t + 2 });
-    const recs = {
-      AV: grantOf('role-grant', V2, 'validator', ANC2, t),
-      AX: grantOf('role-grant', X, 'validator', ANC2, t + 1),
-      rVX,
-      rAV: grantOf('role-revoke', V2, undefined, ANC2, t + 5, { cutoff: t + 5, ratify: [rVX.sig] }),
-      rAVbare: grantOf('role-revoke', V2, undefined, ANC2, t + 5, { cutoff: t + 5 }),
-    };
-    for (const [order, role] of [[['AV', 'AX', 'rVX', 'rAV'], 'participant'], [['AV', 'AX', 'rAV', 'rVX'], 'participant'], [['AV', 'AX', 'rVX', 'rAVbare'], 'validator'], [['AV', 'AX', 'rAVbare', 'rVX'], 'validator']]) {
-      const store = new RoleGrantStore({ anchor: { nodeId: ANC2.nodeId, publicKey: ANC2.pub } });
-      for (const k of order) assert.strictEqual(store.record(recs[k]).stored, true, `${order.join(' ')}: ${k}`);
-      assert.strictEqual(store.resolveRole(X.nodeId, X.pub, Date.now()), role, `${order.join(' → ')}`);
-    }
-  });
-
-  it('a revoke signed at or after its revoker\'s cutoff has no effect, whichever arrives first', () => {
-    const ANC3 = kp('anchor-3'), V3 = kp('v-3'), W3 = kp('w-3');
-    const t = Date.now() - 100_000;
-    const rVW = grantOf('role-revoke', W3, undefined, V3, t + 20, { cutoff: t + 20 });
-    const recs = {
-      AV: grantOf('role-grant', V3, 'validator', ANC3, t),
-      AW: grantOf('role-grant', W3, 'validator', ANC3, t + 1),
-      rVW,
-      // The anchor revoked V3 at t+30, withdrawing its trust from t+10, and (wrongly) lists rVW.
-      rAV: grantOf('role-revoke', V3, undefined, ANC3, t + 30, { cutoff: t + 10, ratify: [rVW.sig] }),
-    };
-    for (const order of [['AV', 'AW', 'rVW', 'rAV'], ['AV', 'AW', 'rAV', 'rVW']]) {
-      const store = new RoleGrantStore({ anchor: { nodeId: ANC3.nodeId, publicKey: ANC3.pub } });
-      for (const k of order) store.record(recs[k]);
-      assert.strictEqual(store.resolveRole(W3.nodeId, W3.pub, Date.now()), 'validator', `${order.join(' → ')}: V3 signed after its cutoff`);
-    }
-  });
-
-  it('a grant naming this node with a foreign key is inert and reported (p2b-node)', () => {
-    const reported = [];
-    const own = kp('me');
-    const store = new RoleGrantStore({ anchor: { nodeId: ANC.nodeId, publicKey: ANC.pub }, selfId: own.nodeId, selfKey: own.pub, onForeignSelfGrant: (g) => reported.push(g) });
-    const r = store.record(grantOf('role-grant', { nodeId: own.nodeId, pub: ATT.pub }, 'validator', ANC, Date.now() - 1));
-    assert.strictEqual(r.inert, 'foreign-key-for-self');
-    assert.strictEqual(reported.length, 1);
-    assert.strictEqual(store.resolveRole(own.nodeId, own.pub, Date.now()), 'participant');
-    assert.strictEqual(store.vouchedKey(own.nodeId), undefined);
-  });
-
-  it('p2b-node: at the node, a grant a revoked validator dated after its cutoff confers nothing and binds no key, and records forged under it are refused', async () => {
-    const ANCN = identity('anchor-n');
-    const b = mk('p2b', { anchor: { nodeId: ANCN.nodeId, publicKey: ANCN.publicKey }, room: 'r' });
-    try {
-      await b.start();
-      const P = identity('relay-peer');
-      const s = admitAs(b, P);
-      const g = (o, k) => ({ type: o.type, grant: signGrant({ ...o }, k) });
-      const VV = identity('validator-n'); const HH = identity('honest-n'); const AT = identity('att-n');
-      deliver(b, s, g({ type: 'role-grant', grantee: VV.nodeId, role: 'validator', grantedBy: ANCN.nodeId, grantedAt: t0, granteeKey: VV.publicKey }, ANCN.privateKey));
-      deliver(b, s, g({ type: 'role-revoke', grantee: VV.nodeId, grantedBy: ANCN.nodeId, grantedAt: t0 + 50_000, cutoff: t0 + 500 }, ANCN.privateKey));
-      deliver(b, s, g({ type: 'role-grant', grantee: HH.nodeId, role: 'validator', grantedBy: VV.nodeId, grantedAt: t0 + 1000, granteeKey: AT.publicKey }, VV.privateKey));
-      deliver(b, s, g({ type: 'role-grant', grantee: b.nodeId, role: 'validator', grantedBy: VV.nodeId, grantedAt: t0 + 1001, granteeKey: AT.publicKey }, VV.privateKey));
-      assert.strictEqual(b._roster.source(HH.nodeId), undefined);
-      assert.strictEqual(b._roster.source(b.nodeId), 'self');
-      assert.strictEqual(b._roleGrants.size(), 4, 'kept, as verifiable records (final re-review ruling A); they confer nothing');
-      assert.strictEqual(b.resolveRole(HH.nodeId, Date.now(), { key: AT.publicKey }), 'participant');
-      const hooked = [];
-      b.on('verified-record', (e) => hooked.push(e));
-      deliver(b, s, { type: 'cmb', cmb: signedRecord({ ...HH, publicKey: AT.publicKey, privateKey: AT.privateKey }, { categories: { focus: 'forged as H' }, room: 'r' }) });
-      deliver(b, s, { type: 'cmb', cmb: signedRecord({ nodeId: b.nodeId, name: b.name, publicKey: AT.publicKey, privateKey: AT.privateKey }, { categories: { focus: 'forged as me' }, room: 'r' }) });
-      await new Promise((r) => setTimeout(r, 200));
-      assert.strictEqual(hooked.length, 0, 'neither verifies');
-    } finally { await stopAll(b); }
-  });
-});
+// Section C (cs-review-B; re-review N2; final re-review ruling B: cutoffs, backdating, ratification)
+// tested the time-replay grant rule MMP §6.6 retired: authority is now a function of a set of
+// hash-linked statements with no times in it. Its successors are authority-vectors, authority-attacks
+// (backdating, arrival order) and authority-node (a foreign key for this node is inert and reported).
 
 describe('D. no shared budget before verification; bounds (cs-review-B, cs-review-D)', () => {
-  it('p10-hold-size / pending-abuse-014 (c): 64 padded early records hold nothing past their signed fields and 64 KiB', async () => {
-    const b = mk('p10', { anchor: { nodeId: crypto.randomUUID(), publicKey: crypto.randomBytes(32).toString('base64url') } });
+  it('p10-hold-size / pending-abuse-014 (c): a padded authority statement is not of the shape and is held nowhere; at most 64 pending, each a few KiB at most', async () => {
+    const someone = identity('a');
+    const b = mk('p10', { anchor: { nodeId: someone.nodeId, publicKey: someone.publicKey }, gossipBudget: { newLane: 1e6, burst: 1e6 } });
     try {
       await b.start();
       const s = admitAs(b, identity('m'));
       const big = 'x'.repeat(900 * 1024);
-      for (let i = 0; i < 64; i++) {
-        deliver(b, s, { type: 'role-grant', grant: { type: 'role-grant', grantee: big + i, role: 'validator', grantedBy: crypto.randomUUID(), grantedAt: Date.now(), granteeKey: crypto.randomBytes(32).toString('base64url'), sigAlg: 'ed25519', sig: crypto.randomBytes(64).toString('base64url'), pad: big } });
-      }
-      assert.ok(!s._chainHold || s._chainHold.grants.size === 0, 'a grantee over 128 characters is malformed: never held');
-      for (let i = 0; i < 100; i++) {
-        deliver(b, s, { type: 'role-grant', grant: { type: 'role-grant', grantee: crypto.randomUUID(), role: 'validator', grantedBy: crypto.randomUUID(), grantedAt: Date.now(), granteeKey: crypto.randomBytes(32).toString('base64url'), sigAlg: 'ed25519', sig: crypto.randomBytes(64).toString('base64url'), pad: big } });
-      }
-      assert.ok(s._chainHold.grants.size <= 64);
-      assert.ok(s._chainHold.bytes <= 64 * 1024, `held ${s._chainHold.bytes} bytes`);
-      for (const e of s._chainHold.grants.values()) assert.ok(!('pad' in e.grant), 'held as its signed fields only');
+      const stmt = (M) => A.signStatement({ kind: 'grant', authorisedBy: `auth-${crypto.randomBytes(32).toString('hex')}`, subject: { nodeId: crypto.randomUUID(), key: M.publicKey }, role: 'validator', nonce: A.freshNonce(), sigs: [] }, M.privateKey, M.publicKey);
+      const M1 = identity('signer-1');
+      for (let i = 0; i < 64; i++) deliver(b, s, { type: 'authority-statement', statement: { ...stmt(M1), pad: big } });
+      assert.ok(!s._authPending || s._authPending.size === 0, 'a member the schema does not define: never held');
+      assert.strictEqual(b._relayMuted(s.nodeId, `authority:${M1.publicKey}`), true, 'and past a few, that signer\'s statements from this peer are dropped unread');
+      const M2 = identity('signer-2');
+      for (let i = 0; i < 100; i++) deliver(b, s, { type: 'authority-statement', statement: stmt(M2) });
+      assert.strictEqual(s._authPending.size, 64);
+      let bytes = 0;
+      for (const e of s._authPending.values()) bytes += JSON.stringify(e.statement).length;
+      assert.ok(bytes <= 64 * 4096, `held ${bytes} bytes`);
     } finally { await stopAll(b); }
   });
 
-  it('role-linear / role-resolve-cost: a delegation reaches at most 8 grants, and resolution stays fast at 16 records per pair', () => {
-    const A = kp('anchor-l');
-    const s = new RoleGrantStore({ anchor: { nodeId: A.nodeId, publicKey: A.pub } });
-    const t = Date.now() - 1e6;
-    let prev = A;
+  it('role-linear / role-resolve-cost (MMP §6.6): a chain is at most 4 links, and resolving 4 levels of 256 statements each is fast', () => {
+    const anchor = identity('anchor-l');
+    const pin = A.parsePin({ threshold: 1, keys: [{ key: anchor.publicKey }] });
+    const st = new AuthorityStore({ pin });
+    const sign = (by, signer, fields) => A.signStatement({ ...fields, authorisedBy: by, nonce: A.freshNonce(), sigs: [] }, signer.privateKey, signer.publicKey);
+    let prev = { id: 'anchor', signer: anchor };
     let depthReached = 0;
-    for (let d = 1; d <= 24; d++) {
-      const g = kp(`l${d}`);
-      assert.strictEqual(s.record(grantOf('role-grant', g, 'validator', prev, t + d)).stored, true, 'verifiable: kept, its effect decided at resolution');
-      if (s.resolveRole(g.nodeId, g.pub, Date.now()) === 'validator') depthReached = d;
-      prev = g;
+    for (let d = 1; d <= 6; d++) {
+      const g = identity(`l${d}`);
+      const s = sign(prev.id, prev.signer, { kind: 'grant', subject: { nodeId: g.nodeId, key: g.publicKey }, role: 'admin' });
+      if (st.ingest(s).result === 'held' && st.statusOf(A.statementId(s)) === 'in-force') depthReached = d;
+      prev = { id: A.statementId(s), signer: g };
     }
-    assert.strictEqual(depthReached, 8, 'the 9th link confers nothing');
-    const B = kp('anchor-c');
-    const st = new RoleGrantStore({ anchor: { nodeId: B.nodeId, publicKey: B.pub } });
-    const chain = [kp('c0')];
-    st.record(grantOf('role-grant', chain[0], 'validator', B, t));
+    assert.strictEqual(depthReached, 4, 'the fifth link is not valid');
     const t1 = process.hrtime.bigint();
-    for (let d = 1; d <= 7; d++) {
-      const g = kp(`c${d}`); chain.push(g);
-      for (let i = 0; i < 16; i++) st.record(grantOf('role-grant', g, 'validator', chain[d - 1], t + d * 1000 + i));
+    const wide = new AuthorityStore({ pin });
+    let level = [{ id: 'anchor', signer: anchor }];
+    for (let d = 1; d <= 3; d++) {
+      const next = [];
+      for (const parent of level.slice(0, 2)) for (let i = 0; i < 256; i++) {
+        const g = identity('w');
+        const s = sign(parent.id, parent.signer, { kind: 'grant', subject: { nodeId: g.nodeId, key: g.publicKey }, role: i < 16 ? 'admin' : 'participant' });
+        wide.ingest(s);
+        if (i < 16) next.push({ id: A.statementId(s), signer: g });
+      }
+      level = next;
     }
     const storeMs = Number(process.hrtime.bigint() - t1) / 1e6;
     const t2 = process.hrtime.bigint();
-    assert.strictEqual(st.resolveRole(chain[7].nodeId, chain[7].pub, Date.now()), 'validator');
+    wide._resolved = null;
+    const r = wide.resolve();
     const resMs = Number(process.hrtime.bigint() - t2) / 1e6;
-    assert.ok(storeMs < 5000, `7 levels x 16 stored in ${storeMs.toFixed(0)} ms (was exponential)`);
+    assert.ok(r.inForce.size > 1000);
+    assert.ok(storeMs < 20000, `${wide.size()} stored in ${storeMs.toFixed(0)} ms`);
     assert.ok(resMs < 500, `resolved in ${resMs.toFixed(0)} ms`);
   });
 
@@ -727,25 +619,9 @@ describe('the rest of the review (cs-review-B/p11-cli-compact, node-level attest
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('p2c-backdate at the node: a revoked validator\'s attestation dated at or after its cutoff weighs as a participant', async () => {
-    const ANCN = identity('anchor-att');
-    const node = mk('att-w', { anchor: { nodeId: ANCN.nodeId, publicKey: ANCN.publicKey } });
-    try {
-      const V = identity('validator-att');
-      const t0 = Date.now() - 100_000;
-      node._roleGrants.record(signGrant({ type: 'role-grant', grantee: V.nodeId, role: 'validator', grantedBy: ANCN.nodeId, grantedAt: t0, granteeKey: V.publicKey }, ANCN.privateKey));
-      node._roster.bind(V.nodeId, V.publicKey, 'pinned');
-      const inWindow = { by: V.nodeId, at: t0 + 1000 };
-      assert.strictEqual(node._attesterRole(inWindow), 'validator', 'signed while V was a validator: it counts');
-      node._roleGrants.record(signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: ANCN.nodeId, grantedAt: t0 + 50_000, cutoff: t0 + 2000 }, ANCN.privateKey));
-      assert.strictEqual(node._attesterRole(inWindow), 'participant', 'V no longer holds rank, and nothing ratified it (final re-review ruling B)');
-      const ratified = { ...inWindow, sig: 'Q'.repeat(85) + 'A' };
-      node._roleGrants.record(signGrant({ type: 'role-revoke', grantee: V.nodeId, grantedBy: ANCN.nodeId, grantedAt: t0 + 50_001, cutoff: t0 + 2000, ratify: [ratified.sig] }, ANCN.privateKey));
-      assert.strictEqual(node._attesterRole(ratified), 'validator', 'one the anchor ratified keeps its standing, for every receiver');
-      const backdated = { by: V.nodeId, at: t0 + 3000 };
-      assert.strictEqual(node._attesterRole(backdated), 'participant', 'one dated at or after the cutoff never counts, whenever it was signed (re-review N2)');
-    } finally { await stopAll(node); }
-  });
+  // p2c-backdate at the node (an attestation dated after its signer's cutoff) tested the retired time
+  // rule; an attestation's weight is now judged against the in-force set when it is applied (§6.6.10,
+  // earned-authority-node.test.js).
 });
 
 describe('the rest of the review (cs-review-C)', () => {
