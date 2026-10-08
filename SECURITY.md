@@ -148,13 +148,17 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
   (`status().coreSecure.keyConflicts`).
 - **Authority statements** (MMP §6.6): what is in force is bounded by the quotas above. What is
-  held: at most 200,000 statements. Past that the store drops what is not in the live set first,
-  then what comes last in authority order (deepest first, grants before revokes and endorses,
-  highest id first), a batch at a time; an arriving anchor-level statement or revoke is never the
-  one refused or dropped, so a revoke that removes a flooding authority is always taken; dropping
-  live statements is logged and counted. A statement is at most 16 signature entries (their keys
-  unique: MMP §6.6 errata 1), 64 targets and a 256-character scope, in the schema's shape (anything
-  else is refused before any work). A statement whose chain is not held is pending: at most 64 held per
+  held: at most 200,000 statements, and beyond that only in-force revokes and in-force anchor-level
+  statements, which the quotas bound. Past the bound the store drops everything outside the live set
+  first, whatever its kind (a dead or over-quota revoke is an ordinary candidate), then live
+  statements in reverse authority order (deepest first, grants before revokes and endorses, highest
+  id first), skipping only in-force revokes and in-force anchor-level statements. So a revoke that
+  removes a flooding authority is always taken, and one signer's dead statements never displace
+  another's authority. A pass resolves once and frees a batch, so its cost is paid once per
+  thousands of arrivals at the default bound, and the file is compacted as it goes, so the disk is
+  bounded too. Dropping live statements is logged and counted. A statement is at most 16 signature
+  entries (their keys unique: MMP §6.6 errata 1), 64 targets and a 256-character scope, in the
+  schema's shape (anything else is refused before any work). A statement whose chain is not held is pending: at most 64 held per
   session (checked before its signature is), keyed by id and signing key, for at most 10 s or until
   the session closes, never persisted, relayed or counted. An `authority-set` carries at most 64
   statements. A node answers `authority-fetch` at 4 a second per session (burst 16); over that a
@@ -168,7 +172,10 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   multiplication), so at most 33; a repeat or a statement not of the shape spends nothing. Every
   statement a session delivers spends its lane, asked for or not: this node asks only when the lane
   holds a full page's worst case (64 × 33 = 2,112), and reserves it until the answer, so an answer
-  is never dropped for budget and never spends more than the lane holds. A ceiling of 4,000
+  is never dropped for budget and never spends more than the lane holds. Resolving, which is linear
+  in the held set and not charged to any lane, is paced instead: a node resolves when it settles, at
+  most once per twice the time its last resolution took, and a pull's end is decided at the next
+  settle, never by a resolution forced for it. A ceiling of 4,000
   verified statements a second in all (burst 20,000) is spent only after the check; checkpoints at most
   4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
   per position.

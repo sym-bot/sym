@@ -42,13 +42,16 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   statement a revoke cut off is rescued only by an in-force endorse from above, charged to the
   endorser's bucket and falling through by id; a quota cut is never rescued. The live set and the
   authority root. (lib/authority-store.js)
-- **Capacity (errata 1).** At most 200,000 statements held. Past that the store drops what is not
-  live first, then what comes last in authority order (deepest first, grants before revokes and
-  endorses, highest id first), freeing a batch at a time so its sort is paid once per batch. An
-  anchor-level statement or a revoke is never dropped or refused, so the removal that would clean up
-  a flooded store is always taken. A statement refused for capacity (`over-capacity`) says nothing
-  against its sender. Dropping live statements is said in the log and counted
-  (`authorityStatus().capacity`).
+- **Capacity (errata 1).** At most 200,000 statements held, and beyond that only in-force revokes and
+  in-force anchor-level statements, which the quotas bound. Past the bound the store drops
+  everything outside the live set first, whatever its kind (a dead or over-quota revoke is an
+  ordinary candidate), then live statements in reverse authority order (deepest first, grants before
+  revokes and endorses, highest id first), skipping only in-force revokes and in-force anchor-level
+  statements. So the removal that would clean up a flooded store is always taken, and one signer's
+  dead statements never displace another's authority. A pass resolves once and frees a batch; the
+  statement file is compacted once it holds twice what the store keeps. A statement refused for
+  capacity (`over-capacity`) says nothing against its sender. Dropping live statements is said in
+  the log and counted (`authorityStatus().capacity`).
 - **Persistence.** One file, `authority/statements.jsonl`, whatever the pin. At load every statement
   is judged again against the pin in force; what does not count under it (a mistyped pin, a re-pin,
   a chain not yet held) stays in the file as the bytes it was, never deleted, so a corrected pin, or
@@ -84,7 +87,9 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   (`authority-foreign-self-key`). A received record's origin weight, `validateCMB` and `canonizeCMB`
   (judged on that CMB's own fields; a scoped grant only inside its scope, through the host's
   `authorityScopes`) and attestation weights are judged against the in-force set when applied. A
-  node resolves when it settles, at most once per twice the time its last resolution took.
+  node resolves when it settles, at most once per twice the time its last resolution took; a pull's
+  end is decided at the next settle, and an eviction pass resolves once per batch of arrivals, so no
+  peer buys a resolve per frame.
 - **One Ed25519 rule (§18.3.2)** for every signature sym checks: records, handshake proofs,
   attestations, checkpoints, witnesses, room-join grants, tether attestations, relocation bundles
   and authority statements (lib/core/ed25519.js). Handshake keys are taken only in canonical
@@ -201,7 +206,8 @@ Five findings and the open leads, each fixed where its assumption was made (the 
 `docs/DESIGN-core-secure-identity.md` on branch `design/0.14.0-core-secure-identity`). N2, N4 and N5
 (revoke cutoffs, caps that refused revokes, the 0.13 grant store) went with the time-replay rule;
 MMP §6.6 (above) has no cutoff, a bucket keeps its revokes and endorses before its grants, a full
-store never refuses a revoke, and the 0.13 store is read only as plain data, never rewritten.
+store never refuses or drops a revoke that is in force, and the 0.13 store is read only as plain data,
+never rewritten.
 
 - **A failed signature is charged only to a session that signed in its own name (N1).** Bindings are
   local views: a relayed statement is verified under this node's binding for its signer, which may

@@ -107,17 +107,23 @@ counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in
   paid from the reservation and what it did not spend goes back. One ask is in flight per session.
   So an answer is never dropped for budget, and nothing the peer sends makes this node verify more
   than the peer's lane pays for, whatever triggered the ask (a digest, a pending statement, the
-  answer before). An answer is verified in slices, the event loop free between them.
+  answer before). An answer is verified in slices, the event loop free between them. Resolving the
+  set is not charged to a lane; it is paced: a node resolves when it settles, at most once per twice
+  its last resolution's time, a pull's end is decided at the next settle (never by a resolution forced
+  for it), and an eviction pass resolves once per batch of arrivals.
 - **Pulls.** An unanswered page is asked again from the same cursor, up to 3 times. A digest that
   arrives during a pull is remembered, and if the roots still differ when the pull ends, the pull
   starts again at once (under the asking rule). A pull that ends with the roots apart and no new
   digest is started again after a backoff, 2 s doubling to 5 minutes, reset when either set changes,
   until the roots meet. A pull that stopped early (its page retries spent, or its session closed)
   resumes from its cursor.
-- **Capacity (errata 1).** At most 200,000 statements are held. Past that the store drops what is
-  not live first, then what comes last in authority order (deepest first, grants before revokes and
-  endorses, highest id first), a batch at a time. An anchor-level statement or a revoke is never
-  dropped or refused. A statement refused for capacity is not a relay failure.
+- **Capacity (errata 1).** At most 200,000 statements are held, and beyond that only in-force revokes
+  and in-force anchor-level statements, which the quotas bound. Past the bound the store drops
+  everything outside the live set first, whatever its kind, then live statements in reverse authority
+  order (deepest first, grants before revokes and endorses, highest id first), a batch at a time. An
+  anchor-level statement or a revoke that is in force is never dropped or refused; a dead or
+  over-quota one is an ordinary candidate. A statement refused for capacity is not a relay failure.
+  The file is compacted once it holds twice what the store keeps.
 - **Unique signature keys (errata 1).** A statement whose signature entries repeat a key is not well
   formed, refused before any signature is checked.
 - **Persistence (§6.6.8).** Held statements are written as their canonical members only, each on a
