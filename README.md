@@ -165,7 +165,7 @@ What this does not solve, said plainly:
   reconnects. The anchor's threshold holders are the root of authority.
 - **Upgrading from 0.13 is a flag day for authority.** Old role grants confer nothing under §6.6;
   the anchor and each grantor re-issue what should stand (`node.legacyRoleGrants()` lists the old
-  ones).
+  ones; [docs/AUTHORITY-OPERATOR.md](docs/AUTHORITY-OPERATOR.md) says how, and how to pin and re-pin).
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
   replace another node's connection (close 4004). A squatter gets no Core Secure session — it
   cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.

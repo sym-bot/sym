@@ -92,22 +92,40 @@ counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in
   that keeps one pull in flight gets every page. sym does not take the MAY to refuse a fresh full
   pull within 60 s: the pacing bounds the work, and a refused pull would leave differing roots
   apart until the peer's set next changed.
-- **The cost of a new key (§6.6.12).** Every statement a session delivers spends that peer's gossip
-  lane before it is checked: one check, plus 16 for each key it names that this node has not seen
-  (a grant's subject key; the signing key, when it will be verified; pinned keys an anchor-level
-  statement's entries name). Rules 1 and 2 of §18.3.2 cost one scalar multiplication for a new key,
-  about fifteen signature checks here. A statement not of the schema's shape, and a repeat of one
-  held, cost nothing. Unsolicited statements over the lane are dropped (a pull brings them later);
-  an answer to this node's own fetch or pull is never dropped: its cost is charged as a debt, and
-  the next page is asked for only once the debt is repaid.
+- **The cost of a statement (§6.6.12).** Every statement a session delivers spends that peer's
+  gossip lane before it is checked, asked for or not: one check (one per pinned-key entry of an
+  anchor-level statement, each of which may be verified), plus 16 for each key it makes this node
+  check for the first time (a grant's subject key; the signing key, when it will be verified). Rules
+  1 and 2 of §18.3.2 cost one scalar multiplication for a new key, about fifteen signature checks
+  here; pinned keys are checked once, at the pin, and kept. So a statement costs at most 33. A
+  statement not of the schema's shape, a repeat of one held, a pending statement already held, and
+  one the session's pending holds (64) have no room for cost nothing: they are dropped before any
+  check. Unsolicited statements the lane cannot pay for are dropped (a pull brings them later).
+- **The asking rule.** This node asks a session (a pull page, or a fetch by ids for the missing
+  links of its pending statements, up to 64 ids at once) only when that peer's lane holds a full
+  answer's worst case, 64 × 33 = 2,112 checks, and reserves it while the ask is out: the answer is
+  paid from the reservation and what it did not spend goes back. One ask is in flight per session.
+  So an answer is never dropped for budget, and nothing the peer sends makes this node verify more
+  than the peer's lane pays for, whatever triggered the ask (a digest, a pending statement, the
+  answer before). An answer is verified in slices, the event loop free between them.
 - **Pulls.** An unanswered page is asked again from the same cursor, up to 3 times. A digest that
   arrives during a pull is remembered, and if the roots still differ when the pull ends, the pull
-  starts again.
-- **Persistence (§6.6.8).** Held statements are written as their canonical members only, to
-  `authority/statements-<pin digest>.jsonl` in the node's directory: a statement means something only
-  under the pin it was verified against, so a node started under another pin reads another file and
-  leaves this one as it was. At load every statement is verified again, chain by chain, and the set
-  resolved afresh; no status, root or receipt time is stored.
+  starts again at once (under the asking rule). A pull that ends with the roots apart and no new
+  digest is started again after a backoff, 2 s doubling to 5 minutes, until the roots meet.
+- **Capacity.** At most 200,000 statements are held. Past that the store drops what is not live
+  first, then what comes last in authority order (deepest first, grants before revokes and endorses,
+  highest id first), a batch at a time. An arriving anchor-level statement or revoke is never the one
+  refused. A statement refused for capacity is not a relay failure.
+- **Persistence (§6.6.8).** Held statements are written as their canonical members only, each on a
+  line of its own, to one file, `authority/statements.jsonl`, whatever the pin. At load every
+  statement is judged again against the pin in force, chain by chain, and the set resolved afresh;
+  what does not count under that pin is kept in the file as the bytes it was, never deleted, so a
+  re-pin keeps what still counts (§6.6.1) and a corrected pin finds everything again. Only lines that
+  are not a statement (torn, not JSON, not of the shape) and statements dropped for capacity are left
+  out. No status, root or receipt time is stored.
+- **No anchor pinned.** A node with no pin sends no digest, pulls nothing,
+  answers no fetch, stores and relays nothing, and counts no statement it cannot judge against the
+  session that sent it.
 - **Scopes (§6.6.2).** A scope's namespace is implemented by an extension. sym implements none by
   itself: a host passes `authorityScopes: { <namespace>: (path, cmb, scope) => boolean }`, judged on
   the CMB's own signed fields. Where a namespace is not implemented a scoped grant is still resolved
@@ -198,5 +216,6 @@ from another peer is still taken.
 key its own chain names (the subject key of its authorising grant, or the pinned keys), never a
 registry binding (MMP §6.6.9), so the views above cannot differ and no session is closed for one.
 One that fails is dropped and counted against the delivering session (§6.6.8: rate-limited): past 8
-failures in a minute for one signing key, that session's statements under that key are dropped
-unread for the rest of the minute.
+failures in a minute, that peer's authority statements are dropped unread for the rest of the minute.
+The mute is keyed on the session's peer, never on a key the statement names (a sender chooses those).
+A statement refused for capacity is not a failure.

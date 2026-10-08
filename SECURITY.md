@@ -104,8 +104,10 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   signer are dropped unverified for the rest of the minute. A refused record is logged and recorded
   in the decision log at most once a minute per peer and reason. Authority statements are verified
   under the keys their own chains name, so this question does not arise for them: one that fails is
-  dropped and counted against the delivering session, and past 8 failures a minute under one signing
-  key that session's statements under that key are dropped unread.
+  dropped and counted against the delivering session, and past 8 failures in a minute that peer's
+  authority statements are dropped unread for the rest of the minute. The mute is keyed on the
+  session's peer, never on a key the sender writes into the statement. A statement refused for
+  capacity, and one this node cannot judge because no anchor is pinned, count for nothing.
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
@@ -146,22 +148,27 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   conflicts: at most 8 kept per nodeId and 1,024 in all, every one counted
   (`status().coreSecure.keyConflicts`).
 - **Authority statements** (MMP §6.6): what is in force is bounded by the quotas above. What is
-  held: at most 200,000 statements; past that the ones not in the live set go first (highest id
-  first), and a new one is refused only when the live set alone fills the store. A statement is at
-  most 16 signature entries, 64 targets and a 256-character scope, in the schema's shape (anything
-  else is refused before any work). A statement whose chain is not held is pending: its own
-  signature checked first, at most 64 held per session, keyed by id and signing key, for at most
-  10 s or until the session closes, never persisted, relayed or counted, with one fetch in flight per
-  missing id. An `authority-set` carries at most 64 statements. A node answers `authority-fetch` at 4
-  a second per session (burst 16); over that a request waits, at most 64 of them, and past that one
-  is dropped. One pull in flight per session.
+  held: at most 200,000 statements. Past that the store drops what is not in the live set first,
+  then what comes last in authority order (deepest first, grants before revokes and endorses,
+  highest id first), a batch at a time; an arriving anchor-level statement or revoke is never the
+  one refused, so a revoke that removes a flooding authority is always taken. A statement is at most
+  16 signature entries, 64 targets and a 256-character scope, in the schema's shape (anything else
+  is refused before any work). A statement whose chain is not held is pending: at most 64 held per
+  session (checked before its signature is), keyed by id and signing key, for at most 10 s or until
+  the session closes, never persisted, relayed or counted. An `authority-set` carries at most 64
+  statements. A node answers `authority-fetch` at 4 a second per session (burst 16); over that a
+  request waits, at most 64 of them, and past that one is dropped. This node asks a session for
+  anything (a pull page, the missing links of its pending statements, up to 64 ids at once) one ask
+  at a time, and only when the session's gossip lane can pay a full answer's worst case (below).
 - **Gossip** (attestations, checkpoints, witnesses, authority statements): 2,000 new statements a
   second per proven peer (burst 10,000; a new peer starts at 100), spent before a signature is
-  checked (an authority statement also spends 16 for each key it makes this node check for the first
-  time, since that check is a scalar multiplication; a repeat or a statement not of the shape spends
-  nothing; an answer to this node's own pull is charged as a debt that paces the next page, never
-  dropped), and
-  4,000 verified statements a second in all (burst 20,000), spent only after it; checkpoints at most
+  checked. An authority statement spends one check (an anchor-level one, one per pinned-key entry)
+  and 16 for each key it makes this node check for the first time (that check is a scalar
+  multiplication), so at most 33; a repeat or a statement not of the shape spends nothing. Every
+  statement a session delivers spends its lane, asked for or not: this node asks only when the lane
+  holds a full page's worst case (64 × 33 = 2,112), and reserves it until the answer, so an answer
+  is never dropped for budget and never spends more than the lane holds. A ceiling of 4,000
+  verified statements a second in all (burst 20,000) is spent only after the check; checkpoints at most
   4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
   per position.
 - **Records** (MMP §8.8.6 as draft spec PR #37 states it): a category's text at most 256 KiB after
@@ -229,11 +236,20 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 - **Grants are visible.** Every node that holds the set can read who holds which role.
 - **A new key costs a scalar multiplication.** The prime-order check of a key not seen before
   (§18.3.2) is one multiplication by L, about fifteen signature checks here. The gossip lane is
-  charged for it before it is done; a flood of fresh keys buys a sixteenth of a lane's checks.
+  charged 16 checks for it before it is done, whether the statement was asked for or not, so a peer
+  that answers with fresh keys buys at most its lane's worth of work. An answer is verified in
+  slices, so a page never holds the event loop for long. The key cache keeps the pinned keys for good
+  and the rest least recently used first, so a flood of fresh keys evicts only keys nobody used since.
+- **A re-pin keeps what still counts; a mistyped pin destroys nothing.** Statements are kept in one
+  file whatever the pin. At each start every statement is judged again against the pin in force, and
+  what does not count under it is kept as the bytes it was. A re-pin that keeps a threshold of the
+  old keys (dropping a compromised key from 2 of 3 to 2 of 2) keeps everything those keys signed in
+  force (§6.6.1); a pin corrected after a typo finds everything again (docs/AUTHORITY-OPERATOR.md).
 - **The upgrade is a flag day (MMP §6.6.11).** sym 0.14 resolves no authority from the role grants
-  0.13 (and earlier 0.14 builds) signed: until the anchor and each grantor re-issue what should stand
-  as §6.6 grants, every node resolves as a participant. `node.legacyRoleGrants()` lists the old store
-  as plain data (never verified, never resolved, never sent) for the operator who re-issues.
+  0.13 signed: until the anchor and each grantor re-issue what should stand as §6.6 grants, every
+  node but the anchor's holder resolves as a participant. `node.legacyRoleGrants()` lists the old
+  store as plain data (never verified, never resolved, never sent) for the operator who re-issues
+  (docs/AUTHORITY-OPERATOR.md).
 - **Scopes need their namespace.** sym implements no scope namespace by itself: a scoped grant
   confers nothing on any CMB until the host passes the extension's resolver (`authorityScopes`).
 - **A received validation CMB advances its parent only to remixed.** MMP §6.5 has a receiver advance
