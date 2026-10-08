@@ -70,6 +70,10 @@
       "from": "scripts/mmp/lib.mjs (repository root)",
       "sha256": "990c963ac556180ebee37e7f54915801f475bf92810d46c9afdc7da4c973aece",
       "note": "the reference construction (scripts/mmp/lib.mjs at 2660ab9); not a published artifact, so not in the manifest"
+    },
+    "application.schema.json": {
+      "from": "schema/application.schema.json",
+      "sha256": "b52d2a385cb7eb382a960dbdb4003f859edeb185c7d1ebd719dfe2eb71f8690e"
     }
   }
 }

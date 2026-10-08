@@ -1,76 +1,53 @@
-# sym 0.14.0: wire elements that need spec text
+# sym 0.14.0: the wire, against MMP 2.0 update 1
 
-These are the wire elements that sym 0.14.0 (Core Secure) sends and that MMP v2.0 does not
-define yet, written so that a spec PR can be drafted from them. Each section gives the element's
-fields, how it is signed or sealed, when it is sent, and what a receiver does.
+This file began as the wire elements sym 0.14.0 sends that MMP v2.0 did not define, written so that
+spec PRs could be drafted from them. Those drafts are now folded into **MMP 2.0 update 1**
+(sym-bot/meshcognition-website PR #43, branch spec/mmp-2.0-update-1 at 2660ab9, pending the
+founder's merge): `control-encrypted` (§7.1, §18.2.1), `cmb-anchors` (§9.4), `room-join` (§5.8.1),
+the relay handshake and the error rules (§5.2.2, §7.2), the record size limits and the canonical
+projection (§8.8.5, §8.8.6), discovery's TXT `mmp` and `room` (§5.1), the relay fan-out envelope
+(§4.4.4) and `sym-attest-v1` (§16.4). What remains here is what sym chooses where the spec leaves a
+choice, and where sym does not yet do what the update says.
 
 Notation follows MMP v2.0. `lp(x)` is the §8.8.4 length prefix (`<utf8-byte-length>:<utf8 bytes>`).
-A **sealed control frame** is the inner frame of a `control-encrypted` envelope (draft spec PR
-meshcognition-website#26). It shares the session's single per-direction sequence with
-`cmb-encrypted`, so the frames below are ordered with the records around them, and none is ever
-sent in the clear on a Core Secure session.
+A **sealed control frame** is the inner frame of a `control-encrypted` envelope. It shares the
+session's single per-direction sequence with `cmb-encrypted`, so the frames below are ordered with
+the records around them, and none is ever sent in the clear on a Core Secure session.
 
-Frames that the published spec, or a draft PR, already defines are not repeated here. That
-includes `control-encrypted` (#26), `cmb-fetch` and `cmb-fetch-result` (#26: the result is
-`{reqId, returned[], missing[]}`, and each record travels in its own `cmb-encrypted` frame ahead
-of it), the `sym-attest-*` frames (#27), the error code 1009 `IDENTITY_CONFLICT` (#21), and the
-relay close code 4007 (#20).
+Not in the update, and not in sym 0.14.0: relay-auth key proof and its close code 4007 (#20,
+deferred past 0.14.0; sym treats 4007 as an ordinary close, reconnected with backoff), and the
+Near Band extension (#39).
 
 ---
 
-## 1. `cmb-anchors`: the records that follow are replayed context
+## 1. `cmb-anchors`: MMP 2.0 update 1, §9.4
 
-**Why.** When a session is admitted, a node replays a few of its own recent records as context,
-so that a newly joined peer has something to couple against. In 0.13 the replayed record frame
-carried an `_anchor: true` flag. In Core Secure the record frame is fixed by §18.2.1 (an
-`cmb-encrypted` envelope carries the record and nothing else), so the flag cannot ride on it.
+The frame is §9.4's: `{ "type": "cmb-anchors", "keys": [...] }`, sealed, at most 50 cognition keys,
+the first sealed frame after admission (after `room-join`, where the server holds a grant), with
+`keys: []` when nothing is replayed. What sym chooses:
 
-**Frame** (sealed control frame):
-
-```json
-{ "type": "cmb-anchors", "keys": ["cmb-<64 lowercase hex>", "..."] }
-```
-
-- `keys`: the cognition keys (`metadata.key`, §8.2.1) of the records about to be replayed, in the
-  order they will be sent. At most 50 keys. The sender sends at most 5 records.
-
-**Sealing and signing.** Sealed on the session (`control-encrypted`), unsigned. It is
-session-bound: it speaks only for the session's proven peer, about records that peer authored.
-
-**When it is sent.** To every admitted session, first: with the keys of the records about to be
-replayed (at most once a minute per peer), or with `keys: []` when none follow. It goes immediately
-before the replayed records, which follow it on the same session as ordinary `cmb-encrypted`
-frames. Only records the sender itself authored are replayed (anti-echo, §15.7), and only signed
-`mmp-sig-v2.0` records. Because it is always sent, it is also the first authenticated frame a relay
-client hears from its server on a new session: a client that re-handshakes while it holds a
-confirmed session keeps the old one until the new one carries a sealed frame from the server (it
-cannot otherwise know the server took its `client-finish`), and closes a new one that hears nothing
-within the handshake timeout (`unconfirmed-by-peer`). (0.14.0 used `role-digest` for this until
-§6.6 retired it; with no anchor pinned there is no `authority-digest` to send.)
-
-**Receiver.**
-- Keeps the key set for that session, replacing any earlier set from the same session. It keeps
-  at most 50 string keys and ignores entries that are not strings.
-- A record that then arrives on that session with a listed key goes through §8.8.5 verification
-  and admission like any other, and is marked as replayed context (`anchor: true` on the
-  `verified-record` event and on the stored entry) only when its signed `createdByNodeId` is the
-  session's proven nodeId: an anchor is the sender's own record.
-- Only room-bound records are replayed: a record signed to one node (`to` set) is never replayed
-  to another, whoever's session it is (the seal point refuses it in any case).
-- Nothing about the record's authority or verification changes. `cmb-anchors` never causes a
-  record to be accepted.
+- It replays at most 5 records, the newest of its own `mmp-sig-v2.0` records in the session's room
+  with no recipient, and sends a **non-empty** list to one peer at most once a minute; only a list
+  that was sent starts that minute. The empty list goes on every admission.
+- Receiving, it keeps the key set for that session (replacing any earlier one) and marks a record
+  as replayed context (`anchor: true` on the `verified-record` event and the stored entry) only when
+  its signed `createdByNodeId` is the session's proven nodeId. A frame that is not the schema's (more
+  than 50 keys, a non-key, another member) is refused whole and counted.
+- Because it is always sent, it is the first sealed frame a relay client hears on a new session:
+  the client supersedes its old session only when a sealed frame of the new one, other than an
+  `error`, opens, and abandons a new one that hears nothing within the handshake timeout
+  (`unconfirmed-by-peer`), keeping the old.
 
 ---
 
-## 2. `room-join`: now draft spec PR #31
+## 2. `room-join`: MMP 2.0 update 1, §5.8.1
 
-sym 0.14.0 sent this frame as `mesh-room-join` until the security review. It now sends and reads
-`room-join`, as draft spec PR meshcognition-website#31 names and defines it (§5.8.1: a sealed
-control frame carrying the owner-signed grant, sent as the first control frame of a newly
-confirmed session; pending admission for up to the handshake timeout; verified against the
-owner's pinned key, the session's proven nodeId and key, this room, and the grant's expiry). One
-behaviour beyond the draft: an admitted session whose grant expires is closed when it does
-(`room-grant-expired`), not kept for as long as the session lasts.
+As §5.8.1 states it: a sealed control frame carrying the owner-signed grant, sent first on a newly
+confirmed session; the grant checked against its schema (closed, integer times, lowercase ids)
+before any signature work, then verified under §18.3.2 against the owner's pinned key, the
+session's proven nodeId and key and this room, with 5 minutes of skew either way; admission
+decided before the session's next frame; the session closed when the grant expires
+(`room-grant-expired`). sym sends only the schema's members of the grant it holds.
 
 ---
 
@@ -145,58 +122,58 @@ counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in
 
 ---
 
-## 4. Errors on a session: 1011 `UNKNOWN_SESSION` in the clear, everything else sealed
+## 4. Errors and the relay handshake: MMP 2.0 update 1, §5.2.2 and §7.2
 
-sym 0.14.0 used sym-local codes 4404 ("unknown session") and 4400 ("session closed") until the
-security review. It now uses the renumbering draft spec PR meshcognition-website#23 adopts: **1011
-`UNKNOWN_SESSION`** and **1010 `SESSION_CLOSED`**, beside #21's 1009 `IDENTITY_CONFLICT`, and the
-rule that an error is information, never a command.
+sym follows §5.2.2 and §7.2 as the update states them: every error on a confirmed session is sealed;
+a clear error changes nothing, except that 1011 `UNKNOWN_SESSION` may prompt a new handshake; a
+sealed error whose action is Close ends the session (1001, 1003 to 1010: 1009 `IDENTITY_CONFLICT`
+and 1010 `SESSION_CLOSED` among them); a replay is discarded on every transport; a gap closes the
+session with a sealed 1010. What sym chooses:
 
-**On a confirmed session every error is sealed** (`control-encrypted`): 1010 when a node closes the
-session, 1009 when the peer's proven key conflicts with the binding, and any 2xxx. A sealed 1010
-or 1009 ends the session at the receiver; any other sealed code is counted and changes nothing.
-A handshake that does not confirm sends nothing, and a superseded session sends nothing (the
-peer's own new session supersedes it): it leaves any confirmed session exactly as it was.
+- **1011 replies.** At most once a second per relay `from` (the table of froms bounded at 1,024,
+  least recently said first out), and at most 2 a second in all (burst 8), dropped past it, never
+  queued. `detail` is `session:<32 hex>` when the triggering frame named a session, absent for a
+  `ping`.
+- **Acting on 1011.** Only the client-role side, only while the peer is present on the relay, only
+  when `detail` names a session it holds with that peer or a probe ping to it is outstanding, only
+  while no newer session with it is waiting to supersede, and no faster than 1 s doubling to 30 s
+  (starting over after a quiet minute). It keeps the session it has until the new one supersedes it.
+- **Probe.** A repeated announcement (`relay-peer-joined`, `relay-peers`) for a peer with a live
+  relay session sends a `ping` on it, at most once a second; a pong (clear or sealed) ends the probe.
+  ping and pong may travel sealed; a sealed ping is answered with a pong.
+- **The server supersedes when it admits the new session** (in a gated room, after `room-join`).
+- **A failed handshake sends nothing.** 1009 is found only after both proofs validate, so it is sent
+  sealed on the session, and a node refused with 1009 does not re-handshake over the relay or
+  re-dial over the LAN (discovery's 15 s re-offer included) until it restarts.
+- **`sendError`** sends only 1002 and 2xxx; the protocol's own codes are the node's to send.
 
-**A clear `error`** on a confirmed session, or over the relay, is anyone's to write, and is
-ignored (counted as `clear-error-ignored`), with one exception:
+## 4a. Records, fetch and the mood frame: MMP 2.0 update 1, §8.8, §7.1, §9.3
 
-```json
-{ "type": "error", "code": 1011, "message": "unknown session", "detail": "session:<32 lowercase hex>" }
-```
+- **The projection.** sym holds and serves the canonical signed projection (§8.8.5 step 1) and passes
+  record-projection-v2 byte for byte: NFC refused, never normalised, on receipt (minted NFC), parents
+  sorted bytewise, an empty lineage and an absent application null. The 256-character caps count
+  code points. A room is a §5.8 identifier everywhere.
+- **The size measure.** `MAX_RECORD_BYTES` is the RFC 8785 length of the two-section record
+  (record-size-v2), never a node's annotations beside it.
+- **Fetch.** `cmb-fetch` is `{ type, reqId, key, timestamp? }` and names one key;
+  `cmb-fetch-result` is `{ type, reqId, returned, missing }`; both are refused when they carry any
+  other member. A fetched record is verified by the whole of §8.8.5 before `fetchCMB()` attributes
+  it; otherwise only its categories are handed back (`verified: false`), for §15.8 lineage use.
+- **mood.** `{ type, mood, context, timestamp }`, attributed to the session's proven nodeId and name;
+  1,024 and 4,096 characters at most; refused when it carries `from`, `fromName` or anything else.
 
-**Why.** A relay session is bound to the relay `from` (draft #23). When a peer restarts behind the
-relay, the relay replaces its connection (4004) and, since sym-relay 0.5.4, sends no
-`relay-peer-left`. The other node still holds the old confirmed session and cannot tell the
-restart from a repeated announcement. So the peer's new process says, in the clear (it has no
-session to seal under), that it holds no such session.
+## 4b. Discovery and the relay client: MMP 2.0 update 1, §5.1, §4.4
 
-- `detail` names the sessionId when the triggering frame carried one (a sealed frame), and is
-  absent when it did not (a `ping`).
-
-**When it is sent.** A node that receives, from a relay `from`, either a sealed frame naming a
-session it does not hold, or a `ping` from a `from` it holds no relay session with, answers with
-1011: at most once a second per relay `from` (the table of froms is bounded at 1,024, least
-recently said first out), and at most 2 a second in all (burst 8) across every `from`, past which
-replies are dropped, never queued (security review D, pacer-starve).
-
-**Receiver.**
-- If it is the client for that peer (the smaller nodeId, §5.2.2), and the peer is present on the
-  relay, it starts a new handshake. It **keeps** the session it has until the new one confirms
-  and supersedes it, so a restart produces no `peer-left`.
-- The server ignores it: the client will re-handshake.
-- 1011 never tears a session down. At most it prompts a new handshake.
-
-**A replayed frame.** An authentic sealed frame whose sequence the receiver has already passed (a
-relay repeating what it carried) is discarded and counted (`replay`); the session is unharmed. A
-gap still closes the session (a lost frame cannot heal).
-
-**1009 is not retried.** A node refused with 1009 does not re-handshake over the relay and is not
-re-dialled over the LAN (discovery's 15 s re-offer included) until it restarts.
-
-**Probe.** A node that sees a repeated announcement (`relay-peer-joined`, `relay-peers`) for a
-peer it holds a live relay session with does not re-handshake. It sends a `ping` on that session,
-at most once a second. A live peer answers `pong`; a restarted one answers 1011.
+- Every node, the daemon included, advertises `_sym._tcp` with TXT `room` and `mmp=2.0`, and dials
+  only advertisements whose TXT room is its own and whose `mmp` list contains 2.0. TXT keys are read
+  case-insensitively, the first occurrence winning. The daemon also browses `_<room>._tcp` where
+  that is a valid RFC 6335 name (the §5.1 migration browse), and never advertises it.
+- The relay client reconnects with backoff after every close but 4004 and 4006 (4005, 4008, 1001,
+  1009, 1011, 1013, and 4007); forgets a relay's `features` with its socket; and sends relay-auth's
+  nodeId lowercase, with `room` (when not default) and `engine`. It paces at 20 frames a second,
+  burst 200: the update's floors (§19.1, `RELAY_MIN_RATE` and `RELAY_MIN_BURST`) are those same
+  numbers, and relay-auth and relay-pong are sent outside the bucket, so there is no headroom
+  (a verification note on #43 asks for floors of 25/300; open).
 
 ---
 

@@ -22,15 +22,24 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
 - **Sealed, ordered channel.** Records travel only as `cmb-encrypted` (ChaCha20-Poly1305 under
   the session's directional traffic key, AEAD-bound to session, direction, sequence and the
   record's identity). Every other post-handshake frame except ping and pong — an `error` included —
-  travels as a sealed `control-encrypted` frame on the same ordered sequence. The receive counter
-  advances only after a frame authenticates, so a forged frame moves nothing; an authentic replay
-  or rollback is discarded, and a gap closes the session, which re-handshakes.
+  travels as a sealed `control-encrypted` frame on the same ordered sequence (ping and pong may too,
+  and a sealed ping is answered). The receive counter advances when a frame authenticates, whatever
+  it carries, so a forged frame moves nothing and an authentic frame whose record or inner frame is
+  refused changes nothing else; an authentic replay or rollback is discarded, and a gap closes the
+  session, which re-handshakes. The envelope is checked as its schema bounds it (its members, a
+  sequence of at most 29 digits, a sealed value at least the tag's length) before it is opened.
 - **Errors are information, never commands.** A clear `error` frame is anyone's to write: it is
-  ignored, except 1011 UNKNOWN_SESSION, which prompts a new handshake and never tears a session
-  down. A session ends on its peer's sealed 1010 SESSION_CLOSED or 1009 IDENTITY_CONFLICT only.
+  ignored, except 1011 UNKNOWN_SESSION, which never tears a session down and prompts a new handshake
+  only on the client side, only when its `detail` names a session this node holds with that peer or a
+  probe ping to it is outstanding, while no newer session is waiting to supersede, and no faster than
+  the retry backoff (1 s doubling to 30 s). A session ends on its peer's sealed error whose MMP §7.2
+  action is Close (1001, 1003–1010: 1010 SESSION_CLOSED and 1009 IDENTITY_CONFLICT among them). A
+  host can send only information (1002 and 2xxx): `sendError` refuses the protocol's own codes.
 - **A record goes only where its author signed it to.** The one seal point refuses a record whose
-  signed `metadata.to` names anyone but the session's proven peer, whatever path offered it
-  (a broadcast, an anchor replay, a fetch answer, a queued frame).
+  signed `metadata.to` names anyone but the session's proven peer, or whose signed room is not the
+  session's room (a node's store is per node, not per room), whatever path offered it (a broadcast,
+  an anchor replay, a fetch answer, a queued frame), so its content is never disclosed to a peer that
+  would refuse it.
 - **One key per nodeId.** Every confirmed session runs with a binding: the key it proved, held for
   that nodeId while the session lives. The durable key registry binds a nodeId only when the
   binding is earned — an admitted verified record, a verified record its author signed to this
@@ -51,7 +60,23 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   lowercase ids, each category key recomputed and a mismatch refused), application bytes, cognition
   key, assertion identity, the Ed25519 signature against the key resolved by `createdByNodeId`, and
   the signed audience (room, recipient). Members no signature covers (`valence`, `arousal`,
-  `lineage.method`) are dropped, and what is stored, delivered and served is the projection.
+  `lineage.method`) are dropped, and what is stored, delivered and served is the projection. The
+  projection is canonical (MMP 2.0 update 1, §8.8.5 step 1), so one assertion is the same bytes at
+  every node: a category text, `createdBy` or `application.schema` that is not NFC is refused (this
+  node mints them NFC), parents are held sorted bytewise as they are signed, a lineage with no
+  parents is null and an absent application is null. A room is a §5.8 identifier
+  (`[a-z0-9._-]`, 1 to 64 characters) everywhere it is named. Valence and arousal never reach the
+  Layer-6 engine, whatever a record (a Legacy Import one included) carried.
+- **A fetched record is attributed only after §8.8.5.** A `cmb-fetch` answer is checked against the
+  requested cognition key, which binds the categories only, then verified in full (author key by
+  `createdByNodeId`, signature, assertion identity, audience). `fetchCMB()` returns a record with its
+  author only when that passes; otherwise it returns the categories alone (`verified: false`, with the
+  reason), which the §15.8 audit may use and nothing reads as attributed.
+- **The mood frame speaks for its session only.** A mood frame is `{type, mood, context,
+  timestamp}`, sealed: at most 1,024 characters of mood and 4,096 of context. It names no sender:
+  the receiver labels it with the session's proven peer and name, and refuses a frame that carries
+  `from`, `fromName` or anything else the schema does not define. It is never stored, relayed or
+  remixed.
   Directed versus room-bound delivery is decided by the signed `metadata.to`, never by a relay
   envelope; a directed record older than 24 h by its signed time is refused.
 - **Authority is a function of a set of signed statements (MMP §6.6, as merged at
@@ -111,10 +136,17 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
 - **Admission attestations under `sym-attest-v1`.** Attestations, checkpoints and witnesses are
   signed under their own domain tags with every field covered, verified against the signer's bound
   key (never the delivering session), and exchanged only with sessions that negotiated the
-  extension. They describe a decision; they never change the receiver's own.
+  extension. Their objects are closed, with exactly seven category verdicts, lowercase UUID
+  attesters and witnesses, a §5.8 room and the registered `role` and `method` grammars. No
+  attestation is signed about a Legacy Import record, and none about a directed record leaves this
+  node (one received is kept, never relayed): an attestation would make it a confirmation oracle. A
+  conflicting checkpoint is relayed once, as evidence. An attester's scoped role is judged on the
+  record its assertion names. They describe a decision; they never change the receiver's own.
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
-  nobody.
+  nobody. A grant is checked against its schema (closed, integer times, lowercase ids) before any
+  signature work, so the same signature over string times never verifies, and the session closes
+  when the grant expires; a node sends only the schema's members of the grant it holds.
 - **Moved, and copied only when asked.** `sym node export` refuses while the node runs (in another
   process or this one), holds the identity's lock, tombstones the node before its encrypted bundle
   exists (so the source refuses to start it), signs the bundle with the node's key, and once the
@@ -181,8 +213,8 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   verified statements a second in all (burst 20,000) is spent only after the check; checkpoints at most
   4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
   per position.
-- **Records** (MMP §8.8.6 as draft spec PR #37 states it): a category's text at most 256 KiB after
-  NFC, the seven at most 512 KiB, the record's JSON encoding at most 720 KiB, so every record fits
+- **Records** (MMP §8.8.6, MMP 2.0 update 1): a category's text at most 256 KiB after NFC, the seven
+  at most 512 KiB, the two-section record's RFC 8785 length at most 720 KiB, so every record fits
   one sealed frame. This node mints nothing larger, and refuses a received record over any limit
   before anything validates, verifies or encodes it; a sealed frame longer than a 720 KiB record can
   produce (983,062 base64url characters) is refused before it is opened. At most 8 new records a
@@ -213,7 +245,7 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   debounce go when the peer leaves, a refusal is kept (so a refused peer stays refused). The gossip
   budget and checkpoint-rate tables hold at most 4,096 peers each; the log-line deduplication maps
   1,024 keys each.
-- **Fetch and interior**: a `cmb-fetch` names at most 32 keys, a session expects at most 64 fetched
+- **Fetch and interior**: a `cmb-fetch` names one key (a `keys` array is refused), a session expects at most 64 fetched
   records; a node serves at most 2 fetches a second per session (burst 8), a record at most once a
   minute per session, and nothing while 2 MiB to that session is unsent; an interior submission is
   at most 64 KiB of category text and 512 KiB of application data, at the mission's rate (60 a
@@ -270,10 +302,11 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no
-  session without the key. The client stops for good on 4004, 4006 (the existing holder is the
-  legitimate one) and 4007 (a relay that binds this nodeId to another key), and says so in
-  status, so an eviction is visible rather than a reconnect loop. The fix (relay-auth proving key
-  possession, MMP spec PR meshcognition-website#20) is drafted, not implemented.
+  session without the key. The client stops for good on 4004 and 4006 (the existing holder is the
+  legitimate one), and says so in status, so an eviction is visible rather than a reconnect loop.
+  Every other close is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
+  meshcognition-website#20) is deferred past 0.14.0, and its review found that never reconnecting
+  after 4007 makes a lockout.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.
 - **The local machine.** Identity files are readable by any process running as the same user.
   Operating-system isolation is out of scope. The daemon's IPC socket trusts the same user the same
@@ -289,11 +322,25 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   `legacy-record`, and given no authority; a legacy peer never passes a gated room's door. A
   nodeId that has proven itself over Core Secure has its legacy route refused (a persisted floor)
   until an operator resets it. Network Legacy Import is removed in 0.15.0.
-- **Metadata.** The relay operator sees routing envelopes: who, to whom, room, timing, sizes.
+- **Metadata.** The relay operator sees routing envelopes: who, to whom, room, timing, sizes. On the
+  LAN every node advertises on `_sym._tcp` with its room in the TXT `room` key, in cleartext to the
+  segment: a room name is not a credential, and the TXT room is a hint for whom to dial, never an
+  admission (the handshake decides).
+- **§15.8 is not applied to what this node receives.** MMP 2.0 update 1 (§15.5) exempts a collapsed
+  integration from the lineage tether, and sym's gates always collapse (they keep the incoming text,
+  so they store the author's record as signed). A peer's record that cites a root it has drifted
+  from is therefore kept with its author's lineage; the tether is the remixing node's duty. sym's
+  own remix path (`remix()`) does not yet evaluate the tether before it mints, and the retroactive
+  audit (`auditLineageTethers`) judges only this node's own records, which it cannot tell apart from
+  its replies. Lineage confers retention here (a hot descendant keeps its ancestors hot), never
+  authority or lifecycle.
+- **LAN meshing with sym 0.13.17 stops** except through configured Legacy Import routes, by design:
+  a 0.13.17 node advertises no `mmp` key, so a 0.14 node never dials it as Core Secure, and a 0.14
+  listener closes its legacy hello at once.
 - **Attestations disclose decisions.** With `sym-attest-v1` (offered by default) every peer in the
-  room learns which records a node gated and what it decided; a content address is a confirmation
-  oracle for whoever holds the text. Leave the extension out (`extensions` option) where that
-  disclosure is not acceptable. An attestation proves who decided, not that the decision was
+  room learns which room-bound records a node gated and what it decided; a content address is a
+  confirmation oracle for whoever holds the text (a directed record's never leaves its attester).
+  Leave the extension out (`extensions` option) where that disclosure is not acceptable. An attestation proves who decided, not that the decision was
   honest; the chain and witnesses make a forked history detectable, not impossible.
 - **A room name or relay token is not an enterprise trust boundary.** Anyone holding the token
   is in the channel, and an invite that carries a token is a secret.

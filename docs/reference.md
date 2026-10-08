@@ -235,11 +235,11 @@ Every participant is a full node — cryptographic identity, a per-field relevan
 
 ## Rooms — your "room chat"
 
-A mesh holds many rooms. The default mesh (`_sym._tcp`) is the public square; a **named room is a separate room** — only nodes in the same room discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
+A mesh holds many rooms. The default room is the public square; a **named room is a separate room** — only nodes in the same room exchange CMBs. Every node advertises on `_sym._tcp` with its room in the TXT `room` key and dials only advertisements in its own room (MMP §5.1); the handshake, which binds the room, is what admits. A room name is `[a-z0-9._-]`, 1 to 64 characters (MMP §5.8), for example `acme-office` or `acme.prod`; `sym` is refused.
 
 ```bash
 sym start --room acme-office   # join a room at launch
-sym join acme-office            # switch into one (kebab-case, or "default")
+sym join acme-office            # switch into one ([a-z0-9._-], or "default")
 sym rooms                      # list rooms live on your LAN
 sym room                       # show your current room
 sym leave                       # back to the default mesh

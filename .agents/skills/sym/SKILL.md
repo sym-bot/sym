@@ -120,7 +120,7 @@ A mesh holds many groups: the default global mesh, or named private rooms. You o
 ```bash
 sym groups            # which groups are live on the LAN right now
 sym group             # the group you're in
-sym join <name>       # switch into a group (kebab-case, e.g. backend-team)
+sym join <name>       # switch into a group ([a-z0-9._-], e.g. backend-team or acme.prod)
 sym leave             # back to the default mesh
 ```
 

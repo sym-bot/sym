@@ -5,13 +5,14 @@
 **Core Secure.** 0.14.0 makes every sym node an MMP v2.0 Core Secure participant (design
 "Core Secure identity: a peer is a proven session, never a hint", v2, 2026-10-02). It breaks the
 wire with 0.13 and older: a 0.13 node is reached only through an explicit Legacy Import route
-(below). It also breaks readers outside sym: the store's annotations moved from the stored record
+(below, and "Interop with 0.13.17"). It also breaks readers outside sym: the store's annotations moved from the stored record
 to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and its
-follow-ups). **0.13.17 was never released:** its fixes and their tests ship in 0.14.0 (no more
-0.13.x releases), except two mechanisms 0.14's design replaces — the cap of 16,384 never-evicted
+follow-ups). **The 0.13.17 security candidate was never released as such:** its fixes and their
+tests ship in 0.14.0, except two mechanisms 0.14's design replaces — the cap of 16,384 never-evicted
 key bindings (a lockout anyone on the LAN could fill) by the binding lifetime below, and the
 in-memory pending set for grants that arrive before their root (which could be flooded), now by
-§6.6's bounded pending statements (below).
+§6.6's bounded pending statements (below). The 0.13.17 that was released (2026-10-07) is a relay
+fix on the 0.13 line; 0.14.0's relay sessions do not have the defect it fixes (see its entry).
 
 ### Authority: MMP §6.6
 
@@ -119,6 +120,89 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   the one rule at every verification site in ed25519-strict; threshold co-signing and migration in
   authority-migration; roles and weights in earned-authority-node.
 
+### MMP 2.0 update 1: the drafts this release implements, as the spec now states them
+
+The founder ruled that the drafts sym 0.14.0 implements land in the published spec before it ships.
+They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, branch
+spec/mmp-2.0-update-1 at 2660ab9: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28
+on the §6.6 errata), and sym is aligned with its text, its reference construction (scripts/mmp/lib.mjs)
+and its schemas and vectors, vendored in tests/fixtures with their manifest digests
+(record-projection-v2, record-size-v2 and control-encrypted-v2 pass byte for byte, and every frame
+sym builds validates against the vendored schemas).
+
+- **The seal point (#26, S1).** A record is never sealed into a session of another room than its
+  signed one, whatever path offered it: a fetch answer, an anchor replay, a broadcast.
+- **room-join (#31, S2).** A grant is checked against its schema (closed, integer times, lowercase
+  ids) before any signature work: the same owner signature over string times verified, and the
+  expiry timer never armed for it. The expiry timer arms from the verified number; the node sends
+  only the schema's members of the grant it holds, and mints only those.
+- **Sequencing (#26, S4).** A sealed frame that opens advances the receive sequence, whatever it
+  carries; its record or inner frame is parsed after, and refusing it changes nothing else (it left
+  the counter behind, so the next frame closed the session as a gap).
+- **Errors (#23).** Every sealed error whose §7.2 action is Close ends the session (1008 from a peer
+  did not). `sendError` sends only 1002 and 2xxx. A clear 1011 prompts a re-handshake only when its
+  `detail` names this node's session or a probe ping is outstanding, while no newer session is
+  waiting to supersede, and no faster than the retry backoff (fifty forged 1011s with no detail
+  bought three re-handshakes in five seconds; now none). A sealed ping is answered with a pong.
+- **The mood frame (founder ruling).** `{ type, mood, context, timestamp }`: mood 1 to 1,024
+  characters, context at most 4,096 or null; no `from` or `fromName` (the receiver labelled the event
+  with the payload's name); a frame carrying them is refused. `broadcastMood` throws `EMOODFRAME`
+  rather than send one out of bounds.
+- **Fetch (#26).** `cmb-fetch` carries no `from` and names one `key` (a `keys` array is refused);
+  `cmb-fetch-result` carries no `timestamp` (it was schema-invalid). A fetched record is verified by
+  the whole of §8.8.5 before it is attributed: `fetchCMB()` returns `{ verified: true, cmb,
+  authorNodeId }`, or `{ verified: false, reason, categories }` with no metadata (D4; it returned
+  unverified metadata as if attributed).
+- **cmb-anchors (#30).** Only a non-empty list starts the once-a-minute limit (an admission with
+  nothing to replay held back the next one's context); only this node's own records of the
+  session's room are replayed; a frame that is not the schema's is refused whole.
+- **The canonical projection (#34, D2).** One assertion is held as the same bytes at every node: a
+  non-NFC category text, `createdBy` or `application.schema` is refused (and minted NFC), parents are
+  held and minted as a sorted set, a lineage with no parents is null, and an absent application is
+  null (so sealed records carry `metadata.application`, as encrypted-cmb-frame.schema.json requires).
+  The 256-character caps count code points. `MAX_RECORD_BYTES` measures the two-section record only
+  (#37), not remember()'s decoded payload beside it.
+- **Rooms.** A room is a §5.8 identifier, `[a-z0-9._-]` of 1 to 64 characters, everywhere it is
+  named: the node's own (`SymNode` throws `EBADROOM`), the handshake, a record, an attestation, a
+  grant. `sym join` and the daemon took kebab-case only and refused §5.8-valid dotted and underscored
+  rooms (the spec's recommended `acme.prod` among them). `sym` stays refused.
+- **Discovery (#17, #22).** The daemon advertises every room on `_sym._tcp` with TXT `room`, as the
+  library did (it used `_<room>._tcp`, so a daemon and a library node in one room never met), and
+  browses the per-room type earlier releases used, where it is a valid RFC 6335 name. A node dials
+  only an advertisement whose TXT room is its own and whose `mmp` (a comma-separated version list)
+  lists 2.0. TXT keys are read case-insensitively, the first occurrence winning. A discovery a host
+  builds advertises its node's room.
+- **The relay client (#25).** 4007 is an ordinary close with backoff (#20, relay-auth key proof, is
+  deferred, and its review found that never reconnecting after 4007 makes a lockout); what a relay
+  listed in `relay-peers.features` is forgotten with its socket; relay-auth carries the nodeId in its
+  lowercase form.
+- **sym-attest-v1 (#27, S3).** No attestation is signed about a Legacy Import record, and none about a
+  directed record is sent or relayed (one received is kept). The attestation is a closed object with
+  exactly seven verdicts, lowercase UUID attesters, a §5.8 room, a role of up to 64 characters and a
+  method of up to 32. A conflicting checkpoint is relayed once, as evidence. An attester's scoped role
+  is judged on the record its assertion names. No checkpoint root is signed over a suffix of the
+  chain (D1; the chained construction of the revised #27 is not in this release yet).
+- **Echoes (#35, D3).** A record citing this node's own records is verified, gated, stored and
+  delivered like any other: the ingest echo skip is gone, and the anti-echo rule sits at the remix
+  trigger. `remixProduced` counts only remixes minted through `remix()`, and the decision log says
+  whether a refused record cites parents (`cites`), never that it was a remix.
+- **No tether on a collapsed integration (#17, §15.5).** sym's gates keep the incoming text, so every
+  integration collapses onto the author's record as signed; it is no longer tethered, severed or
+  attested, and the retroactive audit judges only this node's own records. sym's receive path
+  therefore applies §15.8 to nothing, and `remix()` does not yet evaluate it (SECURITY.md).
+- **Layer 6** is given no valence or arousal (unsigned), a Legacy Import record's included.
+- **xmesh-insight-v1** is not offered by default; a host adds it with `extraExtensions`.
+
+### Interop with 0.13.17
+
+LAN meshing with 0.13.17 stops except through Legacy Import routes, by design. A 0.13.17 node
+advertises no `mmp` key, so a 0.14 node never dials it as Core Secure; a 0.14 listener closes the
+legacy one-frame hello a 0.13.17 node sends at once (logged once a minute per address). Over the
+relay they never share a session either: 0.14 attempts the Core Secure handshake with a 0.13.17
+relay peer, which never completes, and answers its pings with clear 1011s at the bounded rate. A
+0.13.17 node is reached only through a configured Legacy Import route naming its nodeId and pinned
+key (below), whose records are quarantined. Upgrade every node of a room together.
+
 ### `message` and `mood-delivered` carry their provenance
 
 - **The `message` event's meta and the `mood-delivered` event carry `verified`, `profile`,
@@ -133,8 +217,8 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   peer sent it, under the key that session proved (the frame is sealed on the session); it is not a
   signed record. Nothing about it can be verified again later, relayed with its author's signature,
   or attributed to anyone but that peer. A host shows it as the peer's word, not as a verified record.
-  MMP §6.6 errata 1 registers the mood frame as sym sends it (`{ type, from, fromName, mood,
-  context, timestamp }`, sealed on a Core Secure session, never stored, relayed or remixed).
+  The mood frame is `{ type, mood, context, timestamp }` (MMP 2.0 update 1, by the founder's
+  ruling): it names no sender, and `mood-delivered.from` is the session's proven name.
 
 ### The loaded version, and hot-swap
 
@@ -308,7 +392,7 @@ Seven design assumptions, each changed where it was made, not patched where it s
   Windows `listen` refuses unless `{ allowDefaultPipeAcl: true }`. The interior capability is bound
   to the first connection that presents it; `end` takes the capability, never the mindId; a
   submission's kind is its signed intent. The client refuses a selection outside both offers.
-  Rooms compare in NFC. A relay frame type never rides inside a sealed control frame. Node names
+  A room is a §5.8 identifier (MMP 2.0 update 1, above). A relay frame type never rides inside a sealed control frame. Node names
   are one path component. `sym keys <name>` lists without writing. `sym emit` pins its receiver
   (`--receiver <nodeId> --receiver-key <key|sha256:…>`) and holds the identity lock while
   connected. An anchor mark needs the record's author to be the session's node. `mood-delivered`
@@ -341,17 +425,18 @@ Seven design assumptions, each changed where it was made, not patched where it s
   hello naming another nodeId is refused),
   torn down on `relay-peer-left`, superseded by a newer confirmed session for the same (nodeId,
   key) (a restart under 4004), and never torn down by an unconfirmed hello. 5 s timeout.
-- **Discovery advertises the profile.** TXT `mmp=2.0` and `room=<room>` (and the same in the
-  loopback registry). A record without `mmp=2.0` is a legacy node: never dialled as Core Secure.
-  The lexicographically smaller nodeId dials (§5.1).
+- **Discovery advertises the profile.** Every room on `_sym._tcp`, with TXT `mmp=2.0` and
+  `room=<room>` (and the same in the loopback registry). A record whose `mmp` list lacks 2.0 is not
+  dialled as Core Secure, nor one whose TXT room is another room (MMP 2.0 update 1, above). The
+  lexicographically smaller nodeId dials (§5.1).
 - **Ephemeral E2E, sealed frames.** The persistent X25519 key (`e2e-keypair.json`) and the
   per-peer shared-secret map are gone: each handshake uses a fresh X25519 key pair and derives
   directional keys (§5.2.1). Records travel only as `cmb-encrypted` (§18.2.1), one sealed frame
   per peer session. Every other post-handshake frame except ping/pong travels sealed as
   `control-encrypted` (`mood` included: it is cognitive content; `error` too). The receive counter
-  advances only after the AEAD opens (it advanced first, so one forged frame with the right
-  sequence desynchronised a session); a gap closes the session and re-handshakes, a replay is
-  discarded.
+  advances when the AEAD opens (it advanced first, so one forged frame with the right sequence
+  desynchronised a session), whatever the frame carries (MMP 2.0 update 1, above); a gap closes the
+  session and re-handshakes, a replay is discarded.
 - **Records are v2.0** (`MMP_EMIT_V2` on). Every record is signed `mmp-sig-v2.0` with the signed
   author `createdByNodeId`; the receiver resolves the author key by `createdByNodeId` through
   the key registry. An unsigned, legacy-suite or unresolvable record is refused (a legacy-suite
@@ -364,19 +449,19 @@ Seven design assumptions, each changed where it was made, not patched where it s
   `remember({ payload })` payload now rides as the record's signed application section (§8.8.3)
   and is given back to the receiver as `cmb.payload`.
 - **The frame table.** `cmb` (plaintext) is refused (Legacy Import sessions only);
-  `cmb-fetch` may name one `key` or up to 32 `keys`; each record found goes out as its own
-  sealed `cmb-encrypted` frame, then one sealed `cmb-fetch-result` that carries only the
-  correlation id and the key lists, `{ reqId, returned: [...], missing: [...] }` (draft spec PR
-  #26; each key requested in exactly one list; it carried the record in the clear); `role-grant`/`role-revoke` are retired
+  `cmb-fetch` names one `key`; the record found goes out as its own sealed `cmb-encrypted` frame,
+  then one sealed `cmb-fetch-result` that carries only the correlation id and the key lists,
+  `{ reqId, returned: [...], missing: [...] }` (MMP 2.0 update 1; it carried the record in the
+  clear); `role-grant`/`role-revoke` are retired
   (MMP §6.6.11, above); `peer-info` and `wake-channel` are learned only
   for the session's own nodeId (gossip about other nodes and the relay's peer list are hints,
   never stored); `message` is retired: `send()` sends a directed CMB whose signed application
   section marks it a message, and the receiver raises its `message` event from it;
-  `xmesh-insight` goes only with `xmesh-insight-v1`; `state-sync` is refused. Records
-  replayed as context on connect are announced in a sealed `cmb-anchors` frame (the `_anchor`
-  frame flag could not ride a sealed record). The new wire elements that still need spec text
-  (`cmb-anchors`, the error rules and 1011, and what sym chooses where MMP §6.6 leaves a choice) are
-  written out in `docs/WIRE-0.14.0.md`; `room-join` is draft spec PR #31.
+  `xmesh-insight` goes only with `xmesh-insight-v1`, which is offered only when a host adds it;
+  `state-sync` is refused. Records replayed as context on connect are announced in a sealed
+  `cmb-anchors` frame (the `_anchor` frame flag could not ride a sealed record). MMP 2.0 update 1
+  now defines these frames; what sym chooses where the spec leaves a choice is in
+  `docs/WIRE-0.14.0.md`.
 - **Admission attestations are the `sym-attest-v1` extension** (draft spec PR
   meshcognition-website#27). The frames are `sym-attest-attestation`, `sym-attest-checkpoint`,
   `sym-attest-witness` and `sym-attest-node-stats`, sent only to sessions that selected the
@@ -493,13 +578,12 @@ Seven design assumptions, each changed where it was made, not patched where it s
 
 ### Relay
 
-- **4006 and 4007 are hard stops, like 4004.** The client did not handle 4006 (§4.4.7: the
-  existing holder is the legitimate one) and retried it at the normal backoff. Now 4006, and 4007
-  (draft MMP spec PR meshcognition-website#20: the relay binds this nodeId to a different key) are
-  said once, loudly, kept in `state().stopped` / `status().relayState.stopped` with phases
-  `duplicate-rejected` and `key-conflict`, reported to the host (`identity-collision` with `code`
-  and `kind`, and a `relay-hard-stop` metric), and never reconnected. relay-auth v2 (the
-  challenge in that PR) is not implemented until it merges.
+- **4006 is a hard stop, like 4004.** The client did not handle 4006 (§4.4.7: the existing holder
+  is the legitimate one) and retried it at the normal backoff. Now 4006 is said once, loudly, kept in
+  `state().stopped` / `status().relayState.stopped` with phase `duplicate-rejected`, reported to the
+  host (`identity-collision` with `code` and `kind`, and a `relay-hard-stop` metric), and never
+  reconnected. 4007 (draft MMP spec PR meshcognition-website#20, deferred past 0.14.0) is an
+  ordinary close, reconnected with backoff (MMP 2.0 update 1, above).
 - A relay socket that `destroy()` let go no longer schedules a reconnect when its close arrives
   (a stopped node object kept redialling when its host reported it still running).
 - The client paces everything it sends under sym-relay's limit (25 frames/s, burst 300, then
@@ -663,9 +747,9 @@ debt, and the daemon's log flood. Every item has a test that fails without its f
   stored records and 16,384 parent keys queued, and it stops at a bound instead of draining its
   queue. A record can name about 14,700 parents within one frame, and before this the queue grew
   with every long parent list the walk stepped onto.
-- **A tether could not be reproduced by another node (B-L5).** It is measured on the stored record's
-  text, encoded in one kernel, instead of on vectors blended with local memory.
-- **Cold-start admissions had no tether (B-L6).**
+- **A tether could not be reproduced by another node (B-L5).** It is measured on the record's text,
+  encoded in one kernel, instead of on vectors blended with local memory. (Since MMP 2.0 update 1 a
+  collapsed integration, which is every one sym's gates make, has no tether at all: above.)
 - The tether audit's fetch fallback no longer returns a local record the walk had refused.
 
 ### Changed — read these before upgrading
@@ -938,7 +1022,22 @@ spend it under the asking rule, as "Authority: MMP §6.6" says.)
 - Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
 - Tests wait on what they test instead of fixed sleeps: in-flight frames, and the encoder's own load.
 
-## 0.13.17 (never released — its fixes ship in 0.14.0)
+## 0.13.17 (2026-10-07)
+
+A relay fix, released on the 0.13 line (the 0.13 line otherwise stays closed).
+
+- **One peer re-announced by the relay no longer breaks every send in the room.** A replaced relay
+  transport is detached before it is closed, and a peer with no transport is skipped and logged,
+  never thrown on.
+- **A LAN transport added to a peer first met over the relay is used** (MMP §4.6: bonjour before
+  relay).
+- `stop()` closes every transport a peer holds, and tolerates a peer with none.
+
+0.14.0 does not carry this code: a 0.14 peer is a set of proven sessions, a repeated announcement
+reuses a live relay session (probing it with a ping), and LAN is preferred over relay
+(tests/relay-reannounce-scenes.test.js).
+
+## The 0.13.17 security candidate (not released as such; its fixes ship in 0.14.0)
 
 This entry is kept as the record of what the 0.13.17 review found and fixed. Two of its mechanisms
 do not ship: the 16,384-binding cap on the key registry (replaced by the binding lifetime) and the
