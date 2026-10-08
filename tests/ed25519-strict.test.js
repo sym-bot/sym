@@ -193,3 +193,43 @@ describe('§18.3.2 at every verification site in sym', () => {
     assert.deepStrictEqual(offenders, []);
   });
 });
+
+describe('the key cache keeps keys that keep being used (release review L5)', () => {
+  it('least recently used goes first; a pinned key is never evicted', () => {
+    const { isPrimeOrderKey, isKeyKnown, _setKeyCacheMax } = require('../lib/core/ed25519');
+    const was = _setKeyCacheMax(4);
+    try {
+      const k = () => identity('c').publicKey;
+      const pinned = k(); isPrimeOrderKey(pinned, { keep: true });
+      const used = k(); isPrimeOrderKey(used);
+      const others = [k(), k(), k()];
+      for (const o of others) isPrimeOrderKey(o);
+      isPrimeOrderKey(used); // used again: most recent
+      const fresh = [k(), k()];
+      for (const f of fresh) isPrimeOrderKey(f); // a small flood
+      assert.strictEqual(isKeyKnown(used), true, 'the key in use stays');
+      assert.strictEqual(isKeyKnown(others[0]), false, 'the least recently used went');
+      for (let i = 0; i < 6; i++) isPrimeOrderKey(k());
+      assert.strictEqual(isKeyKnown(pinned), true, 'a pinned key is kept for good');
+    } finally { _setKeyCacheMax(was); }
+  });
+});
+
+describe('one spelling per handshake key (release review L4)', () => {
+  it('a hello whose identity key is a non-canonical spelling of 32 bytes is refused', () => {
+    const { checkOffer } = require('../lib/session');
+    const id = identity('h');
+    const raw = Buffer.from(id.publicKey, 'base64url');
+    // The same 32 bytes with the two unused low bits of the last character set: another spelling.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const last = id.publicKey[42];
+    const alias = id.publicKey.slice(0, 42) + alphabet[alphabet.indexOf(last) | 1];
+    assert.notStrictEqual(alias, id.publicKey);
+    assert.ok(Buffer.from(alias, 'base64url').equals(raw), 'it decodes to the same key');
+    const offer = (identityPublicKey) => ({ protocolVersion: '2.0', room: 'r', nodeId: id.nodeId, name: 'h', identityPublicKey, e2ePublicKey: id.publicKey, nonce: id.publicKey, implementation: { name: 'sym', version: '0' }, extensions: [] });
+    const err = (f) => { try { checkOffer(f, 'client-hello'); return null; } catch (e) { return e.message; } };
+    // Whatever the canonical offer's verdict on its other fields, the alias is refused for its key.
+    assert.doesNotMatch(String(err(offer(id.publicKey))), /identityPublicKey/);
+    assert.match(String(err(offer(alias))), /identityPublicKey is not 32 bytes of canonical/);
+  });
+});
