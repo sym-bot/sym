@@ -268,6 +268,14 @@ describe('ping and pong sealed, and the control envelope\'s bounds (§7.1, #26)'
       assert.strictEqual(sA.probeSince, 0);
     } finally { await stopAll(); }
   });
+  it('a cmb-encrypted envelope is bounded as encrypted-cmb-frame.schema.json bounds it (5417176)', () => {
+    const { openEncryptedSealed } = require('../lib/core/cmb-encrypted-frame');
+    const base = { type: 'cmb-encrypted', protocolVersion: '2.0', suite: 'X25519-HKDF-SHA256-ChaCha20-Poly1305', sessionId: 'a'.repeat(32), sequence: '1', direction: 'client-to-server', metadata: {}, sealed: 'A'.repeat(22) };
+    const key = crypto.randomBytes(32);
+    for (const [label, f] of [['30 digits', { ...base, sequence: '1'.repeat(30) }], ['shorter than the tag', { ...base, sealed: 'A'.repeat(21) }], ['longer than a 720 KiB record seals to', { ...base, sealed: 'A'.repeat(983063) }], ['a sessionId that is not 32 hex', { ...base, sessionId: 'x' }], ['a sequence that is a number', { ...base, sequence: 1 }]]) {
+      assert.throws(() => openEncryptedSealed({ frame: f, trafficKey: key }), /bad (sequence|sealed value|sessionId)/, label);
+    }
+  });
   it('an envelope with a 30-digit sequence, a sealed value shorter than the tag, or another member is not a control envelope', () => {
     const ok = { type: 'control-encrypted', protocolVersion: '2.0', suite: 'X25519-HKDF-SHA256-ChaCha20-Poly1305', sessionId: 'a'.repeat(32), sequence: '1', direction: 'client-to-server', sealed: 'A'.repeat(22) };
     assert.strictEqual(isControlFrame(ok), true);
