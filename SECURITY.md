@@ -145,8 +145,8 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   the part of its history it still holds, and one that lost its segment ends its chain visibly. Two
   checkpoints from one attester whose ranges overlap, or that share a prev, are equivocation: the
   conflicting copy is relayed once as evidence, and this node witnesses that attester no more. A
-  witness that contradicts the checkpoint held is refused and never counts against the attester (it
-  is only the witness's word). They describe a decision; they never change the receiver's own.
+  witness that contradicts the attester-signed checkpoint held counts against the witness, never the
+  attester: it is refused, and that witness is muted for 10 minutes. They describe a decision; they never change the receiver's own.
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
   nobody. A grant is checked against its schema (closed, integer times, lowercase ids) before any

@@ -185,6 +185,31 @@ describe('the node chains its own checkpoints and stops witnessing an equivocati
     } finally { await stopAll(); }
   });
 
+  it('a witness contradicting an attester-signed checkpoint held counts against the witness, which is muted; never against the attester', async () => {
+    try {
+      const A = mk('wmute');
+      const X = { nodeId: V.testKeys.attester.nodeId, publicKey: KEY.attester };
+      A._roster.bind(X.nodeId, X.publicKey, 'pinned');
+      const Wi = identity('lying-witness');
+      A._roster.bind(Wi.nodeId, Wi.publicKey, 'pinned');
+      A._gossipToRoster = () => {};
+      A._witnessCheckpoint = () => {};
+      const s = admitAs(A, identity('relayer'));
+      for (const x of V.checkpoints) assert.strictEqual(A._ingestCheckpoint(store(x.checkpoint), s.nodeId, s).ok, true);
+      const held = V.checkpoints[2].checkpoint;
+      const lie = core.signWitness({ attester: X.nodeId, roster: A._room, from_seq: held.fromSeq, upto_seq: held.uptoSeq, root: crypto.randomBytes(32).toString('hex'), by: Wi.nodeId, role: 'participant', at: 1 }, Wi.privateKey);
+      assert.strictEqual(A._ingestWitness(lie, s.nodeId, s).reason, 'disagrees');
+      assert.strictEqual(A._attestations.attesterEquivocated(X.nodeId), false, 'the attester signed nothing wrong');
+      const honest = core.signWitness({ attester: X.nodeId, roster: A._room, from_seq: held.fromSeq, upto_seq: held.uptoSeq, root: held.root, by: Wi.nodeId, role: 'participant', at: 2 }, Wi.privateKey);
+      assert.strictEqual(A._ingestWitness(honest, s.nodeId, s).reason, 'witness-muted', 'its next witness is dropped unverified');
+    } finally { await stopAll(); }
+  });
+
+  it('a reversed range is refused at the schema step (§6 step 1), before anything else', () => {
+    const c = V.linkChecks.find((x) => /reversed/.test(x.label));
+    assert.strictEqual(core.fromWireCheckpoint(c.checkpoint), null);
+  });
+
   it('after a conflict this node never witnesses the attester again, and drops its further checkpoints unverified', async () => {
     try {
       const A = mk('witness');

@@ -180,11 +180,10 @@ session with a sealed 1010. What sym chooses:
   its last, chained to that root. The segment and the checkpoint are appended to the attestation
   logs before anything that depends on them is gossiped (appended, not fsynced). A node that no
   longer holds its segment ends its chain and signs no further checkpoint until its state changes.
-- A witness that names another range or root than the checkpoint held at its position is refused
-  and said (`disagrees`), and not taken as equivocation evidence: the extension text counts two
-  witnesses, or a witness and a checkpoint, with overlapping ranges as evidence against the
-  attester, but a witness is only its signer's word, so that would let any witness stop every node
-  from witnessing an honest attester. Only two checkpoints the attester signed are evidence here.
+- Only two conflicting checkpoints the attester signed are equivocation evidence (a witness is not
+  attester-signed). A verified witness that names another range or root than the attester-signed
+  checkpoint held at its position counts against the witness: it is refused (`disagrees`), said once,
+  and that witness's further witnesses are dropped unverified for 10 minutes (`witness-muted`).
 - Unchained checkpoints in a log written before update 1 are kept and read as before (one per
   position, a second root for one a conflict); none is accepted from the wire.
 
