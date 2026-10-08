@@ -43,13 +43,17 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   endorser's bucket and falling through by id; a quota cut is never rescued. The live set and the
   authority root. (lib/authority-store.js)
 - **Capacity (errata 1).** At most 200,000 statements held, and beyond that only in-force revokes and
-  in-force anchor-level statements, which the quotas bound. Past the bound the store drops
+  in-force anchor-level statements, which the quotas bound; between eviction passes up to
+  EVICT_SLACK (3,125 at the default bound) more can be held, and the protected floor is judged
+  again at the next pass. Past the bound the store drops
   everything outside the live set first, whatever its kind (a dead or over-quota revoke is an
   ordinary candidate), then live statements in reverse authority order (deepest first, grants before
   revokes and endorses, highest id first), skipping only in-force revokes and in-force anchor-level
   statements. So the removal that would clean up a flooded store is always taken, and one signer's
   dead statements never displace another's authority. A pass resolves once and frees a batch; the
-  statement file is compacted once it holds twice what the store keeps. A statement refused for
+  statement file is compacted once it holds twice what the store keeps, and every rewrite of it is
+  crash-safe (written, flushed, renamed, the directory flushed; a crash's stale temp file is removed
+  when the store opens). A statement refused for
   capacity (`over-capacity`) says nothing against its sender. Dropping live statements is said in
   the log and counted (`authorityStatus().capacity`).
 - **Persistence.** One file, `authority/statements.jsonl`, whatever the pin. At load every statement

@@ -118,7 +118,9 @@ counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in
   until the roots meet. A pull that stopped early (its page retries spent, or its session closed)
   resumes from its cursor.
 - **Capacity (errata 1).** At most 200,000 statements are held, and beyond that only in-force revokes
-  and in-force anchor-level statements, which the quotas bound. Past the bound the store drops
+  and in-force anchor-level statements, which the quotas bound; between eviction passes up to
+  EVICT_SLACK (3,125 at the default bound) more can be held, and the protected floor is judged again
+  at the next pass. Past the bound the store drops
   everything outside the live set first, whatever its kind, then live statements in reverse authority
   order (deepest first, grants before revokes and endorses, highest id first), a batch at a time. An
   anchor-level statement or a revoke that is in force is never dropped or refused; a dead or

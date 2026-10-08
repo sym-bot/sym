@@ -441,6 +441,45 @@ describe('§6.6 capacity: a full store keeps what comes first in authority order
     for (const x of [rA, eC]) assert.strictEqual(st.has(id(x)), true, 'the in-force anchor-level statements stay');
   });
 
+  // The diff check of f26fc92: the file's crash safety, and what a pass that compacts writes.
+  it('a compaction during an arrival writes the arriving statement once', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-once-'));
+    try {
+      const st = new AuthorityStore({ pin: PIN, maxHeld: 64, dir });
+      const gA = grant('anchor', party(), 'admin');
+      st.ingest(gA); st.ingest(revoke('anchor', [gA]));
+      const gW = grant('anchor', party(), 'admin');
+      st.ingest(gW);
+      const honest = [];
+      for (let i = 0; i < 600; i++) {
+        st.ingest(make(gA, { kind: 'revoke', targets: [`auth-${crypto.randomBytes(32).toString('hex')}`] }));
+        if (i % 7 === 0) { const g = grant(gW, party(), 'participant'); honest.push(g); st.ingest(g); }
+      }
+      const lines = fs.readFileSync(path.join(dir, 'statements.jsonl'), 'utf8').split('\n').filter(Boolean);
+      assert.strictEqual(new Set(lines).size, lines.length, 'no statement appears twice in the file');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a rewrite of the file is flushed before and after its rename; a crash\'s stale temp file is removed at open', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-fsync-'));
+    try {
+      const st = new AuthorityStore({ pin: PIN, dir });
+      st.ingest(grant('anchor', party(), 'admin'));
+      // A crash left this behind (a pid no process has); a live process's temp is left alone.
+      const stale = path.join(dir, 'statements.jsonl.999999999.tmp');
+      const live = path.join(dir, `statements.jsonl.${process.ppid}.tmp`);
+      fs.writeFileSync(stale, 'half a rewrite');
+      fs.writeFileSync(live, 'another process, still writing');
+      const real = fs.fsyncSync;
+      let syncs = 0;
+      fs.fsyncSync = (fd) => { syncs++; return real(fd); };
+      try { new AuthorityStore({ pin: PIN, dir }); } finally { fs.fsyncSync = real; }
+      assert.ok(syncs >= 2, `the temp file and its directory are flushed (${syncs} fsyncs)`);
+      assert.strictEqual(fs.existsSync(stale), false, 'the stale temp file is gone');
+      assert.strictEqual(fs.existsSync(live), true, 'a live process\'s is not touched');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('dead revokes never displace an honest tree in force (one signer never displaces another)', () => {
     const st = new AuthorityStore({ pin: PIN, maxHeld: 300 });
     const honest = [];

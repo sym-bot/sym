@@ -149,7 +149,9 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   (`status().coreSecure.keyConflicts`).
 - **Authority statements** (MMP §6.6): what is in force is bounded by the quotas above. What is
   held: at most 200,000 statements, and beyond that only in-force revokes and in-force anchor-level
-  statements, which the quotas bound. Past the bound the store drops everything outside the live set
+  statements, which the quotas bound; between eviction passes up to EVICT_SLACK (3,125 at the
+  default bound) more can be held, and what is protected is judged again at the next pass. The
+  file is replaced crash-safely (written, flushed, renamed, its directory flushed). Past the bound the store drops everything outside the live set
   first, whatever its kind (a dead or over-quota revoke is an ordinary candidate), then live
   statements in reverse authority order (deepest first, grants before revokes and endorses, highest
   id first), skipping only in-force revokes and in-force anchor-level statements. So a revoke that
