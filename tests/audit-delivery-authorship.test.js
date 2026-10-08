@@ -6,6 +6,8 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * Directed delivery and authorship, from the 2026-10-01 MMP 2.0 audit of sym-mesh-channel.
  *
  * - B-D1  a directed reply citing one of the receiver's own CMBs was dropped as an "echo"
+ *         (MMP 2.0 update 1, #35: no record is dropped as an echo at ingest; the rule sits at the
+ *         remix trigger)
  * - B-D2  directed de-duplication used the content key for 7 days, so a new directed send of
  *         words already seen (even as a broadcast) never surfaced (§8.8.2)
  * - B-D3  a directed CMB SVAF admitted, but whose key the store already held, surfaced nowhere
@@ -117,7 +119,7 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
-  it('re-review F1: frame flags alone do not exempt a reply from echo suppression', async () => {
+  it('re-review F1: frame flags alone do not make a reply directed (and, since MMP 2.0 update 1, no reply is an echo at ingest)', async () => {
     await withNode('d1-forged', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const mine = node.remember({ focus: 'my broadcast', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
@@ -125,7 +127,8 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
       // Signed as a broadcast (metadata.to null), frame forged to say directed.
       node._frameHandler.handle(from(node), directed(node, signed(mkCmb('remix pong', { parents: [mine.key] }))));
       await settle();
-      assert.strictEqual(seen.accepted.length, 0, 'a signed broadcast citing my CMB is an echo, whatever the frame says');
+      assert.strictEqual(seen.accepted.length, 1, 'gated as the room-bound record its author signed');
+      assert.notStrictEqual(seen.accepted[0].directed, true, 'never directed on the frame\'s word');
     });
   });
 
@@ -163,14 +166,14 @@ describe('directed delivery (MMP §9.2.2, §8.8.2)', () => {
     });
   });
 
-  it('B-D1: a broadcast citing the receiver\'s own CMB is still skipped as an echo', async () => {
+  it('B-D1, reversed by MMP 2.0 update 1 (#35): a broadcast citing the receiver\'s own CMB is gated and delivered, never skipped as an echo', async () => {
     await withNode('d1-echo', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const mine = node.remember({ focus: 'my broadcast', issue: 'x', intent: 'tell', motivation: 'm', commitment: 'c', perspective: 'me', mood: NEUTRAL });
       const seen = collect(node);
       node._frameHandler.handle(from(node), frame(signed(mkCmb('remix of your broadcast', { parents: [mine.key] }))));
       await settle();
-      assert.strictEqual(seen.accepted.length, 0);
+      assert.strictEqual(seen.accepted.length, 1, 'admitted like any record: the anti-echo rule sits at the remix trigger');
     });
   });
 

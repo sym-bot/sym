@@ -47,7 +47,7 @@ const frame = (text) => ({ type: 'cmb', timestamp: Date.now(), content: text, cm
 const share = (node, f) => node._frameHandler._handleMemoryShare(PEER.nodeId, PEER.name, f, admitAs(node, PEER));
 
 describe('the neural path after its decision', () => {
-  it('a tether that cannot be evaluated leaves the record stored unverified, decided and attested once', async () => {
+  it('a collapsed record evaluates no tether (§15.5, MMP 2.0 update 1), so an anchor the model cannot encode changes nothing: decided and attested once', async () => {
     await withNode(async (node, seen) => {
       // A lineage anchor whose categories cannot be read: what a model fault during the encode does.
       const broken = new Proxy({}, { get() { throw new Error('encoder fault'); }, ownKeys() { throw new Error('encoder fault'); } });
@@ -60,8 +60,9 @@ describe('the neural path after its decision', () => {
       assert.strictEqual(node._attestations.byCmb(key).length, 1, 'one attestation for the frame');
       const stored = node._store.get(key);
       assert.ok(stored, 'the admitted record is stored');
-      assert.strictEqual(stored.tether ?? null, null, 'with no tether verdict: unverified');
-      assert.ok(seen.logs.some((l) => /tether of a record from peerA not evaluated: encoder fault/.test(l)));
+      assert.strictEqual(stored.collapsed, true);
+      assert.strictEqual(stored.tether ?? null, null, 'no tether verdict');
+      assert.ok(!seen.logs.some((l) => /encoder fault/.test(l)), 'the anchor was never encoded');
     });
   });
 

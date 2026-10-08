@@ -87,10 +87,11 @@ describe('admission annotations live on the store entry', () => {
         assert.strictEqual(entry.admission?.of, record.metadata.key, 'the admission attestation is on the entry');
         assert.strictEqual(entry.admission.by, node.nodeId);
         assert.deepStrictEqual(verifyAttestation(entry.admission, node._identity.publicKey), { signed: true, valid: true });
-        assert.strictEqual(entry.tether?.anchor, record.metadata.key, 'the tether attestation is on the entry (a root is its own anchor)');
-        assert.strictEqual(verifyTetherAttestation(entry.tether, node._identity.publicKey).valid, true);
-        assert.strictEqual(entry.provenance?.tether?.severed, false, 'the provenance is on the entry');
-        assert.strictEqual(entry.provenance.forged, undefined, 'nothing the frame supplied reached it');
+        // A collapsed integration (the incoming block itself) has no §15.8 tether (§15.5, MMP 2.0
+        // update 1): the forged one the frame supplied is not kept, and none is signed.
+        assert.strictEqual(entry.tether, undefined, 'no tether attestation, and not the frame\'s');
+        assert.strictEqual(entry.provenance?.tether, undefined, 'no tether in the provenance');
+        assert.strictEqual(entry.provenance?.forged, undefined, 'nothing the frame supplied reached it');
         assert.strictEqual(entry.collapsed, true, 'the record is the incoming block itself');
         if (path_ === 'heuristic') {
           assert.strictEqual(typeof entry.provenance.totalDrift, 'number', 'the gate\'s evidence');

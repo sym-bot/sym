@@ -92,7 +92,7 @@ async function admit(node, frame) {
 }
 
 describe('§15.8 tether is reproducible by any holder of the root and the record (B-L5)', () => {
-  it('two nodes with different local memories sign the same tether for the same record', async () => {
+  it('the tether is a function of the root and the record alone: two nodes with different memories measure the same, and neither signs one about a collapsed record', async () => {
     await awaitSemantic();
     const seen = [];
     for (const [label, memory] of [['n1', MEMORY_1], ['n2', MEMORY_2]]) {
@@ -100,26 +100,22 @@ describe('§15.8 tether is reproducible by any holder of the root and the record
         const root = node.remember(cat7(ROOT));
         for (const t of memory) node.remember(cat7(t));
         const stored = await admit(node, remixFrame(INCOMING, root.key));
-        assert.ok(stored, `${label}: the remix admits`);
-        assert.ok(stored.tether, `${label}: the integrator signed a tether`);
-        assert.strictEqual(stored.tether.anchor, root.key, `${label}: anchored on the shared root`);
-        seen.push({ label, att: stored.tether, record: stored.cmb, root: root.cmb, node });
+        assert.ok(stored, `${label}: the record admits`);
+        // MMP 2.0 update 1, §15.5: the gate kept the author's record, so the tether is not the receiver's.
+        assert.strictEqual(stored.collapsed, true);
+        assert.strictEqual(stored.tether, undefined, `${label}: no tether signed about a collapsed record`);
+        const ev = await evaluateLineageTetherFromText({
+          remixCategories: stored.cmb.categories, anchorCategories: root.cmb.categories,
+          categoryWeights: node._svafCategoryWeights, guardedThreshold: node._svafGuardedThreshold,
+        });
+        seen.push({ label, ev, record: stored.cmb });
       });
     }
     const [a, b] = seen;
-    assert.strictEqual(a.att.kernelId, b.att.kernelId, 'precondition: one kernel, so the drifts are comparable');
     assert.strictEqual(a.record.metadata.key, b.record.metadata.key, 'precondition: the same record on both nodes');
-    // The attestation signs the drift at six fractional digits, so that is the value a holder reproduces.
-    assert.strictEqual(a.att.drift.toFixed(6), b.att.drift.toFixed(6), 'both integrators measured the same drift');
-
-    // And a third party holding only the root and the record recomputes it from text alone.
-    const recomputed = await evaluateLineageTetherFromText({
-      remixCategories: a.record.categories, anchorCategories: a.root.categories,
-      categoryWeights: a.node._svafCategoryWeights, guardedThreshold: a.node._svafGuardedThreshold,
-    });
-    assert.strictEqual(recomputed.kernelId, a.att.kernelId);
-    assert.strictEqual(recomputed.drift.toFixed(6), a.att.drift.toFixed(6), 'the signed drift is recomputable from the two texts');
-    assert.strictEqual(recomputed.tethered ? 'tethered' : 'severed', a.att.verdict);
+    assert.strictEqual(a.ev.kernelId, b.ev.kernelId, 'precondition: one kernel, so the drifts are comparable');
+    assert.strictEqual(a.ev.drift.toFixed(6), b.ev.drift.toFixed(6), 'both measure the same drift: memory plays no part');
+    assert.strictEqual(a.ev.tethered, b.ev.tethered);
   });
 
   it('a vector no text backs is not content, and never enters the tether', async () => {
@@ -171,8 +167,8 @@ describe('§15.8 tether is reproducible by any holder of the root and the record
   });
 });
 
-describe('§15.8 cold-start admissions carry a tether like warm ones (B-L6)', () => {
-  it('an empty-memory admission of a remix is tether-checked against its anchor', async () => {
+describe('§15.8 and cold start (B-L6): a cold-start admission is a collapsed integration like a warm one', () => {
+  it('an empty-memory admission of a record keeps it as signed, with no tether, as a warm one does', async () => {
     await awaitSemantic();
     const root = createCMB({ categories: cat7(LAUNDERED_ROOT), createdBy: 'author' });
     const frame = remixFrame(INCOMING, root.metadata.key);
@@ -183,19 +179,11 @@ describe('§15.8 cold-start admissions carry a tether like warm ones (B-L6)', ()
     });
     assert.strictEqual(r.accepted, true, 'cold start admits to bootstrap memory');
     assert.strictEqual(r.coldStartCause, 'empty-memory', 'precondition: this is the cold-start exit');
-    assert.ok(r.tether, 'the cold-start admission carries a tether');
-    assert.strictEqual(r.tether.anchorKey, root.metadata.key);
-    assert.strictEqual(r.tether.checked, true);
-    assert.strictEqual(r.tether.tethered, false, 'a remix drifted past the floor is caught at cold start too');
-
-    const recomputed = await evaluateLineageTetherFromText({
-      remixCategories: r.fusedEntry.cmb.categories, anchorCategories: root.categories, guardedThreshold: POLICY.guardedThreshold,
-    });
-    assert.strictEqual(r.tether.drift.toFixed(6), recomputed.drift.toFixed(6), 'the same computation as the warm path');
-    assert.strictEqual(r.tether.kernelId, recomputed.kernelId);
+    assert.strictEqual(r.fusedEntry.collapsed, true, 'the author\'s record, kept as signed');
+    assert.strictEqual(r.tether, null, 'the §15.8 tether does not apply to a collapsed integration (§15.5)');
   });
 
-  it('a fresh node signs a tether on its first (cold-start) admission, as a warm node does', async () => {
+  it('a fresh node and a warm node store a peer root alike: as signed, with no tether', async () => {
     await awaitSemantic();
     for (const warm of [false, true]) {
       await withNode(`tether-cold-${warm ? 'warm' : 'cold'}`, async (node) => {
@@ -203,9 +191,9 @@ describe('§15.8 cold-start admissions carry a tether like warm ones (B-L6)', ()
         const peerRoot = createCMB({ categories: cat7(ROOT), createdBy: 'peerA' });
         const stored = await admit(node, { type: 'cmb', timestamp: Date.now(), content: ROOT, cmb: peerRoot });
         assert.ok(stored, `${warm ? 'warm' : 'cold'}: the root admits`);
-        assert.strictEqual(stored.tether?.anchor, peerRoot.metadata.key, `${warm ? 'warm' : 'cold'}: a root is its own anchor`);
-        assert.strictEqual(stored.tether.verdict, 'tethered');
-        assert.strictEqual(stored.provenance?.tether?.severed, false);
+        assert.strictEqual(stored.collapsed, true);
+        assert.strictEqual(stored.tether, undefined);
+        assert.strictEqual(stored.provenance?.tether, undefined);
       });
     }
   });

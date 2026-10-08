@@ -195,7 +195,8 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
       assert.strictEqual(decisions.length, 1, 'the rejection is recorded');
       assert.strictEqual(decisions[0].focusLabel, 'content-mismatch',
         'the recorded reason is the ACTUAL verdict — this is what the constant hid');
-      assert.strictEqual(decisions[0].remix, false, 'and whether it was a remix is recorded');
+      assert.strictEqual(decisions[0].cites, false, 'and whether it cites parents is recorded');
+      assert.strictEqual(decisions[0].remix, undefined, 'never whether it was a remix: a receiver cannot know (§15.7, update 1)');
     });
   });
 
@@ -231,7 +232,7 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
     });
   });
 
-  it('a REMIX rejection is flagged as one — the boolean the next diagnosis needs', async () => {
+  it('a rejection of a record that cites parents says so (cites), never that it was a remix (MMP 2.0 update 1, #35)', async () => {
     await withNode('diag-remix', async (node) => {
       node._svafEvaluator.evaluate = async () => ALIGNED;
       const peer = rawKeypair(), attacker = rawKeypair();
@@ -243,8 +244,9 @@ describe('rejection diagnosability — the decision records WHY, not a constant'
       node._frameHandler.handle(node.__peerSession, frame);
       await settle();
       assert.strictEqual(decisions.length, 1);
-      assert.strictEqual(decisions[0].remix, true,
-        'a rejected CMB is dropped and never stored, so root-vs-remix can only be captured here');
+      assert.strictEqual(decisions[0].cites, true,
+        'a rejected CMB is dropped and never stored, so whether it cited parents can only be captured here');
+      assert.strictEqual(decisions[0].remix, undefined, 'a record that cites its parent is not thereby a remix');
     });
   });
 });

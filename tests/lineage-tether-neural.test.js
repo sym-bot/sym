@@ -3,13 +3,14 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * MMP §15.8 applies to every remix a node integrates, whichever gate admitted it.
+ * MMP §15.8 on the neural admission path, as MMP 2.0 update 1 states it.
  *
  * The frame handler offers each inbound block to the injected Layer-4 evaluator first and runs the
- * heuristic baseline only when that evaluator declines. The heuristic path resolved the lineage
- * root, evaluated the stored record against it, severed a drifted chain and signed a tether
- * attestation. The neural path did none of it: a remix the neural evaluator admitted kept a
- * laundered lineage, carried no attestation, and kept whatever attestation the sender had attached.
+ * heuristic baseline only when that evaluator declines. Both paths keep the incoming text, so both
+ * collapse onto the author's record, kept exactly as signed, and the §15.8 tether does not apply to
+ * a collapsed integration (§15.5): the receiver produced no remix and asserts no descent of its own.
+ * So neither path severs, evaluates or attests a tether, and neither keeps an attestation a sender
+ * attached. (Until update 1 both paths severed and attested; this suite pinned that they agreed.)
  *
  * The neural evaluator is dormant in a stock install (models/svaf_v2.pt is not shipped), so it is
  * stubbed here with the result shape it returns.
@@ -93,54 +94,38 @@ async function admitThrough(path, rootText, frameOf) {
 }
 
 describe('MMP §15.8 lineage tether on the neural admission path', () => {
-  it('the stock dispatch, with a neural evaluator that admits, severs a laundered chain and attests it', async () => {
+  it('the stock dispatch, with a neural evaluator that admits, keeps a laundered chain as signed: no severance, no attestation', async () => {
     await awaitSemantic();
     await withNode('tether-neural-dispatch', { svafEvaluator: { evaluate: async () => ALIGNED } }, async (node) => {
-      // The root is held as a verified peer admission: a remix citing a block this node authored
-      // would be dropped as an echo before any gate runs.
       const root = createCMB({ categories: cat7(TOPIC_A), createdBy: 'peerR' });
       node._store.receiveFromPeer('peerR', { key: root.metadata.key, content: TOPIC_A, source: 'peerR', cmb: root, _cmbVerified: true });
       const frame = remixFrame(TOPIC_B_NEW, root.metadata.key);
       await node._frameHandler._handleMemoryShare(PEER.nodeId, PEER.name, frame, admitAs(node, PEER));
 
       const stored = node._store.get(frame.cmb.metadata.key);
-      assert.ok(stored, 'the neural evaluator admitted the remix');
+      assert.ok(stored, 'the neural evaluator admitted the record');
       assert.strictEqual(stored.svaf?.method, 'neural', 'precondition: the neural path stored it');
-      // Severed on the entry and in the index; the record is the author's and keeps its lineage.
-      assert.strictEqual(stored.lineage.severed, true, 'the laundered lineage is severed');
-      assert.deepStrictEqual(node._store.parents(stored.key), [], 'the store walks no parents from it');
-      assert.deepStrictEqual(stored.cmb.metadata.lineage, frame.cmb.metadata.lineage, 'the record\'s own lineage is untouched');
-      assert.strictEqual(stored.provenance?.tether?.severed, true);
-      assert.strictEqual(stored.provenance.tether.departedFrom, root.metadata.key);
-      const att = stored.tether;
-      assert.ok(att, 'a tether attestation is attached');
-      assert.strictEqual(att.verdict, 'severed');
-      assert.strictEqual(att.anchor, root.metadata.key);
-      assert.strictEqual(att.by, node.nodeId);
-      assert.strictEqual(verifyTetherAttestation(att, node._identity.publicKey).valid, true);
+      assert.strictEqual(stored.collapsed, true);
+      assert.notStrictEqual(stored.lineage?.severed, true, 'not severed');
+      assert.deepStrictEqual(node._store.parents(stored.key), [root.metadata.key], 'its signed lineage is walked');
+      assert.strictEqual(stored.provenance?.tether, undefined);
+      assert.strictEqual(stored.tether, undefined, 'no tether attestation');
     });
   });
 
   for (const [label, rootText] of [['a laundered chain', TOPIC_A], ['a faithful chain', TOPIC_B_ROOT]]) {
-    it(`${label}: the neural path reaches the verdict the heuristic path does`, async () => {
+    it(`${label}: the neural path and the heuristic path store the same thing, with no tether`, async () => {
       await awaitSemantic();
       const frameOf = (rootKey) => remixFrame(TOPIC_B_NEW, rootKey);
       const neural = await admitThrough('neural', rootText, frameOf);
       const heuristic = await admitThrough('heuristic', rootText, frameOf);
       for (const r of [neural, heuristic]) {
-        assert.ok(r.att, 'attested');
-        assert.strictEqual(r.attValid, true);
-        assert.strictEqual(r.att.by, r.nodeId);
-        assert.strictEqual(r.att.anchor, r.root.key);
+        assert.strictEqual(r.att, undefined, 'not attested');
+        assert.strictEqual(r.stored.collapsed, true);
+        assert.strictEqual(r.stored.provenance?.tether, undefined);
       }
-      assert.strictEqual(neural.att.verdict, heuristic.att.verdict, 'same verdict');
-      assert.strictEqual(neural.att.kernelId, heuristic.att.kernelId, 'one kernel, so the drifts are comparable');
-      assert.strictEqual(neural.att.drift.toFixed(6), heuristic.att.drift.toFixed(6), 'same drift: one computation');
-      const withoutDrift = ({ drift, ...rest }) => rest; // drift is compared above, to the precision it is signed at
-      assert.deepStrictEqual(withoutDrift(neural.stored.provenance.tether), withoutDrift(heuristic.stored.provenance.tether), 'same provenance');
       assert.deepStrictEqual(neural.stored.cmb.metadata.lineage, heuristic.stored.cmb.metadata.lineage, 'same record lineage, as signed');
-      assert.deepStrictEqual(neural.stored.lineage, heuristic.stored.lineage, 'same lineage in the store: severed or kept alike');
-      assert.strictEqual(neural.att.verdict, rootText === TOPIC_A ? 'severed' : 'tethered');
+      assert.deepStrictEqual(neural.stored.lineage, heuristic.stored.lineage, 'same lineage in the store');
     });
   }
 

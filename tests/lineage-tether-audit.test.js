@@ -3,10 +3,13 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * MMP §15.8 retroactive lineage-tether audit — chains stored before the
- * invariant (or received from pre-tether peers) get the same treatment:
- * re-evaluate against the resolvable root in the current kernel, annotate +
- * attest, and (opt-in) sever what fails the floor.
+ * MMP §15.8 retroactive lineage-tether audit — chains of records this node minted itself get the
+ * same treatment the invariant gives a remix: re-evaluate against the resolvable root in the current
+ * kernel, annotate + attest, and (opt-in) sever what fails the floor.
+ *
+ * A peer's record this node holds is a collapsed integration, kept exactly as its author signed it:
+ * the §15.8 tether does not apply to it (§15.5, MMP 2.0 update 1, #17), and the audit leaves it alone.
+ * Until the update the audit judged peers' records too; these fixtures were peer records then.
  */
 
 const { describe, it } = require('node:test');
@@ -26,21 +29,11 @@ function cat7(t) {
   };
 }
 
-/** Store a pre-tether chain entry: a remix citing `rootKey` with `topicText`
- *  content, injected the way a legacy receiver would have stored it. */
-function storeLegacyRemix(node, rootKey, topicText) {
-  // NOTE: createCMB mints content-only keys, so fixtures must use distinct
-  // texts — two identical texts collide on one key and dedup.
-  const cmb = createCMB({ categories: cat7(topicText), createdBy: 'legacy-peer' });
-  // Lineage goes in the section this record ACTUALLY carries. The fixture used to staple a flat
-  // `cmb.lineage` onto a record createCMB had already built with metadata — a hybrid that is
-  // neither generation, whose key read back undefined and whose lineage nothing walked.
-  cmb.metadata.lineage = { parents: [rootKey], ancestors: [rootKey], method: 'SVAF-v2' };
-  const key = cmb.metadata.key;
-  const entry = node._store.receiveFromPeer('legacy-peer', {
-    key, content: topicText, source: 'legacy-peer', cmb, storedAt: Date.now(),
-  });
-  return { key, entry };
+/** A record this node mints citing `rootKey`, with `topicText` content (before the tether ran on it).
+ *  NOTE: keys are content-only, so fixtures use distinct texts — identical texts collide and dedup. */
+function storeOwnRemix(node, rootKey, topicText) {
+  const entry = node.remember(cat7(topicText), { parents: [{ key: rootKey }] });
+  return { key: entry.key, entry };
 }
 
 const TOPIC_A = 'quarterly financial audit of the accounting ledger and tax filings';
@@ -49,6 +42,26 @@ const TOPIC_B = 'fresh snowfall reported on the upper mountain trail sections';
 const TOPIC_B2 = 'deep snow drifts covering the mountain hiking path near the summit ridge';
 
 describe('MMP §15.8 retroactive tether audit', () => {
+  it('a peer\'s record is a collapsed integration: the audit leaves it alone (MMP 2.0 update 1)', async () => {
+    const name = `audit-peer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      await awaitSemantic();
+      const rootA = node.remember(cat7(TOPIC_A));
+      const cmb = createCMB({ categories: cat7(TOPIC_B2), createdBy: 'peer', lineage: { parents: [rootA.key], method: 'SVAF-v2' } });
+      node._store.receiveFromPeer('peer', { key: cmb.metadata.key, content: TOPIC_B2, source: 'peer', cmb, _cmbVerified: true });
+      const r = await node.auditLineageTethers({ sever: true });
+      assert.strictEqual(r.audited, 0);
+      const e = node._store.get(cmb.metadata.key);
+      assert.strictEqual(e.tether, undefined);
+      assert.deepStrictEqual(node._store.parents(cmb.metadata.key), [rootA.key], 'its lineage is its author\'s');
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
+  });
+
   it('annotate-only pass: failed-floor chains are attested but keep lineage; sever pass strips them', async () => {
     const name = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
@@ -57,8 +70,8 @@ describe('MMP §15.8 retroactive tether audit', () => {
       await awaitSemantic();
       const rootA = node.remember(cat7(TOPIC_A));
       const rootB = node.remember(cat7(TOPIC_B_ROOT));
-      const laundered = storeLegacyRemix(node, rootA.key, TOPIC_B2); // topic-B content citing topic-A root
-      const faithful = storeLegacyRemix(node, rootB.key, TOPIC_B);   // topic-B content citing topic-B root
+      const laundered = storeOwnRemix(node, rootA.key, TOPIC_B2); // topic-B content citing topic-A root
+      const faithful = storeOwnRemix(node, rootB.key, TOPIC_B);   // topic-B content citing topic-B root
 
       // Pass 1: annotate + attest only (default).
       const r1 = await node.auditLineageTethers();
@@ -88,7 +101,7 @@ describe('MMP §15.8 retroactive tether audit', () => {
         'ancestor index no longer lists the severed remix');
 
       const f2 = node._store.get(faithful.key);
-      assert.ok(f2.cmb.metadata.lineage && f2.cmb.metadata.lineage.ancestors.includes(rootB.key), 'faithful chain untouched');
+      assert.deepStrictEqual(f2.cmb.metadata.lineage.parents, [rootB.key], 'faithful chain untouched');
       assert.strictEqual(f2.tether.verdict, 'tethered');
     } finally {
       await node.stop();
@@ -111,7 +124,7 @@ describe('MMP §15.8 retroactive tether audit', () => {
       node._store.receiveFromPeer('unverifiable-peer', {
         key: parent.metadata.key, content: TOPIC_B_ROOT, source: 'unverifiable-peer', cmb: parent, storedAt: Date.now(),
       });
-      const remix = storeLegacyRemix(node, parent.metadata.key, TOPIC_B);
+      const remix = storeOwnRemix(node, parent.metadata.key, TOPIC_B);
       const r = await node.auditLineageTethers({ fetch: true, timeoutMs: 50 });
       assert.strictEqual(r.audited, 1);
       assert.strictEqual(r.fetched, 0, 'the local unverified copy is not a fetch');
@@ -131,7 +144,7 @@ describe('MMP §15.8 retroactive tether audit', () => {
     await node.start();
     try {
       await awaitSemantic();
-      const orphan = storeLegacyRemix(node, 'cmb1-purged-root-nowhere', TOPIC_B);
+      const orphan = storeOwnRemix(node, `cmb-${'f'.repeat(64)}`, TOPIC_B);
       const r = await node.auditLineageTethers({ sever: true });
       assert.strictEqual(r.unchecked, 1);
       assert.strictEqual(r.severed, 0);
@@ -155,11 +168,10 @@ describe('MMP §15.8 retroactive tether audit', () => {
     try {
       await awaitSemantic();
       const root = node.remember(cat7(TOPIC_A));
-      // A faithful hop, admitted from a verified peer, then a laundered hop citing it.
+      // A faithful hop, admitted from a verified peer, then this node's laundered record citing it.
       const hop = createCMB({ categories: cat7(`${TOPIC_A} for the second quarter`), createdBy: 'peer', lineage: { parents: [root.key], method: 'SVAF-v2' } });
       node._store.receiveFromPeer('peer', { key: hop.metadata.key, content: 'hop', source: 'peer', cmb: hop, _cmbVerified: true });
-      const laundered = createCMB({ categories: cat7(TOPIC_B2), createdBy: 'peer', lineage: { parents: [hop.metadata.key], method: 'SVAF-v2' } });
-      node._store.receiveFromPeer('peer', { key: laundered.metadata.key, content: 'laundered', source: 'peer', cmb: laundered, _cmbVerified: true });
+      const laundered = node.remember(cat7(TOPIC_B2), { parents: [{ key: hop.metadata.key }] }).cmb;
       assert.ok(node._store.descendants(root.key).includes(laundered.metadata.key), 'precondition: indexed under the root through the hop');
 
       const r = await node.auditLineageTethers({ sever: true });
@@ -175,16 +187,13 @@ describe('MMP §15.8 retroactive tether audit', () => {
     }
   });
 
-  it('fetch: the candidates are the store\'s closure, never an ancestors list the record carries', async () => {
+  it('fetch: the candidates are the store\'s closure (the parents it indexed)', async () => {
     const name = `audit-anc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
     try {
       const parent = 'cmb-' + 'a'.repeat(64);
-      const chosen = 'cmb-' + 'b'.repeat(64);
-      const cmb = createCMB({ categories: cat7(TOPIC_B), createdBy: 'peer' });
-      cmb.metadata.lineage = { parents: [parent], ancestors: [chosen], method: 'SVAF-v2' };
-      node._store.receiveFromPeer('peer', { key: cmb.metadata.key, content: TOPIC_B, source: 'peer', cmb });
+      node.remember(cat7(TOPIC_B), { parents: [{ key: parent }] });
       const asked = [];
       node.fetchCMB = async (k) => { asked.push(k); return null; };
       await node.auditLineageTethers({ fetch: true, timeoutMs: 50 });

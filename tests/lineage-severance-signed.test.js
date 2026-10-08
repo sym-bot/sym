@@ -3,18 +3,20 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * §15.8 severance never edits a signed record.
+ * §15.8 severance never edits a signed record, and a record kept as its author signed it is never
+ * severed at all.
  *
  * When the gate admits a block unchanged, the record it stores IS the author's signed block (the
  * collapse). Severance used to null that record's metadata.lineage, which the signature covers, so
- * a severed record no longer verified under its author's key: the receiver's judgement about a
- * chain was written into someone else's signed statement and broke it. The retroactive audit did
- * the same to records already stored.
+ * a severed record no longer verified under its author's key. MMP 2.0 update 1 (§15.5, #17) then
+ * says the §15.8 tether does not apply to a collapsed integration at all: the receiver produced no
+ * remix and asserts no descent of its own, and the record's lineage is its author's. So a collapsed
+ * record is stored exactly as signed, its lineage walked as signed, with no tether.
  *
- * Severance is this node's judgement, so it is kept where this node's judgements live: on the
- * entry (entry.lineage.severed) and in the store's lineage index. The record stays exactly as
- * signed, and every walk of stored lineage honours the entry: the index, the §15.8 anchor walk,
- * and a rebuild of the index from disk.
+ * Severance remains this node's judgement about records it minted itself (the retroactive audit),
+ * kept where this node's judgements live: on the entry (entry.lineage.severed) and in the store's
+ * lineage index, never in the record. Every walk of stored lineage honours the entry: the index, the
+ * §15.8 anchor walk, and a rebuild of the index from disk.
  */
 
 const { describe, it } = require('node:test');
@@ -78,10 +80,10 @@ function signedRemix(text, parentKey) {
 }
 
 /** The severance as every reader of stored lineage must see it, live and after a rebuild from disk. */
-function assertSevered(node, label, record, rootKey) {
+function assertSevered(node, label, record, rootKey, authorKey = AUTHOR.pub) {
   const entry = node._store.get(record.metadata.key);
   assert.ok(entry, `${label}: stored`);
-  assert.strictEqual(verifyCMB(entry.cmb, AUTHOR.pub).valid, true, `${label}: the stored record still verifies under its author's key`);
+  assert.strictEqual(verifyCMB(entry.cmb, authorKey).valid, true, `${label}: the stored record still verifies under its author's key`);
   assert.deepStrictEqual(entry.cmb.metadata.lineage, record.metadata.lineage, `${label}: its lineage is exactly as signed`);
   assert.strictEqual(entry.lineage?.severed, true, `${label}: the severance is on the entry`);
   assert.strictEqual(entry.provenance?.tether?.severed, true, `${label}: and in its provenance`);
@@ -99,7 +101,7 @@ function assertSevered(node, label, record, rootKey) {
 
 describe('§15.8 severance keeps the author\'s record as signed', () => {
   for (const path of ['heuristic', 'neural']) {
-    it(`${path} gate: a severed collapsed record still verifies and is no longer a descendant`, async () => {
+    it(`${path} gate: a collapsed record is stored as signed and never severed (§15.5, MMP 2.0 update 1)`, async () => {
       await awaitSemantic();
       const opts = path === 'neural' ? { svafEvaluator: { evaluate: async () => ALIGNED } } : {};
       await withNode(opts, async (node) => {
@@ -110,21 +112,27 @@ describe('§15.8 severance keeps the author\'s record as signed', () => {
         const now = Date.now();
         if (path === 'neural') await node._frameHandler._processNeuralSVAF(ALIGNED, frame, 'peerA', 'peerA', now, now);
         else await node._frameHandler._processHeuristicSVAF(frame, 'peerA', 'peerA', now, now, 0);
-        assert.strictEqual(node._store.get(record.metadata.key)?.collapsed, true, 'precondition: the stored record is the author\'s block');
-        assertSevered(node, path, record, root.key);
+        const entry = node._store.get(record.metadata.key);
+        assert.strictEqual(entry?.collapsed, true, 'precondition: the stored record is the author\'s block');
+        assert.strictEqual(verifyCMB(entry.cmb, AUTHOR.pub).valid, true, 'it verifies under its author\'s key');
+        assert.deepStrictEqual(entry.cmb.metadata.lineage, record.metadata.lineage, 'its lineage is exactly as signed');
+        assert.notStrictEqual(entry.lineage?.severed, true, 'not severed');
+        assert.strictEqual(entry.tether, undefined, 'no tether attestation');
+        assert.strictEqual(entry.provenance?.tether, undefined, 'no tether evaluated');
+        assert.deepStrictEqual(node._store.parents(record.metadata.key), [root.key], 'walked as its author signed it');
       });
     });
   }
 
-  it('the retroactive audit severs on the entry too', async () => {
+  it('the retroactive audit severs a record of this node\'s own on the entry, and the record still verifies', async () => {
     await awaitSemantic();
     await withNode({}, async (node) => {
       const root = node.remember(cat7(TOPIC_A));
-      const record = signedRemix(LAUNDERED, root.key);
-      node._store.receiveFromPeer('peerA', { key: record.metadata.key, content: LAUNDERED, source: 'peerA', cmb: JSON.parse(JSON.stringify(record)), _cmbVerified: true });
+      const own = node.remember(cat7(LAUNDERED), { parents: [{ key: root.key }] });
+      const record = JSON.parse(JSON.stringify(own.cmb));
       const r1 = await node.auditLineageTethers({ sever: true });
       assert.strictEqual(r1.severed, 1, 'precondition: the audit severed it');
-      assertSevered(node, 'audit', record, root.key);
+      assertSevered(node, 'audit', record, root.key, node._identity.publicKey);
       const r2 = await node.auditLineageTethers({ sever: true });
       assert.strictEqual(r2.audited, 0, 'a severed record is a root to the audit: there is no chain left to check');
     });
