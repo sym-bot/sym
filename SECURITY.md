@@ -151,9 +151,10 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   held: at most 200,000 statements. Past that the store drops what is not in the live set first,
   then what comes last in authority order (deepest first, grants before revokes and endorses,
   highest id first), a batch at a time; an arriving anchor-level statement or revoke is never the
-  one refused, so a revoke that removes a flooding authority is always taken. A statement is at most
-  16 signature entries, 64 targets and a 256-character scope, in the schema's shape (anything else
-  is refused before any work). A statement whose chain is not held is pending: at most 64 held per
+  one refused or dropped, so a revoke that removes a flooding authority is always taken; dropping
+  live statements is logged and counted. A statement is at most 16 signature entries (their keys
+  unique: MMP §6.6 errata 1), 64 targets and a 256-character scope, in the schema's shape (anything
+  else is refused before any work). A statement whose chain is not held is pending: at most 64 held per
   session (checked before its signature is), keyed by id and signing key, for at most 10 s or until
   the session closes, never persisted, relayed or counted. An `authority-set` carries at most 64
   statements. A node answers `authority-fetch` at 4 a second per session (burst 16); over that a

@@ -1,9 +1,9 @@
 {
-  "note": "MMP v2.0 conformance artifacts vendored for sym's tests. Copied unchanged from sym-bot/meshcognition-website main at 8c3381d (PR #40, head ef1b542), public/spec/mmp/. The sha256 values equal that commit's public/spec/mmp/artifact-manifest.json; tests/authority-vectors.test.js checks them before it reads anything.",
-  "source": "https://github.com/sym-bot/meshcognition-website/tree/8c3381d/public/spec/mmp",
+  "note": "MMP v2.0 conformance artifacts vendored for sym's tests, copied unchanged. authority-v2.json and authority-frame.schema.json come from sym-bot/meshcognition-website branch spec/authority-errata-1 at df79e04 (MMP §6.6 errata 1: unique signature keys, adding the xRepeatKey case), not yet merged to main; ed25519-strict-v2.json is unchanged since main at 8c3381d (PR #40) and the published 218df24. The sha256 values equal df79e04's public/spec/mmp/artifact-manifest.json; tests/authority-vectors.test.js checks them before it reads anything.",
+  "source": "https://github.com/sym-bot/meshcognition-website/tree/df79e04/public/spec/mmp",
   "files": {
-    "authority-v2.json": { "from": "conformance/v2/authority-v2.json", "sha256": "3cd656cec2c85f1b5658901aa4ed5a4fe9357e761600c64435a324538f8d46ce" },
+    "authority-v2.json": { "from": "conformance/v2/authority-v2.json", "sha256": "0e17b3e52282968e02ea18cd7827a143d70887d7885e21618ea21bef173048f6" },
     "ed25519-strict-v2.json": { "from": "conformance/v2/ed25519-strict-v2.json", "sha256": "323d8d9f1a4ab985a53e3c7031e39c004e456df74a87a48550761160e3c1997b" },
-    "authority-frame.schema.json": { "from": "schema/authority-frame.schema.json", "sha256": "0e9fa987e8d38351ab28755f57d413d354fabd92cf968365b10845924f573a95" }
+    "authority-frame.schema.json": { "from": "schema/authority-frame.schema.json", "sha256": "f0717dea628b525b450892b979690bb97033f39159ee79ac023bb968d6d76c42" }
   }
 }

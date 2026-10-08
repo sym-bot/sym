@@ -366,6 +366,18 @@ describe('§6.6 capacity: a full store keeps what comes first in authority order
     assert.strictEqual(st.ingest(r).result, 'held');
   });
 
+  it('an anchor-level statement or a revoke is never dropped either (MMP §6.6 errata 1): the store holds them past its bound', () => {
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 30 });
+    const top = Array.from({ length: 25 }, () => grant('anchor', party(), 'admin'));
+    for (const g of top) st.ingest(g);
+    const revokes = top.slice(0, 10).map((g) => revoke(g, [g])); // depth 2, last in order among removals
+    for (const r of revokes) assert.strictEqual(st.ingest(r).result, 'held');
+    for (const g of top.slice(10)) for (let i = 0; i < 3; i++) st.ingest(grant(g, party(), 'participant'));
+    for (const x of [...top, ...revokes]) assert.strictEqual(st.has(id(x)), true, 'anchor-level statements and revokes stay');
+    assert.ok(st.size() >= 35, 'past the bound, since nothing else is left to drop');
+    assert.ok(st.capacityReport().liveDropped > 0 || st.capacityReport().refused > 0, 'the grants below went');
+  });
+
   it('what is not live goes first, then the last in authority order; one sort frees a batch', () => {
     const gA = grant('anchor', party(), 'admin');
     const gB = grant('anchor', party(), 'admin');

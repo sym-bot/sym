@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meshcognition.org/spec/mmp/schema/authority-frame.schema.json",
   "title": "MMP v2.0 authority statements and frames (§6.6)",
-  "description": "Grant, revoke and endorse statements, each identified by the SHA-256 of its canonical signed bytes (mmp-authority-v1) and linked to others by those ids, and the four frames that carry them. The schema accepts exactly the shapes the reference construction (scripts/mmp/lib.mjs) accepts, with one exception no JSON Schema can express: a subject key must also be the encoding of an Ed25519 point of prime order (§18.3.2). Whether a statement is valid and in force is decided by §6.6 resolution against the pinned anchor.",
+  "description": "Grant, revoke and endorse statements, each identified by the SHA-256 of its canonical signed bytes (mmp-authority-v1) and linked to others by those ids, and the four frames that carry them. The schema accepts exactly the shapes the reference construction (scripts/mmp/lib.mjs) accepts, with two exceptions no JSON Schema can express: a subject key must also be the encoding of an Ed25519 point of prime order (§18.3.2), and no two signature entries may share a key (the schema refuses only identical entries). Whether a statement is valid and in force is decided by §6.6 resolution against the pinned anchor.",
   "oneOf": [
     { "$ref": "#/$defs/statementFrame" },
     { "$ref": "#/$defs/digestFrame" },
@@ -50,7 +50,7 @@
         "authorisedBy": { "$ref": "#/$defs/authorisedBy" },
         "nonce": { "$ref": "#/$defs/nonce" },
         "issuedAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "Information only. Signed and part of the id; never used by resolution." },
-        "sigs": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/sigEntry" } }
+        "sigs": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/sigEntry" }, "description": "Each entry's key is unique within the statement (§6.6.3, rule 1). JSON Schema can only refuse identical entries (uniqueItems); two entries under one key with different signatures pass the schema and fail the reference construction." }
       },
       "if": { "type": "object", "properties": { "authorisedBy": { "$ref": "#/$defs/statementId" } } },
       "then": { "type": "object", "properties": { "sigs": { "type": "array", "maxItems": 1 } } }

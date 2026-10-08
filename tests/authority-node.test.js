@@ -488,6 +488,36 @@ describe('§6.6.8: the asking rule bounds what a session can make this node veri
   });
 });
 
+describe('§6.6.8: a pull that stops early resumes from its cursor', () => {
+  it('a page that never comes: after the retries the next pull asks from the same cursor', async () => {
+    try {
+      const X = node('resume-x', { gossipBudget: { newLane: 1e6, burst: 1e6 } }); const M = node('resume-m', { anchor: null });
+      await X.start(); await M.start();
+      await connectNodes(M, X);
+      const asked = [];
+      M._onAuthorityFetch = (session, msg) => {
+        asked.push(msg.after);
+        if (msg.after === '') session.send({ type: 'authority-set', reqId: msg.reqId, statements: [], next: '1.1.auth-cursor' });
+        // every later page goes unanswered
+      };
+      const sX = X._peers.get(M.nodeId).transport;
+      sX._authPeerRoot = 'c'.repeat(64);
+      X._startAuthorityPull(sX);
+      await until(() => asked.length >= 2, 3000);
+      assert.deepStrictEqual(asked.slice(0, 2), ['', '1.1.auth-cursor']);
+      // The page timed out its retries: the pull is remembered at its cursor, and the re-pull resumes there.
+      const ask = sX._authAsk;
+      for (let i = 0; i < 4 && sX._authAsk; i++) X._authorityAskTimedOut(sX, sX._authAsk);
+      assert.ok(ask);
+      assert.strictEqual(X._authorityResume.get(M.nodeId), '1.1.auth-cursor');
+      clearTimeout(sX._authRepullTimer); sX._authRepullTimer = null;
+      X._startAuthorityPull(sX);
+      await until(() => asked.length >= 6, 3000);
+      assert.strictEqual(asked[asked.length - 1], '1.1.auth-cursor', 'resumed from the cursor, not from the top');
+    } finally { await stopAll(); }
+  });
+});
+
 describe('§6.6.8: a fetch answer is the closure', () => {
   it('an endorse that keeps a rescued revoke in force goes with it, so the asker reaches the same root', () => {
     const pin = A.parsePin(PIN);

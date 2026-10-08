@@ -16,15 +16,17 @@ in-memory pending set for grants that arrive before their root (which could be f
 ### Authority: MMP §6.6
 
 Authority is MMP §6.6 as merged (sym-bot/meshcognition-website main at 8c3381d, PR #40; published
-unchanged as MMP 2.0 at 218df24): a function of a set of hash-linked signed statements, with no time
-in it. sym implements it as written. The time-replay grant rule that 0.14.0's development builds
+unchanged as MMP 2.0 at 218df24), with its errata 1 (branch spec/authority-errata-1 at df79e04,
+written from sym's release review): a function of a set of hash-linked signed statements, with no
+time in it. sym implements it as written. The time-replay grant rule that 0.14.0's development builds
 carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetch`, `role-chain`,
 `role-digest`) never shipped.
 
 - **Statements (§6.6.3).** `grant`, `revoke` and `endorse`, each identified by `auth-` + SHA-256 of
   its canonical bytes (`mmp-authority-v1`), naming its authority in `authorisedBy` and its targets by
   id, with a 16-byte nonce; `issuedAt` is signed and never read. Validity is static: well formed (a
-  subject key of prime order included), rooted within 4 links, signed, permitted.
+  subject key of prime order, and signature-entry keys unique within the statement, errata 1),
+  rooted within 4 links, signed, permitted.
   (lib/core/authority.js)
 - **The anchor (§6.6.1)** is a pinned key set with a threshold:
   `anchor: { threshold, keys: [{ key, nodeId? }] }`; `{ nodeId, publicKey }`, a `"nodeId:publicKey"`
@@ -40,12 +42,13 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   statement a revoke cut off is rescued only by an in-force endorse from above, charged to the
   endorser's bucket and falling through by id; a quota cut is never rescued. The live set and the
   authority root. (lib/authority-store.js)
-- **Capacity.** At most 200,000 statements held. Past that the store drops what is not live first,
-  then what comes last in authority order (deepest first, grants before revokes and endorses,
-  highest id first), freeing a batch at a time so its sort is paid once per batch. An arriving
-  anchor-level statement or revoke is never the one refused, so the removal that would clean up a
-  flooded store is always taken. A statement refused for capacity (`over-capacity`) says nothing
-  against its sender.
+- **Capacity (errata 1).** At most 200,000 statements held. Past that the store drops what is not
+  live first, then what comes last in authority order (deepest first, grants before revokes and
+  endorses, highest id first), freeing a batch at a time so its sort is paid once per batch. An
+  anchor-level statement or a revoke is never dropped or refused, so the removal that would clean up
+  a flooded store is always taken. A statement refused for capacity (`over-capacity`) says nothing
+  against its sender. Dropping live statements is said in the log and counted
+  (`authorityStatus().capacity`).
 - **Persistence.** One file, `authority/statements.jsonl`, whatever the pin. At load every statement
   is judged again against the pin in force; what does not count under it (a mistyped pin, a re-pin,
   a chain not yet held) stays in the file as the bytes it was, never deleted, so a corrected pin, or
@@ -65,7 +68,9 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   one ask in flight per session: an answer is never dropped for budget and never spends more than
   the lane holds. An answer is verified in slices, so the event loop is never held for a page. A
   pull that ends with the roots apart is repeated, at once if a digest came during it, otherwise
-  after a backoff from 2 s doubling to 5 minutes. A session whose statements keep failing (8 in a
+  after a backoff from 2 s doubling to 5 minutes, reset when either set changes; a pull that stopped
+  early (a page that never came, a session that closed) resumes from its cursor. A session whose
+  statements keep failing (8 in a
   minute) has its authority statements dropped unread for the rest of the minute, a mute keyed on
   the session's peer. The key cache keeps the pinned keys for good and the rest least recently
   used first.
@@ -96,8 +101,8 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   `status().coreSecure.authority`; the `authority-changed` event; the `authorityScopes` option.
 - **An attestation's own time is no part of its weight**: no authority is judged at a time, so an
   attestation dated before the record it attests is not refused for that.
-- **Tests.** The published vectors are vendored in tests/fixtures with their sha256 recorded
-  (SOURCES.json, checked before use): every authority case resolved as listed, reversed, shuffled
+- **Tests.** The vectors are vendored in tests/fixtures with their sha256 recorded (SOURCES.json,
+  checked before use; authority-v2.json from errata 1, with its xRepeatKey case): every authority case resolved as listed, reversed, shuffled
   and with forged copies, and every Ed25519 case (authority-vectors). The review attacks at full
   scale, the old faces (arrival order, backdating, floods, cycles) and capacity in
   authority-attacks; two nodes reaching one root over TCP, the frames, the asking rule against a
@@ -119,6 +124,8 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
   peer sent it, under the key that session proved (the frame is sealed on the session); it is not a
   signed record. Nothing about it can be verified again later, relayed with its author's signature,
   or attributed to anyone but that peer. A host shows it as the peer's word, not as a verified record.
+  MMP §6.6 errata 1 registers the mood frame as sym sends it (`{ type, from, fromName, mood,
+  context, timestamp }`, sealed on a Core Secure session, never stored, relayed or remixed).
 
 ### The loaded version, and hot-swap
 

@@ -111,11 +111,15 @@ counted (`authorityStatus().stats.retired`), and they are never sent. Nothing in
 - **Pulls.** An unanswered page is asked again from the same cursor, up to 3 times. A digest that
   arrives during a pull is remembered, and if the roots still differ when the pull ends, the pull
   starts again at once (under the asking rule). A pull that ends with the roots apart and no new
-  digest is started again after a backoff, 2 s doubling to 5 minutes, until the roots meet.
-- **Capacity.** At most 200,000 statements are held. Past that the store drops what is not live
-  first, then what comes last in authority order (deepest first, grants before revokes and endorses,
-  highest id first), a batch at a time. An arriving anchor-level statement or revoke is never the one
-  refused. A statement refused for capacity is not a relay failure.
+  digest is started again after a backoff, 2 s doubling to 5 minutes, reset when either set changes,
+  until the roots meet. A pull that stopped early (its page retries spent, or its session closed)
+  resumes from its cursor.
+- **Capacity (errata 1).** At most 200,000 statements are held. Past that the store drops what is
+  not live first, then what comes last in authority order (deepest first, grants before revokes and
+  endorses, highest id first), a batch at a time. An anchor-level statement or a revoke is never
+  dropped or refused. A statement refused for capacity is not a relay failure.
+- **Unique signature keys (errata 1).** A statement whose signature entries repeat a key is not well
+  formed, refused before any signature is checked.
 - **Persistence (§6.6.8).** Held statements are written as their canonical members only, each on a
   line of its own, to one file, `authority/statements.jsonl`, whatever the pin. At load every
   statement is judged again against the pin in force, chain by chain, and the set resolved afresh;

@@ -466,6 +466,34 @@
       "expectedPayloadHex": "6d6d702d617574686f726974792d76310a353a6772616e74363a616e63686f7233363a30313866343761302d376232312d376162632d386465662d30303030303030303030656534333a67556369336e4846735535306a6638794b7566337842584f355668325a4a55704c4e6245774b6170337967393a76616c696461746f72303a32323a6a6e362d4866566f666f7670386c7443655f62386d67303a",
       "expectedId": "auth-a47f6807d7cc970b5f3504fb409a8592dbad234a05e47004c5b4ce33aac4852a"
     },
+    "xRepeatKey": {
+      "statement": {
+        "kind": "grant",
+        "authorisedBy": "anchor",
+        "subject": {
+          "nodeId": "018f47a0-7b21-7abc-8def-0000000000ee",
+          "key": "gUci3nHFsU50jf8yKuf3xBXO5Vh2ZJUpLNbEwKap3yg"
+        },
+        "role": "validator",
+        "nonce": "zYwj6-ZG0i1LRBsaMeKDzg",
+        "sigs": [
+          {
+            "key": "vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU",
+            "sig": "wjvlcpkvhABi_23FHsQjBzKFZGCx0K4dFtTpzQB2pDF66-jy69IWpsp5y9m3hvVH5bUCKt9MmtCzo77Vw3DIAw"
+          },
+          {
+            "key": "vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU",
+            "sig": "wjvlcpkvhABi_23FHsQjBzKFZGCx0K4dFtTpzQB2ADF66-jy69IWpsp5y9m3hvVH5bUCKt9MmtCzo77Vw3DIAw"
+          },
+          {
+            "key": "Zej5sLxurhJBafBXb5c2LSlajPX3cLReFDV85kfTPuw",
+            "sig": "I0PGKJbWsPjWlL_2Pmyd3jfmcpxqiNHgyj2ac1n1C-ndZas0DRbJXrXPhh1GhJiKdo0xGMddtbB2Ar1RMotODw"
+          }
+        ]
+      },
+      "expectedPayloadHex": "6d6d702d617574686f726974792d76310a353a6772616e74363a616e63686f7233363a30313866343761302d376232312d376162632d386465662d30303030303030303030656534333a67556369336e4846735535306a6638794b7566337842584f355668325a4a55704c4e6245774b6170337967393a76616c696461746f72303a32323a7a59776a362d5a473069314c524273614d654b447a67303a",
+      "expectedId": "auth-197b2c72bda15532879213ebab0c30b5eaaa0f8cafc920ed656e8cd163350355"
+    },
     "xValidatorByValidator": {
       "statement": {
         "kind": "grant",
@@ -4874,6 +4902,7 @@
         "gQ",
         "xThin",
         "xDupKey",
+        "xRepeatKey",
         "xValidatorByValidator",
         "xEndorseByValidator",
         "xByParticipant",
@@ -4891,6 +4920,7 @@
           "gQ": "in-force",
           "xThin": "invalid",
           "xDupKey": "invalid",
+          "xRepeatKey": "invalid",
           "xValidatorByValidator": "invalid",
           "xEndorseByValidator": "invalid",
           "xByParticipant": "invalid",
