@@ -519,6 +519,56 @@ describe('§6.6.8: the asking rule, exactly', () => {
     } finally { await stopAll(); }
   });
 
+  it('a pull that ends is decided against a settled resolution, never one forced as the answer ends (re-review R2)', async () => {
+    try {
+      const N4 = node('r2-pull', { gossipBudget: { newLane: 1e6, burst: 1e6 } });
+      const s = admitAs(N4, identity('r2-peer'));
+      N4._sessions.add(s);
+      deliver(N4, s, { type: 'authority-digest', root: 'e'.repeat(64), count: 1 });
+      const ask = s.sent.find((f) => f.type === 'authority-fetch');
+      let forced = 0;
+      const resolve = N4._authority.resolve.bind(N4._authority);
+      N4._authority.resolve = () => { if (N4._authority.dirty) forced++; return resolve(); };
+      deliver(N4, s, { type: 'authority-set', reqId: ask.reqId, statements: [grant('anchor', party(), 'participant')] });
+      assert.strictEqual(forced, 0, 'taking the answer, and ending the pull, resolved nothing');
+      await until(() => N4.authorityStatus().inForce === 1, 2000);
+      await until(() => !!s._authRepullTimer, 2000);
+      assert.ok(s._authRepullTimer, 'the settle decided it: the roots differ, so a re-pull is due');
+      assert.ok(forced <= 1, 'one resolve, the settle\'s');
+    } finally { await stopAll(); }
+  });
+
+  it('an answer that throws part way leaves the session able to ask again, its reservation given back', async () => {
+    try {
+      const N6 = node('throw', { gossipBudget: { newLane: 1e6, burst: 1e6 } });
+      const s = admitAs(N6, identity('throw-peer'));
+      N6._sessions.add(s);
+      deliver(N6, s, { type: 'authority-digest', root: '9'.repeat(64), count: 1 });
+      const ask = s.sent.find((f) => f.type === 'authority-fetch');
+      const t = N6._gossipBuckets.get(s.nodeId).tokens;
+      const real = N6._ingestAuthority;
+      N6._ingestAuthority = () => { throw new Error('a fault no input should cause'); };
+      deliver(N6, s, { type: 'authority-set', reqId: ask.reqId, statements: [grant('anchor', party(), 'participant')] });
+      N6._ingestAuthority = real;
+      assert.strictEqual(s._authAsk, null, 'the ask is given up');
+      assert.ok(N6._gossipBuckets.get(s.nodeId).tokens >= t + 2112 - 1, 'and its reservation given back');
+    } finally { await stopAll(); }
+  });
+
+  it('a closing session gives back the reservation of an ask still out', async () => {
+    try {
+      const N5 = node('refund', { gossipBudget: { newLane: 1e6, burst: 1e6 } });
+      const s = admitAs(N5, identity('refund-peer'));
+      N5._sessions.add(s);
+      const before = () => N5._gossipBuckets.get(s.nodeId).tokens;
+      deliver(N5, s, { type: 'authority-digest', root: 'f'.repeat(64), count: 1 });
+      assert.ok(s._authAsk, 'an ask is out');
+      const t = before();
+      N5._authorityReleaseSession(s);
+      assert.ok(before() >= t + 2112 - 1, 'its reservation went back to the lane');
+    } finally { await stopAll(); }
+  });
+
   it('one ask in flight per session: a pending statement\'s fetch waits for the pull page out', async () => {
     try {
       const N2 = node('one-ask', { gossipBudget: { newLane: 1e6, burst: 1e6 } });

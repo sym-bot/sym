@@ -10,6 +10,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const A = require('../lib/core/authority');
 const { AuthorityStore, lifecycleOf } = require('../lib/authority-store');
 
@@ -349,7 +352,7 @@ describe('§6.6 capacity: a full store keeps what comes first in authority order
     assert.deepStrictEqual([...st.resolve().inForce].sort(), [...unbounded.resolve().inForce].sort());
   });
 
-  it('a deep grant that comes last in a full store is refused, as over capacity; an anchor-level grant or a revoke never is', () => {
+  it('a deep grant that comes last in a full store is refused, as over capacity; an in-force anchor-level grant or revoke never is', () => {
     const gA = grant('anchor', party(), 'admin');
     const sub = grant(gA, party(), 'admin');
     const st = new AuthorityStore({ pin: PIN, maxHeld: 100 });
@@ -362,20 +365,81 @@ describe('§6.6 capacity: a full store keeps what comes first in authority order
     while (st.size() < 100) st.ingest(grant(gA, party(), 'participant'));
     assert.strictEqual(st.ingest(grant('anchor', party(), 'validator')).result, 'held');
     while (st.size() < 100) st.ingest(grant(gA, party(), 'participant'));
-    const r = revoke(sub, [sub]); // a revoke at depth 3: also last in order, never refused
+    // A revoke in force in gA's bucket (sub itself may have gone in a pass: it is a live grant like any).
+    const r = make(gA, { kind: 'revoke', targets: [`auth-${crypto.randomBytes(32).toString('hex')}`] });
     assert.strictEqual(st.ingest(r).result, 'held');
+    assert.strictEqual(st.statusOf(id(r)), 'in-force');
   });
 
-  it('an anchor-level statement or a revoke is never dropped either (MMP §6.6 errata 1): the store holds them past its bound', () => {
+  it('in-force anchor-level statements and in-force revokes are kept past the bound; the quotas bound them', () => {
     const st = new AuthorityStore({ pin: PIN, maxHeld: 30 });
     const top = Array.from({ length: 25 }, () => grant('anchor', party(), 'admin'));
     for (const g of top) st.ingest(g);
-    const revokes = top.slice(0, 10).map((g) => revoke(g, [g])); // depth 2, last in order among removals
+    const revokes = top.slice(0, 10).map((g) => revoke(g, [g])); // in force, each in its own bucket
     for (const r of revokes) assert.strictEqual(st.ingest(r).result, 'held');
     for (const g of top.slice(10)) for (let i = 0; i < 3; i++) st.ingest(grant(g, party(), 'participant'));
-    for (const x of [...top, ...revokes]) assert.strictEqual(st.has(id(x)), true, 'anchor-level statements and revokes stay');
+    for (const x of [...top, ...revokes]) assert.strictEqual(st.has(id(x)), true, 'in-force removals and anchor-level statements stay');
     assert.ok(st.size() >= 35, 'past the bound, since nothing else is left to drop');
     assert.ok(st.capacityReport().liveDropped > 0 || st.capacityReport().refused > 0, 'the grants below went');
+  });
+
+  // The re-review of 390b4af (rr-capacity-revokes, rr-capacity-displace): validity is static, so a
+  // removed admin can sign any number of valid, dead revokes, and an in-force one any number of
+  // over-quota ones. They are ordinary candidates: outside the live set, the first to go.
+  function capacityScene(variant) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-cap-'));
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 200, dir });
+    const gA = grant('anchor', party(), 'admin');
+    st.ingest(gA);
+    if (variant === 'dead') st.ingest(revoke('anchor', [gA]));
+    let resolves = 0;
+    const resolve = st.resolve.bind(st);
+    st.resolve = () => { if (st.dirty) resolves++; return resolve(); };
+    for (let i = 0; i < 2000; i++) {
+      const r = make(gA, { kind: 'revoke', targets: [`auth-${crypto.randomBytes(32).toString('hex')}`] });
+      st.ingest(r);
+    }
+    st.resolve = resolve;
+    const lines = fs.readFileSync(path.join(dir, 'statements.jsonl'), 'utf8').trim().split('\n').length;
+    const reloaded = new AuthorityStore({ pin: PIN, maxHeld: 200, dir });
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { st, resolves, lines, reloaded, gA };
+  }
+  const SLACK = Math.ceil(200 / 64);
+
+  it('2,000 dead revokes from a removed admin: the store stays at its bound, on disk too, and an arrival does not cost a resolve', () => {
+    const { st, resolves, lines, reloaded } = capacityScene('dead');
+    assert.ok(st.size() <= 200 + SLACK, `held ${st.size()}`);
+    assert.ok(reloaded.size() <= 200 + SLACK, `after a reload ${reloaded.size()}`);
+    // Compacted once it holds twice what the store keeps; appends run on until the next pass.
+    assert.ok(lines <= 2 * (200 + SLACK) + 2 * SLACK + 2, `the file holds ${lines} lines: compacted, not growing`);
+    assert.ok(resolves <= 2000 / SLACK + 5, `${resolves} resolves for 2,000 arrivals: one per eviction pass, not per arrival`);
+  });
+
+  it('2,000 over-quota revokes from an in-force admin: kept past the bound only as far as its bucket\'s quota', () => {
+    const { st, lines, reloaded, gA, resolves } = capacityScene('over-quota');
+    assert.ok(resolves <= 2000 / SLACK + 5, `${resolves} resolves for 2,000 arrivals: a full store of protected statements waits a batch between passes`);
+    const inForce = [...st.resolve().inForce].filter((x) => st._held.get(x).authBy === id(gA)).length;
+    assert.strictEqual(inForce, 256, 'the bucket keeps its quota of revokes in force');
+    assert.ok(st.size() <= 1 + 256 + SLACK, `held ${st.size()}: the in-force revokes, bounded by the quota, and no more`);
+    assert.ok(reloaded.size() <= 1 + 256 + SLACK);
+    assert.ok(lines <= 2 * (1 + 256 + SLACK) + 2 * SLACK + 2, `the file holds ${lines} lines`);
+  });
+
+  it('dead revokes never displace an honest tree in force (one signer never displaces another)', () => {
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 300 });
+    const honest = [];
+    const gW = grant('anchor', party(), 'admin'); honest.push(gW);
+    for (let i = 0; i < 15; i++) { const gI = grant(gW, party(), 'issuer'); honest.push(gI); for (let j = 0; j < 15; j++) honest.push(grant(gI, party(), 'participant')); }
+    for (const x of honest) st.ingest(x);
+    assert.strictEqual(honest.filter((x) => st.statusOf(id(x)) === 'in-force').length, 241);
+    const gX = grant('anchor', party(), 'admin');
+    st.ingest(gX); st.ingest(revoke('anchor', [gX]));
+    for (let i = 0; i < 400; i++) st.ingest(make(gX, { kind: 'revoke', targets: [`auth-${crypto.randomBytes(32).toString('hex')}`] }));
+    const r = st.resolve();
+    assert.strictEqual(honest.filter((x) => r.inForce.has(id(x))).length, 241, 'every honest statement still in force');
+    assert.ok(st.size() <= 300 + Math.ceil(300 / 64));
+    assert.strictEqual(st.capacityReport().liveDropped, 0);
   });
 
   it('what is not live goes first, then the last in authority order; one sort frees a batch', () => {
