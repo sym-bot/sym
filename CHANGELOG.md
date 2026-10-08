@@ -124,11 +124,11 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
 
 The founder ruled that the drafts sym 0.14.0 implements land in the published spec before it ships.
 They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, branch
-spec/mmp-2.0-update-1 at 2660ab9: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28
-on the §6.6 errata), and sym is aligned with its text, its reference construction (scripts/mmp/lib.mjs)
-and its schemas and vectors, vendored in tests/fixtures with their manifest digests
-(record-projection-v2, record-size-v2 and control-encrypted-v2 pass byte for byte, and every frame
-sym builds validates against the vendored schemas).
+spec/mmp-2.0-update-1, at 5417176 with its verification fixes: #24, #25, #17, #22, #26, #30, #23,
+#31, #37, #34, #35, #27 and #28 on the §6.6 errata), and sym is aligned with its text, its reference
+construction (scripts/mmp/lib.mjs) and its schemas and vectors, vendored in tests/fixtures with their
+manifest digests (record-projection-v2, record-size-v2, control-encrypted-v2 and the draft
+sym-attest-v1 pass case by case, and every frame sym builds validates against the vendored schemas).
 
 - **The seal point (#26, S1).** A record is never sealed into a session of another room than its
   signed one, whatever path offered it: a fetch answer, an anchor replay, a broadcast.
@@ -175,13 +175,27 @@ sym builds validates against the vendored schemas).
 - **The relay client (#25).** 4007 is an ordinary close with backoff (#20, relay-auth key proof, is
   deferred, and its review found that never reconnecting after 4007 makes a lockout); what a relay
   listed in `relay-peers.features` is forgotten with its socket; relay-auth carries the nodeId in its
-  lowercase form.
+  lowercase form. The pace stays 20 frames a second, burst 200, under the update's floors of 25/300,
+  and relay-auth and relay-pong now go inside that bucket (they went out at once whatever it held).
+- **The sealed envelopes** are checked as their schemas bound them: a sequence of at most 29 digits,
+  a sealed value at least the tag's length (and a record's at most 983,062 characters), a 32-hex
+  sessionId, and for `control-encrypted` its members exactly.
 - **sym-attest-v1 (#27, S3).** No attestation is signed about a Legacy Import record, and none about a
   directed record is sent or relayed (one received is kept). The attestation is a closed object with
   exactly seven verdicts, lowercase UUID attesters, a §5.8 room, a role of up to 64 characters and a
-  method of up to 32. A conflicting checkpoint is relayed once, as evidence. An attester's scoped role
-  is judged on the record its assertion names. No checkpoint root is signed over a suffix of the
-  chain (D1; the chained construction of the revised #27 is not in this release yet).
+  method of up to 32. An attester's scoped role is judged on the record its assertion names.
+- **Chained checkpoints (#27, D1).** A checkpoint covers the attestations since the previous one,
+  seq fromSeq..uptoSeq, and is chained to its root (`genesis` first), so a node holds only its last
+  segment; it signs fromSeq and prev, and a witness signs fromSeq. sym signed a root over whatever
+  attestations it still held, and once it had evicted one, over a suffix. A node that loses its
+  segment signs nothing over fewer: its chain ends, visibly (`checkpoint-chain-ended`). Two
+  checkpoints that are not the same one conflict when their ranges overlap or they share a prev (the
+  old rule, one position with two roots, missed a fork cut at other boundaries); the conflicting copy
+  is relayed once, as evidence, and the attester is witnessed no more, its further checkpoints dropped
+  unverified. The link checks (a reversed range, a checkpoint that does not follow the one its prev
+  names) refuse a checkpoint as malformed before any signature work. A witness that names another
+  range or root than the checkpoint held is refused and said, and never counts against the attester.
+  Logs written before this hold unchained checkpoints, which are kept and read as before.
 - **Echoes (#35, D3).** A record citing this node's own records is verified, gated, stored and
   delivered like any other: the ingest echo skip is gone, and the anti-echo rule sits at the remix
   trigger. `remixProduced` counts only remixes minted through `remix()`, and the decision log says

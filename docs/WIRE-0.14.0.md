@@ -171,9 +171,22 @@ session with a sealed 1010. What sym chooses:
 - The relay client reconnects with backoff after every close but 4004 and 4006 (4005, 4008, 1001,
   1009, 1011, 1013, and 4007); forgets a relay's `features` with its socket; and sends relay-auth's
   nodeId lowercase, with `room` (when not default) and `engine`. It paces at 20 frames a second,
-  burst 200: the update's floors (§19.1, `RELAY_MIN_RATE` and `RELAY_MIN_BURST`) are those same
-  numbers, and relay-auth and relay-pong are sent outside the bucket, so there is no headroom
-  (a verification note on #43 asks for floors of 25/300; open).
+  burst 200, under the update's floors (§19.1: 25 a second, burst 300), counting relay-auth and
+  relay-pong inside the same bucket, ahead of every other frame.
+
+## 4c. sym-attest-v1: what sym chooses (§16.4, the extension text)
+
+- An attester checkpoints every 8 attestations (`checkpointInterval`), each over the segment since
+  its last, chained to that root. The segment and the checkpoint are appended to the attestation
+  logs before anything that depends on them is gossiped (appended, not fsynced). A node that no
+  longer holds its segment ends its chain and signs no further checkpoint until its state changes.
+- A witness that names another range or root than the checkpoint held at its position is refused
+  and said (`disagrees`), and not taken as equivocation evidence: the extension text counts two
+  witnesses, or a witness and a checkpoint, with overlapping ranges as evidence against the
+  attester, but a witness is only its signer's word, so that would let any witness stop every node
+  from witnessing an honest attester. Only two checkpoints the attester signed are evidence here.
+- Unchained checkpoints in a log written before update 1 are kept and read as before (one per
+  position, a second root for one a conflict); none is accepted from the wire.
 
 ---
 

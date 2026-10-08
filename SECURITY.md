@@ -139,9 +139,14 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   extension. Their objects are closed, with exactly seven category verdicts, lowercase UUID
   attesters and witnesses, a §5.8 room and the registered `role` and `method` grammars. No
   attestation is signed about a Legacy Import record, and none about a directed record leaves this
-  node (one received is kept, never relayed): an attestation would make it a confirmation oracle. A
-  conflicting checkpoint is relayed once, as evidence. An attester's scoped role is judged on the
-  record its assertion names. They describe a decision; they never change the receiver's own.
+  node (one received is kept, never relayed): an attestation would make it a confirmation oracle. An
+  attester's scoped role is judged on the record its assertion names. Checkpoints are chained (each
+  covers the segment since the previous one and commits to its root), so a node signs no root over
+  the part of its history it still holds, and one that lost its segment ends its chain visibly. Two
+  checkpoints from one attester whose ranges overlap, or that share a prev, are equivocation: the
+  conflicting copy is relayed once as evidence, and this node witnesses that attester no more. A
+  witness that contradicts the checkpoint held is refused and never counts against the attester (it
+  is only the witness's word). They describe a decision; they never change the receiver's own.
 - **Gated rooms on proven keys.** A gated room admits its owner by the owner's pinned key and a
   grantee when its room-join grant binds the key its session proved. A copied grant admits
   nobody. A grant is checked against its schema (closed, integer times, lowercase ids) before any
