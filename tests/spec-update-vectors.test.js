@@ -54,6 +54,23 @@ describe('control-encrypted-v2 (§7.1, §18.2.1)', () => {
   });
 });
 
+describe('one room grammar and one nodeId spelling, as every schema of the update states them', () => {
+  const { ROOM_RE } = require('../lib/core/room-id');
+  const UUID = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  it('the hello, a record, a sealed record, a grant, relay-auth and sym-attest all name a room by §5.8\'s pattern, which sym uses', () => {
+    const rooms = [
+      vendored('handshake.schema.json').$defs.nodeOffer.properties.room.pattern,
+      vendored('cmb.schema.json').properties.metadata.properties.room.pattern,
+      vendored('encrypted-cmb-frame.schema.json').properties.metadata.properties.room.pattern,
+      vendored('room-join.schema.json').$defs.grant.properties.room.pattern,
+      vendored('relay-frame.schema.json').$defs.auth.properties.room.pattern,
+      vendored('sym-attest-frame.schema.json').$defs.room.pattern,
+    ];
+    for (const r of rooms) assert.strictEqual(r, ROOM_RE.source);
+    assert.strictEqual(vendored('handshake.schema.json').$defs.nodeOffer.properties.nodeId.pattern, UUID, 'and the hello names its nodeId in the lowercase spelling sym requires');
+  });
+});
+
 describe('the reference construction (scripts/mmp/lib.mjs) and sym agree', () => {
   let L;
   before(async () => { L = await import(path.join(FIX, 'mmp-lib.mjs')); });

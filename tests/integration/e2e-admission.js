@@ -30,7 +30,9 @@ function bidirectionalPair() {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 describe('E2E Admission Attestation — gate attaches a signed verdict to the remix', () => {
-  it('an admitted directed CMB yields a valid attestation on B\'s stored remix', async () => {
+  // A room-bound record: since MMP 2.0 update 1 (sym-attest-v1 §5.1) no attestation is signed about a
+  // directed record, which would make the attestation a confirmation oracle on a one-to-one record.
+  it('an admitted room-bound CMB yields a valid attestation on B\'s stored remix; a directed one yields none', async () => {
     const aName = `e2e-adm-a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const bName = `e2e-adm-b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const A = new SymNode({ name: aName, silent: true, discovery: new NullDiscovery(), room: 'sym-bot-team' }); // same room as B (MMP §5.8: rooms do not exchange)
@@ -52,10 +54,10 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
         focus: 'e2e admission attestation', issue: 'gate must attach a signed verdict',
         intent: 'phase C', motivation: 'durable audit record', commitment: 'on the remix',
         perspective: 'A', mood: { text: 'procedural', valence: 0, arousal: 0 },
-      }, { to: B.nodeId });
+      });
 
       const admitted = await (async () => { for (let i = 0; i < 100 && !received; i++) await sleep(50); return !!received; })();
-      assert.ok(admitted, 'B must process and admit the directed CMB');
+      assert.ok(admitted, 'B must process and admit the room-bound CMB');
 
       // On the store entry, beside the record (§8.8.1: the record is exactly its two sections).
       const att = received.entry?.admission;
@@ -69,6 +71,15 @@ describe('E2E Admission Attestation — gate attaches a signed verdict to the re
       assert.strictEqual(att.seq, 1, 'first link in B\'s attester chain');
       assert.strictEqual(att.prev, 'genesis');
       assert.deepStrictEqual(verifyAttestation(att, B._identity.publicKey), { signed: true, valid: true }, 'signature verifies against B\'s identity key');
+
+      // A directed record is gated and delivered, and attested by nobody.
+      const directed = A.remember({
+        focus: 'e2e admission, directed', issue: 'no attestation about a one-to-one record',
+        intent: 'S3', motivation: 'no confirmation oracle', commitment: 'nothing signed',
+        perspective: 'A', mood: { text: 'procedural', valence: 0, arousal: 0 },
+      }, { to: B.nodeId });
+      await sleep(800);
+      assert.strictEqual(B.attestationsFor(directed.key).length, 0, 'no attestation about the directed record');
 
     } finally {
       await Promise.allSettled([A.stop(), B.stop()]);

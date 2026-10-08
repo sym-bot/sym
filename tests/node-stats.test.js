@@ -60,8 +60,10 @@ describe('node-stats — self-reported store tally', () => {
       const seen = [];
       node.on('node-stats', s => seen.push(s));
       const peer = admitAs(node, identity('research'));
-      // A self-asserted name and nodeId in the frame are not read: the session says who it is.
+      // The stats object is closed (sym-attest-frame.schema.json, MMP 2.0 update 1): a self-asserted
+      // name and nodeId make the frame malformed; the session says who sent it.
       deliver(node, peer, { type: 'sym-attest-node-stats', stats: { name: 'liar', nodeId: 'someone-else', emitted: 7, admitted: 65, memory: 158, at: 1 } });
+      deliver(node, peer, { type: 'sym-attest-node-stats', stats: { emitted: 7, admitted: 65, memory: 158, at: 1 } });
       deliver(node, peer, { type: 'sym-attest-node-stats', stats: { emitted: -1, admitted: 1, memory: 2, at: 1 } }); // malformed
       deliver(node, peer, { type: 'sym-attest-node-stats', stats: null });
       assert.strictEqual(seen.length, 1, 'only the well-formed stats surfaced');

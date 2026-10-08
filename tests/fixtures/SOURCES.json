@@ -78,6 +78,10 @@
     "sym-attest-v1.json": {
       "from": "conformance/v2/sym-attest-v1.json",
       "sha256": "3f5639e92f7f1bcb34bd88b16d35badfcef6c3f22ed6f170faa36f884b3fa369"
+    },
+    "handshake.schema.json": {
+      "from": "schema/handshake.schema.json",
+      "sha256": "69f257bdc5606c25e4a1ddef27a05b0f626a6302ded916f355b42f7e76f504cb"
     }
   }
 }

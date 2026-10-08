@@ -54,7 +54,7 @@ describe('E2E Admission Attestation gossip (D2)', () => {
       focus: 'attestation gossip e2e', issue: 'verify attestation reaches the author',
       intent: 'D2', motivation: 'cross-mesh audit trail', commitment: 'roster gossip',
       perspective: 'B', mood: { text: 'procedural', valence: 0, arousal: 0 },
-    }, { to: A.nodeId });
+    }); // room-bound: no attestation about a directed record is sent (sym-attest-v1 §5.1, MMP 2.0 update 1)
     const K = entry.key;
 
     const arrived = await (async () => { for (let i = 0; i < 100; i++) { await sleep(50); if (B.attestationsFor(K).length) return true; } return false; })();

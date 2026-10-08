@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/handshake.schema.json",
+  "title": "MMP v2.0 authenticated handshake frames",
+  "oneOf": [
+    { "$ref": "#/$defs/clientHello" },
+    { "$ref": "#/$defs/serverHello" },
+    { "$ref": "#/$defs/clientFinish" }
+  ],
+  "$defs": {
+    "nodeOffer": {
+      "type": "object",
+      "required": [
+        "protocolVersion", "room", "nodeId", "name", "identityPublicKey",
+        "e2ePublicKey", "nonce", "implementation", "extensions"
+      ],
+      "properties": {
+        "protocolVersion": { "const": "2.0" },
+        "room": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$" },
+        "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "identityPublicKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "e2ePublicKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "implementation": {
+          "type": "object",
+          "required": ["name", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" }
+        }
+      }
+    },
+    "clientHello": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeOffer" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "client-hello" },
+            "protocolVersion": true,
+            "room": true,
+            "nodeId": true,
+            "name": true,
+            "identityPublicKey": true,
+            "e2ePublicKey": true,
+            "nonce": true,
+            "implementation": true,
+            "extensions": true
+          }
+        }
+      ]
+    },
+    "serverHello": {
+      "allOf": [
+        { "$ref": "#/$defs/nodeOffer" },
+        {
+          "type": "object",
+          "required": ["type", "clientNonce", "selectedExtensions", "proof", "keyConfirmation"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "server-hello" },
+            "protocolVersion": true,
+            "room": true,
+            "nodeId": true,
+            "name": true,
+            "identityPublicKey": true,
+            "e2ePublicKey": true,
+            "nonce": true,
+            "implementation": true,
+            "extensions": true,
+            "clientNonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+            "selectedExtensions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" }
+            },
+            "proof": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" },
+            "keyConfirmation": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+          }
+        }
+      ]
+    },
+    "clientFinish": {
+      "type": "object",
+      "required": ["type", "transcriptHash", "proof", "keyConfirmation"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "client-finish" },
+        "transcriptHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "proof": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" },
+        "keyConfirmation": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" }
+      }
+    }
+  }
+}
