@@ -181,9 +181,13 @@ session with a sealed 1010. What sym chooses:
   logs before anything that depends on them is gossiped (appended, not fsynced). A node that no
   longer holds its segment ends its chain and signs no further checkpoint until its state changes.
 - Only two conflicting checkpoints the attester signed are equivocation evidence (a witness is not
-  attester-signed). A verified witness that names another range or root than the attester-signed
-  checkpoint held at its position counts against the witness: it is refused (`disagrees`), said once,
-  and that witness's further witnesses are dropped unverified for 10 minutes (`witness-muted`).
+  attester-signed). A verified witness that names the range of an attester-signed checkpoint held,
+  with another root, counts against the witness: it is refused (`disagrees`), said once, and that
+  witness's further witnesses are dropped unverified for 10 minutes (`witness-muted`). One that
+  overlaps a held checkpoint without matching it is a lead: refused and said (`witness-lead`), no more.
+- §6's order: sym drops a duplicate (step 4) and applies the prev link (step 5) before it checks the
+  signature's spelling (step 3); all three discard the frame with no state changed, so only the
+  reason a refusal names differs.
 - Unchained checkpoints in a log written before update 1 are kept and read as before (one per
   position, a second root for one a conflict); none is accepted from the wire.
 

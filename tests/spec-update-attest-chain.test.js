@@ -97,6 +97,23 @@ describe('the sym-attest-v1 vector: the four signed constructions and the chaine
     }
   });
 
+  it('witness leads: never equivocation evidence; evidence against the witness only for a held range with another root', () => {
+    for (const c of V.witnessLeads) {
+      const st = new AttestationStore({});
+      for (const h of c.held) assert.strictEqual(st.recordCheckpoint(store(h)).stored, true);
+      const w = core.fromWireWitness(c.witness);
+      assert.strictEqual(core.witnessPayload(w).toString('hex'), c.payloadHex, c.label);
+      assert.strictEqual(core.verifyWitness(w, KEY.witness).valid, true);
+      const a = st.witnessAssessment(w);
+      const ours = { equivocationEvidence: a.equivocationEvidence, lead: a.lead, evidenceAgainstWitness: a.evidenceAgainstWitness };
+      assert.deepStrictEqual(ours, c.expected, c.label);
+      assert.deepStrictEqual(ours, L.attestWitnessAssessment(c.witness, c.held));
+      const r = st.recordWitness(w);
+      assert.strictEqual(r.reason, c.expected.evidenceAgainstWitness ? 'disagrees' : 'lead');
+      assert.strictEqual(st.attesterEquivocated(c.witness.attester), false);
+    }
+  });
+
   it('link checks: malformed, not evidence', () => {
     for (const c of V.linkChecks) {
       // A reversed range is refused at the wire already; the rule is checked on the raw shape too.
@@ -132,13 +149,16 @@ describe('the store holds one chain per attester (§5.2)', () => {
     assert.strictEqual(st.recordCheckpoint(store(c.checkpoint)).reason, 'malformed-link');
     assert.strictEqual(st.attesterEquivocated(c.prev.by), false);
   });
-  it('a witness naming another range or root than the checkpoint held is refused, and never frames the attester', () => {
+  it('a witness naming another range (a lead) or another root (against the witness) than the checkpoint held is refused, and never frames the attester', () => {
     const st = s();
     for (const x of V.checkpoints) st.recordCheckpoint(store(x.checkpoint));
     const w = core.fromWireWitness(V.witness.witness);
     assert.strictEqual(st.recordWitness(w).stored, true);
-    const other = { ...w, by: '018f47a0-7b21-7abc-8def-a77e57000003', from_seq: 5, sig: w.sig.replace(/^./, (ch) => (ch === 'A' ? 'B' : 'A')) };
-    assert.strictEqual(st.recordWitness(other).reason, 'disagrees');
+    const respell = (ch) => (ch === 'A' ? 'B' : 'A');
+    const otherRange = { ...w, by: '018f47a0-7b21-7abc-8def-a77e57000003', from_seq: 5, sig: w.sig.replace(/^./, respell) };
+    assert.strictEqual(st.recordWitness(otherRange).reason, 'lead', 'another range overlapping the held one: a lead');
+    const otherRoot = { ...w, by: '018f47a0-7b21-7abc-8def-a77e57000004', root: 'f'.repeat(64), sig: w.sig.replace(/^./, respell) };
+    assert.strictEqual(st.recordWitness(otherRoot).reason, 'disagrees', 'the held range with another root: against the witness');
     assert.strictEqual(st.attesterEquivocated(w.attester), false);
   });
 });

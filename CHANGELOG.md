@@ -195,8 +195,8 @@ sym-attest-v1 pass case by case, and every frame sym builds validates against th
   unverified. The link checks (a reversed range, a checkpoint that does not follow the one its prev
   names) refuse a checkpoint as malformed before any signature work: the range at the schema step, the
   prev link after the duplicate drop. Only attester-signed checkpoints are evidence: a witness that
-  names another range or root than the attester's checkpoint held counts against the witness, which
-  is refused and muted for 10 minutes.
+  names a held checkpoint's range with another root counts against the witness, which is refused and
+  muted for 10 minutes; one that overlaps a held checkpoint without matching it is a lead, refused.
   Logs written before this hold unchained checkpoints, which are kept and read as before.
 - **Echoes (#35, D3).** A record citing this node's own records is verified, gated, stored and
   delivered like any other: the ingest echo skip is gone, and the anti-echo rule sits at the remix

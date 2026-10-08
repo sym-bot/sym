@@ -618,6 +618,120 @@
       }
     }
   ],
+  "witnessLeads": [
+    {
+      "label": "a witness over a range no attester-signed checkpoint has (2..4, against held 1..1, 2..3 and 4..6): a lead, never equivocation evidence",
+      "witness": {
+        "attester": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 4,
+        "root": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000002",
+        "role": "participant",
+        "at": 1786611608000,
+        "sigAlg": "ed25519",
+        "sig": "GNyXnrF4WqCauWbm8uLGsiu1n-0M7UPp7lfM0otKKZ0phgKzAEKJ0AkJY3mVkb4FGMlIKRSQgzHdwZcNZkMGBg"
+      },
+      "payloadHex": "6d6d702d6174746573742d7769746e6573732d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a32313a3436343a6630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663033363a30313866343761302d376232312d376162632d386465662d61373765353730303030303231313a7061727469636970616e7431333a31373836363131363038303030",
+      "held": [
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 1,
+          "uptoSeq": 1,
+          "prev": "genesis",
+          "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+          "at": 1786611601500,
+          "sigAlg": "ed25519",
+          "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+        },
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 2,
+          "uptoSeq": 3,
+          "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+          "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+          "at": 1786611603500,
+          "sigAlg": "ed25519",
+          "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+        },
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 4,
+          "uptoSeq": 6,
+          "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+          "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+          "at": 1786611606500,
+          "sigAlg": "ed25519",
+          "sig": "xV47BgwYlhtTL-4UzIhJb3GRlGtMJyDnScpiaKG-AyCymUUyTUHuWJrUjJVcXUZkglZALlpErekwnGsqwOQUAA"
+        }
+      ],
+      "expected": {
+        "equivocationEvidence": false,
+        "lead": true,
+        "evidenceAgainstWitness": false
+      }
+    },
+    {
+      "label": "a witness naming a held checkpoint's range with another root: evidence against the witness, not the attester",
+      "witness": {
+        "attester": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "root": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000002",
+        "role": "participant",
+        "at": 1786611608500,
+        "sigAlg": "ed25519",
+        "sig": "IozTfYxNqXooDZUQQ-yTQaGZ_wJnOSUsEflaQSLZaa9NlMe7-X8FQ0xSRi-LWjB8jYCnLlEc3sMNXQdZaP_RDQ"
+      },
+      "payloadHex": "6d6d702d6174746573742d7769746e6573732d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a34313a3636343a3066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306630663066306633363a30313866343761302d376232312d376162632d386465662d61373765353730303030303231313a7061727469636970616e7431333a31373836363131363038353030",
+      "held": [
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 1,
+          "uptoSeq": 1,
+          "prev": "genesis",
+          "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+          "at": 1786611601500,
+          "sigAlg": "ed25519",
+          "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+        },
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 2,
+          "uptoSeq": 3,
+          "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+          "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+          "at": 1786611603500,
+          "sigAlg": "ed25519",
+          "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+        },
+        {
+          "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+          "room": "team-room",
+          "fromSeq": 4,
+          "uptoSeq": 6,
+          "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+          "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+          "at": 1786611606500,
+          "sigAlg": "ed25519",
+          "sig": "xV47BgwYlhtTL-4UzIhJb3GRlGtMJyDnScpiaKG-AyCymUUyTUHuWJrUjJVcXUZkglZALlpErekwnGsqwOQUAA"
+        }
+      ],
+      "expected": {
+        "equivocationEvidence": false,
+        "lead": true,
+        "evidenceAgainstWitness": true
+      }
+    }
+  ],
   "linkChecks": [
     {
       "label": "a checkpoint whose prev is held but which does not start right after it: malformed, not evidence",
@@ -648,7 +762,7 @@
       }
     },
     {
-      "label": "a reversed range: refused",
+      "label": "a reversed range, signed over its own fields: refused by the rule, not the signature",
       "checkpoint": {
         "by": "018f47a0-7b21-7abc-8def-a77e57000001",
         "room": "team-room",
@@ -658,7 +772,7 @@
         "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
         "at": 1786611603500,
         "sigAlg": "ed25519",
-        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+        "sig": "Lbbh326KY3AqjLAexr1FmomT0bO3wHsxZceHRcp_1iT98n4rXdPftOc0n7ZMZe4U0SazT8481hE4LQekWHujDg"
       },
       "prev": {
         "by": "018f47a0-7b21-7abc-8def-a77e57000001",

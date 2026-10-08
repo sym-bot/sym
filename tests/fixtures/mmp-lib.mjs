@@ -936,3 +936,15 @@ export function attestCheckpointLinkValid(cp, prevCheckpoint = null) {
   if (prevCheckpoint && prevCheckpoint.root === cp.prev && cp.fromSeq !== prevCheckpoint.uptoSeq + 1) return false;
   return true;
 }
+
+// §5.3: what a witness can show. A witness is not signed by the attester, so it is never equivocation
+// evidence against the attester (only two conflicting attester-signed checkpoints are, §5.2). One that
+// overlaps a held checkpoint without matching it is a lead; one that names the range of a held
+// attester-signed checkpoint with a different root is evidence against the witness.
+export function attestWitnessAssessment(w, heldCheckpoints) {
+  const mine = heldCheckpoints.filter((cp) => cp.by === w.attester);
+  const overlapsUnlike = mine.some((cp) => cp.fromSeq <= w.uptoSeq && w.fromSeq <= cp.uptoSeq
+    && !(cp.fromSeq === w.fromSeq && cp.uptoSeq === w.uptoSeq && cp.root === w.root));
+  const againstWitness = mine.some((cp) => cp.fromSeq === w.fromSeq && cp.uptoSeq === w.uptoSeq && cp.root !== w.root);
+  return { equivocationEvidence: false, lead: overlapsUnlike, evidenceAgainstWitness: againstWitness };
+}

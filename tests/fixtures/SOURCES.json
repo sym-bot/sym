@@ -1,6 +1,6 @@
 {
-  "note": "MMP v2.0 conformance artifacts vendored for sym's tests, copied unchanged. Every file comes from sym-bot/meshcognition-website PR #43, branch spec/mmp-2.0-update-1 at 5417176 (MMP 2.0 update 1, with its verification fixes: the corrected chained checkpoint and the sym-attest-v1 draft vector among them), not yet merged to main. authority-v2.json, authority-frame.schema.json and ed25519-strict-v2.json are unchanged since df79e04. The sha256 values equal 5417176's public/spec/mmp/artifact-manifest.json; mmp-lib.mjs is scripts/mmp/lib.mjs at 5417176, the reference construction, which the manifest does not list. The tests that read a file check its digest first.",
-  "source": "https://github.com/sym-bot/meshcognition-website/tree/5417176/public/spec/mmp",
+  "note": "MMP v2.0 conformance artifacts vendored for sym's tests, copied unchanged. Every file comes from sym-bot/meshcognition-website PR #43, branch spec/mmp-2.0-update-1 at 0ab7b76 (MMP 2.0 update 1, with its verification fixes, rounds 1 and 2: the chained checkpoint, the sym-attest-v1 draft vector and its witness leads among them), not yet merged to main. authority-v2.json, authority-frame.schema.json and ed25519-strict-v2.json are unchanged since df79e04. The sha256 values equal 0ab7b76's public/spec/mmp/artifact-manifest.json; mmp-lib.mjs is scripts/mmp/lib.mjs at 0ab7b76, the reference construction, which the manifest does not list. The tests that read a file check its digest first.",
+  "source": "https://github.com/sym-bot/meshcognition-website/tree/0ab7b76/public/spec/mmp",
   "files": {
     "authority-v2.json": {
       "from": "conformance/v2/authority-v2.json",
@@ -68,8 +68,8 @@
     },
     "mmp-lib.mjs": {
       "from": "scripts/mmp/lib.mjs (repository root)",
-      "sha256": "020d09dfbfb2ec1b0446c065a9dd3824692216bd6be75b9721a7a3cd5b6ba148",
-      "note": "the reference construction (scripts/mmp/lib.mjs at 5417176); not a published artifact, so not in the manifest"
+      "sha256": "3c0dcc02a7add945eaa3e4f65d20d130b8bd0012de5e0efa711dfcbae859873f",
+      "note": "the reference construction (scripts/mmp/lib.mjs at 0ab7b76); not a published artifact, so not in the manifest"
     },
     "application.schema.json": {
       "from": "schema/application.schema.json",
@@ -77,7 +77,7 @@
     },
     "sym-attest-v1.json": {
       "from": "conformance/v2/sym-attest-v1.json",
-      "sha256": "934db3407e951377a4e08e2d32b23ef3a66d4220d313bb0cf1d4552bf5e6226d"
+      "sha256": "3f5639e92f7f1bcb34bd88b16d35badfcef6c3f22ed6f170faa36f884b3fa369"
     }
   }
 }
