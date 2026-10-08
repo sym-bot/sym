@@ -35,13 +35,8 @@ describe('record-projection-v2: the canonical signed projection (#34, D2)', () =
     it(c.label, () => {
       if (c.expected.accepted) {
         const p = canonicalRecordV2_0(c.record);
-        // HELD (coordinator, 2026-10-08): the vector holds an absent application as null (#34), a rule
-        // under review that sym does not apply yet. Exactly that member is the difference: sym's
-        // projection with it added is the vector's, byte for byte. Remove `held` when the ruling lands.
-        assert.strictEqual(p.metadata.application, undefined, 'the held rule: no application member');
-        const held = { categories: p.categories, metadata: { ...p.metadata, application: null } };
-        assert.deepStrictEqual(held, c.expected.projection);
-        assert.strictEqual(crypto.createHash('sha256').update(canonicalJSON(held), 'utf8').digest('hex'), c.expected.projectionSha256, 'the same RFC 8785 bytes');
+        assert.deepStrictEqual(p, c.expected.projection);
+        assert.strictEqual(crypto.createHash('sha256').update(canonicalJSON(p), 'utf8').digest('hex'), c.expected.projectionSha256, 'the same RFC 8785 bytes');
         assert.strictEqual(verifyCMB(p, key).valid, true, 'the projection verifies');
         assert.strictEqual(verifyCMB(c.record, key).valid, true, 'and so does the record as given');
       } else {
@@ -80,15 +75,41 @@ describe('record-projection-v2: the canonical signed projection (#34, D2)', () =
   });
 });
 
+describe('rooms, application.schema and the application member on receipt (MMP 2.0 update 1)', () => {
+  const v = vendored('record-projection-v2.json');
+  const base = () => JSON.parse(JSON.stringify(v.cases[0].record));
+  it('a record whose room is not a §5.8 identifier is refused', () => {
+    for (const room of ['Conformance-Room', 'cafe\u0301', 'caf\u00e9', 'x'.repeat(65), 'a b']) {
+      const r = base(); r.metadata.room = room;
+      assert.throws(() => canonicalRecordV2_0(r), (e) => e.reason === 'room is not a §5.8 room identifier', room);
+    }
+  });
+  it('an application whose schema is not NFC is refused; an absent application is held as null', () => {
+    const r = base();
+    r.metadata.application = { mediaType: 'application/json', schema: 'https://example.org/cafe\u0301', encoding: 'base64url', byteLength: 0, digest: `sha256-${crypto.createHash('sha256').update('').digest('hex')}`, data: '' };
+    assert.throws(() => canonicalRecordV2_0(r), (e) => e.reason === 'application schema is not NFC');
+    const absent = base(); delete absent.metadata.application;
+    assert.strictEqual(canonicalRecordV2_0(absent).metadata.application, null);
+  });
+  it('a sealed record carries metadata.application, as encrypted-cmb-frame.schema.json requires', () => {
+    const { buildEncryptedFrame } = require('../lib/core/cmb-encrypted-frame');
+    const p = canonicalRecordV2_0(base());
+    const f = buildEncryptedFrame({ cmb: p, applicationBytes: null, sessionId: 'a'.repeat(32), direction: 'client-to-server', sequence: '0', trafficKey: crypto.randomBytes(32) });
+    assert.ok(Object.prototype.hasOwnProperty.call(f.metadata, 'application'));
+    assert.strictEqual(f.metadata.application, null);
+  });
+});
+
 describe('a node mints the canonical projection (D2)', () => {
   const cats = (focus) => Object.fromEntries(CAT7_CATEGORIES.map((f) => [f, f === 'focus' ? focus : (f === 'mood' ? { text: 'calm' } : `${f} text`)]));
   const P = (b) => `cmb-${b.repeat(64)}`;
   it('NFC text, createdBy and room; parents a sorted set; no parents is no lineage', () => {
     const nfd = 'café'; // "café" in NFD
-    const r = createCMB({ categories: cats(nfd), createdBy: `zoë`, room: `róom`, lineage: { parents: [P('f'), P('0'), P('f')], method: 'SVAF-v2' }, categoryParents: { issue: ['z', 'a', 'z'] } });
-    assert.strictEqual(r.categories.focus.text, nfd.normalize('NFC'));
-    assert.strictEqual(r.metadata.createdBy, 'zoë');
-    assert.strictEqual(r.metadata.room, 'róom'.normalize('NFC'));
+    const r = createCMB({ categories: cats(nfd), createdBy: "zoe\u0308", room: "acme.prod", lineage: { parents: [P("f"), P("0"), P("f")], method: "SVAF-v2" }, categoryParents: { issue: ["z", "a", "z"] }, emitV2: true, createdByNodeId: crypto.randomUUID(), application: { mediaType: "application/json", schema: "https://example.org/cafe\u0301", encoding: "base64url", byteLength: 0, digest: `sha256-${crypto.createHash("sha256").update("").digest("hex")}`, data: "" } });
+    assert.strictEqual(r.categories.focus.text, nfd.normalize("NFC"));
+    assert.strictEqual(r.metadata.createdBy, "zo\u00eb");
+    assert.strictEqual(r.metadata.application.schema, "https://example.org/caf\u00e9", "application.schema minted NFC");
+    assert.throws(() => createCMB({ categories: cats("x"), createdBy: "a", room: "ro\u0301om" }), /§5\.8 room identifier/, "a room outside §5.8 is never minted");
     assert.deepStrictEqual(r.metadata.lineage.parents, [P('0'), P('f')]);
     assert.deepStrictEqual(r.categories.issue.meta.parents, ['a', 'z']);
     assert.strictEqual(createCMB({ categories: cats('x'), createdBy: 'a', lineage: { parents: [] } }).metadata.lineage, null);
@@ -101,11 +122,8 @@ describe('a node mints the canonical projection (D2)', () => {
     r.metadata.assertionId = assertionIdV2_0(r);
     signCMB(r, privateKey.export({ format: 'jwk' }).d);
     const p = canonicalRecordV2_0(r);
-    // The minted record carries application: null; the held #34 rule is not applied, so the
-    // projection drops it (see record-projection-v2 above).
-    const { application, ...metadata } = r.metadata;
-    assert.strictEqual(application, null);
-    assert.strictEqual(canonicalJSON(p), canonicalJSON({ categories: Object.fromEntries(CAT7_CATEGORIES.map((f) => [f, { text: r.categories[f].text, meta: r.categories[f].meta }])), metadata: { ...metadata, lineage: { parents: r.metadata.lineage.parents } } }));
+    assert.strictEqual(r.metadata.application, null);
+    assert.strictEqual(canonicalJSON(p), canonicalJSON({ categories: Object.fromEntries(CAT7_CATEGORIES.map((f) => [f, { text: r.categories[f].text, meta: r.categories[f].meta }])), metadata: { ...r.metadata, lineage: { parents: r.metadata.lineage.parents } } }));
     assert.strictEqual(verifyCMB(p, publicKey.export({ format: 'jwk' }).x).valid, true);
   });
 });

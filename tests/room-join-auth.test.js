@@ -55,7 +55,7 @@ describe('room ownability — derived from the mapping, not a hardcoded list', (
   });
 
   it('an invalid room name is not ownable', () => {
-    for (const bad of ['UPPER', 'has space', '-leading', 'a---b', '']) {
+    for (const bad of ['UPPER', 'has space', 'café', 'x'.repeat(65), '']) {
       assert.strictEqual(isOwnableRoom(bad), false, bad);
     }
   });

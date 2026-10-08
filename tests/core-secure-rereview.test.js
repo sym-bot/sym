@@ -240,21 +240,19 @@ describe('leads', () => {
     assert.throws(() => canonicalRecordV2_0(absent), /to is not a lowercase UUID or null/);
   });
 
-  it('a signed attestation, checkpoint or witness whose room is spelled in another Unicode form is compared in NFC', async () => {
-    const b = mk('nfc-b', { room: 'café' });
+  it('a room is a §5.8 identifier, so no two Unicode spellings of one room exist (MMP 2.0 update 1)', async () => {
+    // Until update 1 a room could be any text, compared in NFC; now it is [a-z0-9._-], 1 to 64
+    // characters, everywhere it is named, and ASCII has one spelling.
+    assert.throws(() => mk('nfc-b', { room: 'cafe\u0301' }), (e) => e.code === 'EBADROOM');
+    assert.throws(() => mk('nfc-c', { room: 'café' }), (e) => e.code === 'EBADROOM');
+    const b = mk('nfc-d', { room: 'cafe.prod_1' });
     try {
       await b.start();
       const X = identity('x');
       const sX = admitAs(b, X);
       b._roster.bind(X.nodeId, X.publicKey, 'pinned');
-      const decomposed = 'café';
-      assert.notStrictEqual(decomposed, b._room);
-      const att = signedAs({ of: `cmb-${hex()}`, by: X.nodeId, at: Date.now(), roster: decomposed, verdict: 'aligned', categories: CATS7, seq: 1, prev: 'genesis' }, X.privateKey, signAttestation);
+      const att = signedAs({ of: `cmb-${hex()}`, by: X.nodeId, at: Date.now(), roster: b._room, verdict: 'aligned', categories: CATS7, seq: 1, prev: 'genesis' }, X.privateKey, signAttestation);
       assert.notStrictEqual(b._ingestAttestation(att, X.nodeId, X.name, sX).reason, 'roster-mismatch');
-      const cp = signedAs({ by: X.nodeId, upto_seq: 1, root: hex(), at: Date.now(), roster: decomposed }, X.privateKey, signCheckpoint);
-      assert.notStrictEqual(b._ingestCheckpoint(cp, X.nodeId, sX).reason, 'roster-mismatch');
-      const w = signedAs({ attester: X.nodeId, upto_seq: 2, root: hex(), by: X.nodeId, role: 'participant', at: Date.now(), roster: decomposed }, X.privateKey, signWitness);
-      assert.notStrictEqual(b._ingestWitness(w, X.nodeId, sX).reason, 'roster-mismatch');
       assert.strictEqual(b._ingestAttestation({ ...att, sig: att.sig, roster: 'another-room' }, X.nodeId, X.name, sX).reason, 'roster-mismatch', 'another room is still refused');
     } finally { await stopAll(b); }
   });

@@ -32,16 +32,21 @@ describe('mesh rooms', () => {
     });
   });
 
-  describe('isValidRoom', () => {
-    it('accepts "default" and kebab-case', () => {
-      for (const g of ['default', 'acme', 'backend-team', 'a1', 'home-office-2']) {
+  describe('isValidRoom: the §5.8 room identifier (MMP 2.0 update 1)', () => {
+    it('accepts "default" and every [a-z0-9._-] name of 1 to 64 characters, dotted and underscored included', () => {
+      for (const g of ['default', 'acme', 'backend-team', 'a1', 'home-office-2', 'acme.prod', 'research.lab', 'backend_team', '-leading', 'trailing-', 'a---b', 'x'.repeat(64)]) {
         assert.ok(isValidRoom(g), `${g} should be valid`);
       }
     });
-    it('rejects non-kebab / unsafe names', () => {
-      for (const g of ['Backend_Team', 'has space', 'UPPER', '-leading', 'trailing-', 'a---b', 'a--', '--b', '', null, undefined]) {
+    it('rejects anything else, and sym (it aliases default on a per-room service type)', () => {
+      for (const g of ['Backend_Team', 'has space', 'UPPER', 'café', 'x'.repeat(65), '', null, undefined, 'sym']) {
         assert.strictEqual(isValidRoom(g), false, `${g} should be invalid`);
       }
+    });
+    it('a legacy per-room service type exists only where it is a valid RFC 6335 service name', () => {
+      const { legacyServiceType } = require('../lib/core/room-id');
+      assert.strictEqual(legacyServiceType('backend-team'), '_backend-team._tcp');
+      for (const g of ['default', 'acme.prod', 'backend_team', 'a--b', '-lead', 'trail-', '1234', 'sixteen-chars-xx']) assert.strictEqual(legacyServiceType(g), null, g);
     });
   });
 

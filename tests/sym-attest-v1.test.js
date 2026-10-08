@@ -85,13 +85,15 @@ describe('the signed constructions (sym-attest-v1 §5)', () => {
 
 describe('the wire form (sym-attest-v1 §5, §6 step 1)', () => {
   it('toWire uses the extension\'s names; fromWire takes only a well-formed frame', () => {
-    const a = core.signAttestation(att(), A.privateKey);
+    // On the wire a room is a §5.8 identifier (sym-attest-frame.schema.json, MMP 2.0 update 1).
+    const a = core.signAttestation({ ...att(), roster: 'room-e' }, A.privateKey);
     const w = core.toWireAttestation(a);
+    assert.strictEqual(core.fromWireAttestation(core.toWireAttestation(core.signAttestation(att(), A.privateKey))), null, 'a room outside §5.8 is refused');
     assert.deepStrictEqual(Object.keys(w).sort(), ['assertionId', 'at', 'by', 'categories', 'method', 'of', 'prev', 'role', 'room', 'seq', 'sig', 'sigAlg', 'verdict']);
-    assert.strictEqual(w.room, 'room-é');
+    assert.strictEqual(w.room, 'room-e');
     assert.strictEqual(core.verifyAttestation(core.fromWireAttestation(w), A.publicKey).valid, true, 'round trip verifies');
     const bad = [
-      { ...w, assertionId: undefined }, { ...w, of: 'cmb-1' }, { ...w, room: undefined, roster: 'room-é' },
+      { ...w, assertionId: undefined }, { ...w, of: 'cmb-1' }, { ...w, room: undefined, roster: 'room-e' },
       { ...w, method: { toString: 1 } }, { ...w, verdict: 'maybe' }, { ...w, categories: { ...CATS, focus: 'stable' } },
       { ...w, categories: { focus: 'admit' } }, { ...w, categories: { ...CATS, extra: 'admit' } }, { ...w, role: 2 },
       { ...w, seq: 1, prev: hex('c') }, { ...w, seq: 2, prev: 'genesis' }, { ...w, seq: 0 }, { ...w, sig: `${w.sig}=` }, { ...w, sigAlg: 'rsa' },

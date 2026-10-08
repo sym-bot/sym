@@ -554,10 +554,8 @@ describe('F. errors are information (cs-review-A/relay-errors, relay-failed-reha
     assert.ok(parseInvite(url).error, 'an invite');
   });
 
-  it('rooms compare in NFC', () => {
-    const nfd = 'café'; const nfc = 'café';
-    const n = mk('nfc', { room: nfd });
-    try { assert.strictEqual(n._room, nfc, 'kept and announced in NFC'); } finally { n.stop().catch(() => {}); }
+  it('a room has one spelling: a §5.8 identifier, refused otherwise (was: compared in NFC; MMP 2.0 update 1)', () => {
+    for (const room of ['cafe\u0301', 'caf\u00e9']) assert.throws(() => mk('nfc', { room }), (e) => e.code === 'EBADROOM', room);
   });
 });
 

@@ -83,8 +83,7 @@ describe('the reference construction (scripts/mmp/lib.mjs) and sym agree', () =>
       const ref = L.recordProjectionV2(c.record);
       assert.strictEqual(ref.ok, true);
       const p = canonicalRecordV2_0(c.record);
-      // HELD (#34 application-as-null, under review): see tests/spec-update-records.test.js.
-      assert.strictEqual(canonicalJSON({ categories: p.categories, metadata: { ...p.metadata, application: p.metadata.application ?? null } }), canonicalJSON(ref.projection), c.label);
+      assert.strictEqual(canonicalJSON(p), canonicalJSON(ref.projection), c.label);
     }
   });
 
