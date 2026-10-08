@@ -71,6 +71,23 @@ describe('§18.3.2: the forgeries this file uses are accepted by crypto.verify, 
   });
 });
 
+describe('§18.3.2: the pre-checks stand on their own', () => {
+  it('with crypto.verify accepting everything, every vector case a pre-check rejects is still rejected', () => {
+    const ed = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'ed25519-strict-v2.json'), 'utf8'));
+    const real = crypto.verify;
+    crypto.verify = () => true; // what OpenSSL would say is no part of rules 1 to 4
+    try {
+      for (const c of ed.cases) {
+        const got = verifyStrict(Buffer.from(c.messageHex, 'hex'), Buffer.from(c.publicKeyHex, 'hex'), Buffer.from(c.signatureHex, 'hex'));
+        // R's order is judged by the equation (§18.3.2, informative), so only R's identity encoding
+        // and rules 1, 2 and 4 are pre-checks here.
+        const prechecked = c.precheckFailure && !(c.precheckFailure.startsWith('R ') && c.signatureHex.slice(0, 64) !== '01' + '0'.repeat(62));
+        if (prechecked) assert.strictEqual(got, false, `${c.label}: ${c.precheckFailure}`);
+      }
+    } finally { crypto.verify = real; }
+  });
+});
+
 describe('§18.3.2 at every verification site in sym', () => {
   const id = identity('signer');
   /** Each site: an honest signed object, its signed bytes, and the verdict function. */

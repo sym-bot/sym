@@ -104,9 +104,12 @@ describe('relay sessions (D2)', () => {
   });
 
   it('frame loss leads to a re-handshake, and records flow again', async () => {
+    // The relay drops one sealed control frame from a to b: the first mood, not a greeting frame still
+    // in flight the other way (that left nothing to follow it, so no gap and no re-handshake).
     let dropOne = false;
-    const relay = fakeRelay({ tap: (e) => { if (dropOne && e.payload.type === 'control-encrypted') { dropOne = false; return false; } return undefined; } });
-    const a = relayNode('rs-a', relay); const b = relayNode('rs-b', relay);
+    let a = null;
+    const relay = fakeRelay({ tap: (e) => { if (dropOne && a && e.from === a.nodeId && e.payload.type === 'control-encrypted') { dropOne = false; return false; } return undefined; } });
+    a = relayNode('rs-a', relay); const b = relayNode('rs-b', relay);
     try {
       await a.start(); await b.start();
       await until(() => paired(a, b), 8000);
