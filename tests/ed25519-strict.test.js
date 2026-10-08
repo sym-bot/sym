@@ -201,10 +201,11 @@ describe('the key cache keeps keys that keep being used (release review L5)', ()
     try {
       const k = () => identity('c').publicKey;
       const pinned = k(); isPrimeOrderKey(pinned, { keep: true });
-      const used = k(); isPrimeOrderKey(used);
       const others = [k(), k(), k()];
-      for (const o of others) isPrimeOrderKey(o);
-      isPrimeOrderKey(used); // used again: most recent
+      const used = k();
+      // The cache holds others[0], used, others[1], others[2]: used is not the oldest when it is used again.
+      isPrimeOrderKey(others[0]); isPrimeOrderKey(used); isPrimeOrderKey(others[1]); isPrimeOrderKey(others[2]);
+      isPrimeOrderKey(used); // used again: now the most recent
       const fresh = [k(), k()];
       for (const f of fresh) isPrimeOrderKey(f); // a small flood
       assert.strictEqual(isKeyKnown(used), true, 'the key in use stays');

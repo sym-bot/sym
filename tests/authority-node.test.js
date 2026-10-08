@@ -488,6 +488,75 @@ describe('§6.6.8: the asking rule bounds what a session can make this node veri
   });
 });
 
+describe('§6.6.8: the asking rule, exactly', () => {
+  it('a pull of valid statements under fresh keys is paced by the lane: the work done never runs ahead of what the lane has paid', async () => {
+    try {
+      const { _setKeyCacheMax } = require('../lib/core/ed25519');
+      const N = 320; // five pages of statements that each cost 1 check + 16 for a fresh subject key
+      const statements = Array.from({ length: N }, () => grant('anchor', party(), 'participant'));
+      const M = node('pace-m'); const X = node('pace-x');
+      for (const st of statements) M._authority.ingest(st);
+      M._authoritySettle();
+      // M checked every subject key, and the two nodes share this process's key cache: forget them, so
+      // to X they are the fresh keys they would be on another host. (The pinned keys are kept.)
+      const was = _setKeyCacheMax(0); _setKeyCacheMax(was);
+      await M.start(); await X.start();
+      const t0 = Date.now();
+      let worst = 0;
+      const watch = setInterval(() => {
+        const t = (Date.now() - t0) / 1000;
+        const done = X.authorityStatus().stats.held * 17;
+        const paid = 100 + 2000 * t + 2112; // the new lane, what it earns, one reservation in hand
+        worst = Math.max(worst, done - paid);
+      }, 10);
+      await connectNodes(X, M);
+      await until(() => X.authorityStatus().stats.held >= N, 15000);
+      clearInterval(watch);
+      assert.strictEqual(X.authorityStatus().stats.held, N, 'everything arrived');
+      assert.ok(worst <= 0, `the work ran ahead of the lane by ${worst} checks`);
+      const secs = (Date.now() - t0) / 1000;
+      assert.ok(secs >= (N * 17 - 100 - 2112) / 2000 - 0.5, `and took the time the lane needs (${secs.toFixed(1)} s)`);
+    } finally { await stopAll(); }
+  });
+
+  it('one ask in flight per session: a pending statement\'s fetch waits for the pull page out', async () => {
+    try {
+      const N2 = node('one-ask', { gossipBudget: { newLane: 1e6, burst: 1e6 } });
+      const s = admitAs(N2, identity('one-ask-peer'));
+      N2._sessions.add(s);
+      deliver(N2, s, { type: 'authority-digest', root: 'd'.repeat(64), count: 1 });
+      const asks = () => s.sent.filter((f) => f.type === 'authority-fetch');
+      assert.strictEqual(asks().length, 1);
+      assert.strictEqual(asks()[0].after, '', 'the pull page is out');
+      const gA = grant('anchor', party(), 'admin');
+      deliver(N2, s, { type: 'authority-statement', statement: grant(gA, party(), 'participant') });
+      assert.strictEqual(asks().length, 1, 'the pending statement\'s fetch waits');
+      deliver(N2, s, { type: 'authority-set', reqId: asks()[0].reqId, statements: [] });
+      await until(() => asks().length >= 2, 2000);
+      assert.deepStrictEqual(asks()[1].ids, [sid(gA)], 'and goes once the answer is in');
+    } finally { await stopAll(); }
+  });
+
+  it('an anchor-level statement costs one check per pinned-key entry it carries (H2)', async () => {
+    try {
+      const k1 = party(); const k2 = party(); const k3 = party();
+      const N3 = node('h2-cost', { anchor: { threshold: 2, keys: [{ key: k1.key }, { key: k2.key }, { key: k3.key }] } });
+      const s = admitAs(N3, identity('h2-peer'));
+      N3._gossipClock = () => 5_000_000;
+      const subject = party();
+      require('../lib/core/ed25519').isPrimeOrderKey(subject.key); // a known subject key: no fresh-key charge
+      const bogus = (keys) => ({ kind: 'grant', authorisedBy: 'anchor', subject, role: 'admin', nonce: A.freshNonce(), sigs: keys.map((k) => ({ key: k.key, sig: crypto.randomBytes(64).toString('base64url') })) });
+      deliver(N3, s, { type: 'authority-statement', statement: bogus([k1]) }); // opens the lane at 100 - 1
+      const tokens = () => N3._gossipBuckets.get(s.nodeId).tokens;
+      const t0 = tokens();
+      deliver(N3, s, { type: 'authority-statement', statement: bogus([k1, k2, k3]) });
+      assert.strictEqual(t0 - tokens(), 3, 'three pinned-key entries: three checks');
+      deliver(N3, s, { type: 'authority-statement', statement: bogus([k1, party()]) });
+      assert.strictEqual(t0 - tokens(), 4, 'an entry under a key not pinned is never verified, and costs nothing');
+    } finally { await stopAll(); }
+  });
+});
+
 describe('§6.6.8: a pull that stops early resumes from its cursor', () => {
   it('a page that never comes: after the retries the next pull asks from the same cursor', async () => {
     try {
@@ -511,9 +580,11 @@ describe('§6.6.8: a pull that stops early resumes from its cursor', () => {
       assert.ok(ask);
       assert.strictEqual(X._authorityResume.get(M.nodeId), '1.1.auth-cursor');
       clearTimeout(sX._authRepullTimer); sX._authRepullTimer = null;
+      await new Promise((r) => setTimeout(r, 100)); // the retries' asks still on the pipe arrive first
+      const from = asked.length;
       X._startAuthorityPull(sX);
-      await until(() => asked.length >= 6, 3000);
-      assert.strictEqual(asked[asked.length - 1], '1.1.auth-cursor', 'resumed from the cursor, not from the top');
+      await until(() => asked.length > from, 3000);
+      assert.strictEqual(asked[from], '1.1.auth-cursor', 'the next pull asks from the cursor, not from the top');
     } finally { await stopAll(); }
   });
 });
