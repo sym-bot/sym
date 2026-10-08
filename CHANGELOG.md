@@ -204,10 +204,32 @@ sym-attest-v1 pass case by case, and every frame sym builds validates against th
   whether a refused record cites parents (`cites`), never that it was a remix.
 - **No tether on a collapsed integration (#17, §15.5).** sym's gates keep the incoming text, so every
   integration collapses onto the author's record as signed; it is no longer tethered, severed or
-  attested, and the retroactive audit judges only this node's own records. sym's receive path
-  therefore applies §15.8 to nothing, and `remix()` does not yet evaluate it (SECURITY.md).
+  attested, and the retroactive audit judges only this node's own records. §15.8 runs on the
+  remixing side instead: `remix()` (below, breaking).
 - **Layer 6** is given no valence or arousal (unsigned), a Legacy Import record's included.
 - **xmesh-insight-v1** is not offered by default; a host adds it with `extraExtensions`.
+
+### Breaking: `remix()` is asynchronous, and §15.8 runs on what it produces
+
+By the founder's ruling, §15.8 is enforced where the spec puts it, on the remixing node, in 0.14.0.
+`node.remix(categories, opts)` now evaluates the remix against its nearest verified lineage root
+(content-only, one kernel, α-weighted drift against Tguarded) before it is minted: a faithful remix
+keeps its lineage; one drifted past the floor is minted as a fresh root, with no parent from the
+severed chain and the departed source on the entry (`provenance.tether.departedFrom`); one with no
+verified root in reach keeps its lineage, unverified. A verdict is signed as an mmp-tether-v1
+attestation on the entry (`entry.tether`). The §15.7 flag is consumed when the call begins and given
+back if nothing is minted. The receive path's collapsed integrations stay exempt (§15.5).
+
+```js
+// before (0.13, 0.14 development builds)
+const entry = node.remix(categories, { parents });
+// after (0.14.0)
+const entry = await node.remix(categories, { parents });
+if (entry.tether) console.log(entry.tether.verdict); // 'tethered' | 'severed'
+```
+
+`remix()` takes categories and parents only (`opts.cmb` throws). MeshAgent's remix cycle and the XMesh
+synthesis loop await it.
 
 ### Interop with 0.13.17
 

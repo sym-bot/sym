@@ -119,7 +119,7 @@ describe('only a gated remix is a remix (#35)', () => {
       A.remember(CATS('a reply citing it'), { parents: [first.cmb] });
       assert.strictEqual(A.metrics().remixProduced, 0);
       A.remember(CATS('new domain data'));
-      const r = A.remix(CATS('an integration of a peer record'), { parents: [first.cmb] });
+      const r = await A.remix(CATS('an integration of a peer record'), { parents: [first.cmb] });
       assert.ok(r && !r.refused);
       assert.strictEqual(A.metrics().remixProduced, 1);
     } finally { await stopAll(); }

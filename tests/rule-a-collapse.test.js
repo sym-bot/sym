@@ -127,7 +127,7 @@ test('B-2: the REMIX PATH still requires new domain data; remember() citing a pe
   await withNode('rule-a-peerparent', async (node) => {
     node._hasNewDomainData = false;
     const peerBlock = { metadata: { key: 'cmb-' + 'f'.repeat(64) } };   // not ours
-    const res = node.remix({ ...FIELDS }, { parents: [peerBlock] });
+    const res = await node.remix({ ...FIELDS }, { parents: [peerBlock] });
     assert.deepStrictEqual(res, { refused: 'remix-without-new-domain-data' }, 'remixing a peer without new domain data is still refused');
     const reply = node.remember({ ...FIELDS, focus: 'a reply citing the peer' }, { parents: [peerBlock] });
     assert.ok(reply && reply.key && !reply.refused, 'a record the agent authors, citing a peer, is not a remix');

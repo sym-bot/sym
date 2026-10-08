@@ -332,14 +332,14 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   LAN every node advertises on `_sym._tcp` with its room in the TXT `room` key, in cleartext to the
   segment: a room name is not a credential, and the TXT room is a hint for whom to dial, never an
   admission (the handshake decides).
-- **§15.8 is not applied to what this node receives.** MMP 2.0 update 1 (§15.5) exempts a collapsed
-  integration from the lineage tether, and sym's gates always collapse (they keep the incoming text,
-  so they store the author's record as signed). A peer's record that cites a root it has drifted
-  from is therefore kept with its author's lineage; the tether is the remixing node's duty. sym's
-  own remix path (`remix()`) does not yet evaluate the tether before it mints, and the retroactive
-  audit (`auditLineageTethers`) judges only this node's own records, which it cannot tell apart from
-  its replies. Lineage confers retention here (a hot descendant keeps its ancestors hot), never
-  authority or lifecycle.
+- **§15.8 is applied by the remixing node, not the receiver.** MMP 2.0 update 1 (§15.5) exempts a
+  collapsed integration from the lineage tether, and sym's gates always collapse (they store the
+  author's record as signed), so a peer's record that cites a root it has drifted from is kept with
+  its author's lineage; the tether is that author's duty. sym does its own: `remix()` evaluates every
+  remix it mints against its root and severs a drifted lineage. The retroactive audit
+  (`auditLineageTethers`) judges only this node's own records, which it cannot tell apart from its
+  replies. Lineage confers retention here (a hot descendant keeps its ancestors hot), never authority
+  or lifecycle.
 - **LAN meshing with sym 0.13.17 stops** except through configured Legacy Import routes, by design:
   a 0.13.17 node advertises no `mmp` key, so a 0.14 node never dials it as Core Secure, and a 0.14
   listener closes its legacy hello at once.

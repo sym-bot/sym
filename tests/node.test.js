@@ -286,7 +286,7 @@ describe('SymNode', () => {
 
     // No domain data yet — the REMIX PATH is refused, and says so (draft spec PR #35: §15.7 gates
     // only the node's integration of a peer record, never remember()).
-    const rejected = node.remix(
+    const rejected = await node.remix(
       { focus: 'remix attempt', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
@@ -301,7 +301,7 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true);
 
     // Now remix should succeed
-    const accepted = node.remix(
+    const accepted = await node.remix(
       { focus: 'valid remix', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
@@ -392,7 +392,7 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true, 'domain observation should enable remix');
 
     // Remix should succeed and RESET canRemix
-    const remix = node.remix(
+    const remix = await node.remix(
       { ...categories, focus: 'remix of peer signal' },
       { parents: [{ key: 'cmb-parent-123', lineage: { ancestors: [] } }] }
     );
@@ -400,7 +400,7 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), false, 'remix should reset hasNewDomainData');
 
     // Second remix without new domain data should be rejected
-    const rejected = node.remix(
+    const rejected = await node.remix(
       { ...categories, focus: 'second remix attempt' },
       { parents: [{ key: 'cmb-parent-456', lineage: { ancestors: [] } }] }
     );
