@@ -39,6 +39,8 @@ function cat7(t) {
 // before sealing. A fetch is answered by each record in its own sealed record frame, then a sealed
 // cmb-fetch-result carrying only the correlation id and the returned / missing key lists (design D1).
 const { admitAs } = require('./_core-secure');
+/** A cognition key no node holds. */
+const NOWHERE = `cmb-${'ab'.repeat(32)}`;
 function fakePeer(node, peerId) {
   return admitAs(node, { nodeId: peerId, name: peerId });
 }
@@ -56,7 +58,7 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       node._frameHandler.handle(peer, { type: 'cmb-fetch', key: root.key, reqId: 'r1' });
       const res = peer.sent.find((f) => f.type === 'cmb-fetch-result');
       assert.ok(res, 'responds');
-      assert.deepStrictEqual(Object.keys(res).sort(), ['missing', 'reqId', 'returned', 'timestamp', 'type'], 'the id and the key lists, never the record (it was plaintext; §18.2.1)');
+      assert.deepStrictEqual(Object.keys(res).sort(), ['missing', 'reqId', 'returned', 'type'], 'the id and the key lists, never the record (it was plaintext; §18.2.1), and no timestamp (cmb-fetch-result.schema.json)');
       assert.deepStrictEqual([res.reqId, res.returned, res.missing], ['r1', [root.key], []]);
       assert.ok(peer.sent.findIndex((f) => f.type === 'cmb') < peer.sent.indexOf(res), 'the record goes first');
       const rec = peer.sent.find((f) => f.type === 'cmb');
@@ -70,9 +72,9 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
   it('lists an unknown key as missing, and sends no record', async () => {
     await withNode('cfetch-miss', async (node) => {
       const peer = fakePeer(node, 'peerX');
-      node._frameHandler.handle(peer, { type: 'cmb-fetch', key: 'cmb1-doesnotexist', reqId: 'r2' });
+      node._frameHandler.handle(peer, { type: 'cmb-fetch', key: NOWHERE, reqId: 'r2' });
       const res = peer.sent.find((f) => f.type === 'cmb-fetch-result');
-      assert.deepStrictEqual([res.returned, res.missing], [[], ['cmb1-doesnotexist']]);
+      assert.deepStrictEqual([res.returned, res.missing], [[], [NOWHERE]]);
       assert.strictEqual(peer.sent.filter((f) => f.type === 'cmb').length, 0);
     });
   });
@@ -86,6 +88,8 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
       const served = toB.sent.find((f) => f.type === 'cmb').cmb;
 
       await withNode('cfetch-req', async (nodeB) => {
+        // nodeB has proven nodeA's key (D4: a fetched record is attributed only after §8.8.5).
+        nodeB._roster.bind(nodeA.nodeId, nodeA._identity.publicKey, 'proven');
         const a = fakePeer(nodeB, 'peerA');
         const evil = fakePeer(nodeB, 'peerEvil');
         const p = nodeB.fetchCMB(root.key, { timeoutMs: 2000 });
@@ -103,88 +107,71 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
         const hit = await p;
         assert.ok(hit, 'verified response resolves');
         assert.strictEqual(hit.from, 'peerA', 'the forged response did not win');
+        assert.strictEqual(hit.verified, true);
+        assert.strictEqual(hit.authorNodeId, nodeA.nodeId);
         assert.strictEqual(hit.cmb.metadata.key, root.key);
       });
     });
   });
 
-  it('a PRE-BOUNDARY record is accepted, not discarded as forged (core 0.8.1 regression guard)', async () => {
-    // THE REGRESSION THIS EXISTS TO CATCH, measured before it shipped:
-    //
-    // This call site used to dispatch on `cmb.metadata` and call core's `recomputeKey` for
-    // records without it — a workaround for recomputeKey being broken (it read `cmb.key`, absent
-    // on v2 records, and derived roots with the FLAT scheme while createCMB minted MERKLE).
-    // core 0.8.1 fixed recomputeKey, and the workaround became a regression the instant it did:
-    // a pre-boundary record with a flat root key recomputed to the MERKLE address, mismatched,
-    // and was DISCARDED AS FORGED. The whole legacy DAG would have been dropped on fetch.
-    //
-    // sym's suite was 309/309 green through all of that, because no test served a record of this
-    // shape. That is the point of this one: the fix is not "bump the dependency", it is "check
-    // what the dependency now returns for the records you actually hold".
+  it('a record that is not a signed v2.0 record answers nothing: Core Secure serves only those (MMP 2.0 update 1, D4)', async () => {
+    // Until the update this took a pre-boundary record (no metadata, a flat key) on its address
+    // alone. Over Core Secure a server sends only signed v2.0 records, and a fetched record passes
+    // the whole of §8.8.5 before it is attributed; one that has no v2.0 metadata cannot.
     const { cmbKeyV1 } = require('../lib/core');
     await withNode('cfetch-legacy', async (nodeB) => {
       const a = fakePeer(nodeB, 'peerA');
       const categories = cat7('a pre-boundary block minted before the merkle cutover');
-      // Pre-boundary wire shape: NO `metadata`, address at the top level, FLAT root derivation.
       const legacy = { categories, key: cmbKeyV1(categories) };
-
-      const p = nodeB.fetchCMB(legacy.key, { timeoutMs: 2000 });
+      const p = nodeB.fetchCMB(NOWHERE, { timeoutMs: 2000 });
       const reqId = [...nodeB._cmbFetchPending.keys()][0];
-      // (Over Core Secure a server sends only a v2.0 record; the requester's address check, the one
-      // under test, still takes a pre-boundary one.)
-      answer(nodeB, a, reqId, legacy.key, legacy);
-
-      const hit = await p;
-      assert.ok(hit, 'a legitimate pre-boundary record must VERIFY, not be discarded as forged');
-      assert.strictEqual(hit.cmb.key, legacy.key);
+      answer(nodeB, a, reqId, NOWHERE, legacy);
+      assert.strictEqual(await p, null);
     });
   });
 
-  it('an UNVERIFIABLE response is distinguished from a FORGED one in telemetry', async () => {
-    // The three classes must not merge here either. A record we cannot read is a compatibility
-    // problem; a record whose content does not match its key is an attack. Both are discarded —
-    // and both used to arrive as a bare `null` that this call site reported as a mismatch,
-    // accusing a record it had merely failed to read.
-    await withNode('cfetch-classes', async (nodeB) => {
-      const a = fakePeer(nodeB, 'peerA');
-      const metrics = [];
-      nodeB.on('metric', (m) => { if (m.type === 'cmb-fetch-forged') metrics.push(m); });
-
-      const categories = cat7('content that will be served without any container at all');
-      const { cmbKeyV1 } = require('../lib/core');
-      const key = cmbKeyV1(categories);
-
-      const p = nodeB.fetchCMB(key, { timeoutMs: 600 });
-      const reqId = [...nodeB._cmbFetchPending.keys()][0];
-      // Same key, NO container — unreadable rather than altered.
-      answer(nodeB, a, reqId, key, { key });
-      await p;
-
-      assert.strictEqual(metrics.length, 1);
-      assert.strictEqual(metrics[0].verdict, 'cannot-verify',
-        'an unreadable record must not be reported as a content mismatch');
+  it('a response that does not match its key is told apart from one that is malformed, in telemetry', async () => {
+    // The classes must not merge: a record whose content does not match its key is an attack; a
+    // record that is not a record is a compatibility problem. Both are discarded.
+    await withNode('cfetch-classes', async (nodeA) => {
+      const root = nodeA.remember(cat7('content served twice, once altered and once broken'));
+      const toB = fakePeer(nodeA, 'peerB');
+      nodeA._frameHandler.handle(toB, { type: 'cmb-fetch', key: root.key, reqId: 'wire' });
+      const served = toB.sent.find((f) => f.type === 'cmb').cmb;
+      await withNode('cfetch-classes-b', async (nodeB) => {
+        const a = fakePeer(nodeB, 'peerA');
+        const c = fakePeer(nodeB, 'peerC');
+        const metrics = [];
+        nodeB.on('metric', (m) => { if (m.type === 'cmb-fetch-forged') metrics.push(m); });
+        const p = nodeB.fetchCMB(root.key, { timeoutMs: 600 });
+        const reqId = [...nodeB._cmbFetchPending.keys()][0];
+        const altered = JSON.parse(JSON.stringify(served)); altered.categories.focus.text = 'other words under the same key';
+        const broken = JSON.parse(JSON.stringify(served)); delete broken.categories;
+        answer(nodeB, a, reqId, root.key, altered);
+        answer(nodeB, c, reqId, root.key, broken);
+        await p;
+        assert.deepStrictEqual(metrics.map((m) => m.verdict), ['mismatch', 'malformed']);
+      });
     });
   });
 
-  it('serves several keys in one request: each returned record in its own frame, then one result', async () => {
+  it('a request names one key: a keys array is refused, not served', async () => {
     await withNode('cfetch-multi', async (node) => {
       const r1 = node.remember(cat7('the first record of a multi-key fetch about avalanche risk'));
-      const r2 = node.remember(cat7('the second record of a multi-key fetch about lift closures'));
       const peer = fakePeer(node, 'peerX');
-      node._frameHandler.handle(peer, { type: 'cmb-fetch', keys: [r1.key, 'cmb1-missing', r2.key, r1.key], reqId: 'm1' });
-      assert.deepStrictEqual(peer.sent.map((f) => f.type), ['cmb', 'cmb', 'cmb-fetch-result']);
-      const res = peer.sent[2];
-      assert.deepStrictEqual([res.returned, res.missing], [[r1.key, r2.key], ['cmb1-missing']], 'each key once');
+      node._receiveSessionFrame(peer, { type: 'cmb-fetch', key: r1.key, keys: [r1.key], reqId: 'm1' });
+      assert.deepStrictEqual(peer.sent, []);
+      assert.strictEqual(node._metrics.framesRefusedByType['cmb-fetch'], 1);
     });
   });
 
   it('a result that lists the key as returned closes the request for that peer when no verifying record came first', async () => {
     await withNode('cfetch-found-nothing', async (node) => {
       const a = fakePeer(node, 'peerA');
-      const p = node.fetchCMB('cmb1-claimed', { timeoutMs: 3000 });
+      const p = node.fetchCMB(NOWHERE, { timeoutMs: 3000 });
       const reqId = [...node._cmbFetchPending.keys()][0];
       const t0 = Date.now();
-      node._frameHandler.handle(a, { type: 'cmb-fetch-result', reqId, returned: ['cmb1-claimed'], missing: [] });
+      node._frameHandler.handle(a, { type: 'cmb-fetch-result', reqId, returned: [NOWHERE], missing: [] });
       assert.strictEqual(await p, null);
       assert.ok(Date.now() - t0 < 1000, 'closed by the result, not by the timeout');
       assert.strictEqual(a._fetchExpect.size, 0, 'the expectation is let go');
@@ -204,9 +191,9 @@ describe('MMP §7 cmb-fetch — content-addressed retrieval', () => {
   it('fetchCMB times out to null when every peer misses', async () => {
     await withNode('cfetch-timeout', async (node) => {
       const peer = fakePeer(node, 'peerX');
-      const p = node.fetchCMB('cmb1-nowhere', { timeoutMs: 300 });
+      const p = node.fetchCMB(NOWHERE, { timeoutMs: 300 });
       const reqId = [...node._cmbFetchPending.keys()][0];
-      answer(node, peer, reqId, 'cmb1-nowhere', null);
+      answer(node, peer, reqId, NOWHERE, null);
       assert.strictEqual(await p, null);
     });
   });

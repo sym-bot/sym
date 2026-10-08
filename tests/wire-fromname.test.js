@@ -25,8 +25,25 @@ const { admitAs, deliver, identity } = require('./_core-secure');
 
 describe('a frame\'s fromName is taken as text (R5)', () => {
   // 0.14: frames arrive on a confirmed session (design D1); the session's proven name is the fallback.
+  // MMP 2.0 update 1 (founder ruling): the mood frame names no sender. A mood frame carrying any
+  // fromName is not that frame and is refused; the event is labelled with the session's proven name.
+  it('mood: a frame naming a sender is refused, whatever its fromName; the session\'s name labels the rest', () => {
+    const name = uniq('fromname-mood');
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: 'g' });
+    const froms = [];
+    for (const e of ['mood-delivered', 'mood-rejected']) node.on(e, (d) => froms.push(d.from));
+    try {
+      const session = admitAs(node, identity('peer-p'));
+      for (const fromName of [BAD, 42, ['x'], { a: 1 }, null, 'its own label']) {
+        assert.strictEqual(deliver(node, session, { type: 'mood', mood: 'calm and focused', fromName }), false, 'refused');
+      }
+      assert.deepStrictEqual(froms, []);
+      assert.strictEqual(deliver(node, session, { type: 'mood', mood: 'calm and focused' }), true);
+      assert.deepStrictEqual(froms, ['peer-p']);
+    } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
+  });
+
   for (const [type, frame, event, fromOf] of [
-    ['mood', { type: 'mood', mood: 'calm and focused' }, ['mood-delivered', 'mood-rejected'], (args) => args[0].from],
     ['xmesh-insight', { type: 'xmesh-insight', anomaly: 0.1, remixScore: 0.2, coherence: 0.3 }, 'xmesh-insight', (args) => args[0].from],
   ]) {
     it(`${type}: a fromName that is not text is not printed or passed on; the session's name is used`, () => {

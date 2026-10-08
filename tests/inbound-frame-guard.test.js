@@ -119,7 +119,7 @@ describe('a mood frame on a stock node (G2)', () => {
     node.on('mood-rejected', (d) => out.push(['rejected', d]));
     try {
       const p = admitAs(node, { nodeId: 'p' });
-      node._frameHandler.handle(p, { type: 'mood', mood: 'tired', fromName: 'p' });
+      node._frameHandler.handle(p, { type: 'mood', mood: 'tired' });
       assert.strictEqual(out.length, 1);
       assert.strictEqual(typeof out[0][1].drift, 'number');
       assert.ok(out[0][1].drift >= 0 && out[0][1].drift <= 2, `drift ${out[0][1].drift} is a cosine drift`);
@@ -127,8 +127,10 @@ describe('a mood frame on a stock node (G2)', () => {
       const entry = node.remember({ focus: 'own work after a mood frame', issue: 'none', intent: 'x', motivation: 'y', commitment: 'z', perspective: 'me', mood: { text: 'calm', valence: 0, arousal: 0 } });
       assert.ok(entry, 'remember() still works (in 0.13.16 it threw for two minutes after one mood frame)');
       assert.ok(Array.isArray(node.peers()));
-      for (const mood of [42, { text: 'x' }, null, '']) node._frameHandler.handle(p, { type: 'mood', mood });
+      // Refused through the guard (MMP 2.0 update 1: the mood frame is the schema's or refused, counted).
+      for (const mood of [42, { text: 'x' }, null, '']) node._receiveSessionFrame(p, { type: 'mood', mood });
       assert.strictEqual(out.length, 1, 'a mood that is not text is not a mood');
+      assert.strictEqual(node._metrics.framesRefusedByType.mood, 4);
     } finally { node.stop(); fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
   });
 

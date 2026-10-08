@@ -48,7 +48,7 @@ describe('cmb-fetch serving', () => {
       assert.deepStrictEqual(verifyCMB(cmb, pub).valid, true, 'precondition: the stored record verifies');
       node._store.get = (k) => (k === cmb.metadata.key ? { key: k, cmb } : null);
       const { res, record, recordFirst } = serve(node, cmb.metadata.key, 'r1');
-      assert.deepStrictEqual(res, { type: 'cmb-fetch-result', reqId: 'r1', returned: [cmb.metadata.key], missing: [], timestamp: res.timestamp }, 'the result carries only the id and the key lists');
+      assert.deepStrictEqual(res, { type: 'cmb-fetch-result', reqId: 'r1', returned: [cmb.metadata.key], missing: [] }, 'the result carries only the id and the key lists (no timestamp: cmb-fetch-result.schema.json)');
       assert.ok(recordFirst, 'the record goes first, in its own frame');
       for (const k of ['signatureSuite', 'addressScheme', 'createdByNodeId', 'application', 'assertionId']) {
         assert.ok(k in record.metadata, `${k} is served`);
