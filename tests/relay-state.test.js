@@ -167,12 +167,12 @@ test('destroy() returns the state to idle, never leaves a stale connected/refuse
   } finally { c.stop(); await relay.close(); }
 });
 
-// MMP §4.4.7 / §4.4.9: 4006 (the existing holder is the legitimate one) is a hard stop like 4004;
-// 4007 (draft spec PR meshcognition-website#20: the relay binds this nodeId to a different key) is an
-// identity conflict and stops the same way. Neither is retried; each is said once and kept in state().
-for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*legitimate one\. Not reconnecting/], [4007, 'key-conflict', /DIFFERENT key \(4007\).*Not reconnecting/]]) {
+// MMP §4.4.7 / §4.4.9: 4006 (the existing holder is the legitimate one) is a hard stop like 4004: not
+// retried, said once and kept in state(). (4007, draft PR #20, is deferred and an ordinary close: see
+// the test below.)
+for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*legitimate one\. Not reconnecting/]]) {
   test(`${code}: awaitOutcome resolves with phase ${phase}; no reconnect; said once; kept in state().stopped`, async () => {
-    const relay = fakeRelay((ws) => ws.close(code, code === 4007 ? 'nodeId bound to another key' : 'Duplicate rejected'));
+    const relay = fakeRelay((ws) => ws.close(code, 'Duplicate rejected'));
     const told = [];
     const c = client(relay.url, { onIdentityCollision: (info) => told.push(info) });
     try {
@@ -195,6 +195,46 @@ for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*legi
     } finally { c.stop(); await relay.close(); }
   });
 }
+
+// MMP 2.0 update 1, §4.4.9: every close other than 4004 and 4006 reconnects with backoff — the RFC 6455
+// closes 1001, 1009, 1011 and 1013 by the table, and 4007, whose draft (#20) is deferred and not in MMP.
+for (const code of [4007, 1001, 1011, 1013, 4005, 4008]) {
+  test(`${code}: an ordinary close, reconnected with backoff`, async () => {
+    const relay = fakeRelay((ws, n) => { if (n === 1) ws.close(code, 'closing'); else ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })); });
+    const c = client(relay.url);
+    try {
+      c.rc.connect();
+      await wait(300);
+      assert.equal(c.rc.state().phase, 'reconnecting');
+      assert.equal(c.rc.state().stopped, null);
+      assert.ok(c.rc.state().nextRetryAt > Date.now(), 'a retry is scheduled');
+      await wait(1500);
+      assert.equal(relay.state.attempts >= 2, true, 'it knocked again');
+      assert.equal(c.rc.state().phase, 'connected');
+    } finally { c.stop(); await relay.close(); }
+  });
+}
+
+test('relay-auth names the nodeId in its lowercase form; a closed socket forgets the fan-out its relay listed', async () => {
+  const frames = [];
+  const relay = fakeRelay((ws, n) => {
+    if (n === 1) { ws.send(JSON.stringify({ type: 'relay-peers', peers: [], features: ['fanout'] })); closeFirst = () => ws.close(1001, 'going away'); }
+  });
+  let closeFirst = null;
+  relay.wss.on('connection', (ws) => ws.on('message', (d) => frames.push(JSON.parse(String(d)))));
+  const id = 'ABCDEF01-2345-7678-9ABC-DEF012345678';
+  const c = client(relay.url, { getIdentity: () => ({ nodeId: id }) });
+  try {
+    c.rc.connect();
+    for (let t = 0; t < 3000 && !(c.rc.state().fanout && closeFirst); t += 10) await wait(10);
+    assert.deepStrictEqual(c.rc.state().fanout, { max: 64 });
+    closeFirst();
+    for (let t = 0; t < 3000 && c.rc.state().phase !== 'reconnecting'; t += 10) await wait(10);
+    assert.equal(c.rc.state().fanout, null, 'forgotten when its socket closed');
+    const auth = frames.find((f) => f.type === 'relay-auth');
+    assert.equal(auth.nodeId, id.toLowerCase());
+  } finally { c.stop(); await relay.close(); }
+});
 
 test('a socket destroy() let go never schedules a reconnect when its close arrives', async () => {
   const relay = fakeRelay((ws) => ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })));
