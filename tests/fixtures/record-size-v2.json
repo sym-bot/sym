@@ -1,0 +1,322 @@
+{
+  "protocolVersion": "2.0",
+  "measure": "MAX_CATEGORY_TEXT and MAX_RECORD_TEXT count the UTF-8 bytes of each category text after NFC; MAX_RECORD_BYTES counts the bytes of the RFC 8785 serialization of the two-section record, metadata.application.data included, which equals the UTF-8 length of ECMAScript JSON.stringify of it in any member order (§8.8.6)",
+  "usage": "Expand each case: the base record with each fill category text set to unit repeated count times and, when applicationBytes is given, metadata.application set to { mediaType: \"application/octet-stream\", schema: \"https://meshcognition.org/schema/size-fixture-v1.json\", encoding: \"base64url\", byteLength, digest, data } over that many bytes of 0x61. Measure; compare. Only the size verdict is pinned: an expanded record keeps the base key and signature.",
+  "limits": {
+    "MAX_CATEGORY_TEXT": 262144,
+    "MAX_RECORD_TEXT": 524288,
+    "MAX_RECORD_BYTES": 737280,
+    "MAX_SEALED_RECORD_CHARS": 983062
+  },
+  "base": {
+    "categories": {
+      "focus": {
+        "text": "publish corrected MMP conformance artifacts",
+        "meta": {
+          "key": "5016f1bd82f5ec8ad064f9fb0a47c10988190c407c9d534e76b366634bf2e268",
+          "parents": []
+        }
+      },
+      "issue": {
+        "text": "the public vectors and runtime disagree",
+        "meta": {
+          "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+          "parents": [
+            "cmb-abababababababababababababababababababababababababababababababab"
+          ]
+        }
+      },
+      "intent": {
+        "text": "make independent implementations interoperate",
+        "meta": {
+          "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+          "parents": []
+        }
+      },
+      "motivation": {
+        "text": "a protocol claim must be executable",
+        "meta": {
+          "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+          "parents": []
+        }
+      },
+      "commitment": {
+        "text": "one contract drives every implementation",
+        "meta": {
+          "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+          "parents": []
+        }
+      },
+      "perspective": {
+        "text": "protocol editor",
+        "meta": {
+          "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+          "parents": []
+        }
+      },
+      "mood": {
+        "text": "determined",
+        "meta": {
+          "key": "a515fb1d0492e7661b89c2b02d6bf81372ee07560bfca054863c76dec74880da",
+          "parents": []
+        }
+      }
+    },
+    "metadata": {
+      "key": "cmb-7f7b55653aa9854999c2efeb9751ce4428f9dfe95839e34e4358ab0be5cdf98d",
+      "addressScheme": "mmp-cmb-merkle-v2",
+      "signatureSuite": "mmp-sig-v2.0",
+      "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+      "createdBy": "vector-author",
+      "createdTimestamp": 1786611600000,
+      "room": "conformance-room",
+      "to": "018f47a0-7b21-7abc-8def-fedcba987654",
+      "lineage": {
+        "parents": [
+          "cmb-abababababababababababababababababababababababababababababababab"
+        ],
+        "method": "svaf-heuristic"
+      },
+      "application": null,
+      "assertionId": "asrt-926d08932fe23abc3950001f80df80f93f9ae0942eb04329cd5d6c4748a0ff7e",
+      "sigAlg": "ed25519",
+      "sig": "ae5wP18m0_bGBxiqL4faj70eTjwK_nZL1FocG021xhwmHqmX1Ne3SlVZzdquOZiuh5haKtss6nGXWZdvXzVpCg"
+    }
+  },
+  "cases": [
+    {
+      "label": "a published record, measured",
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 43,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 227,
+        "recordBytes": 1820,
+        "within": true,
+        "over": []
+      }
+    },
+    {
+      "label": "CJK text is measured as its UTF-8 bytes (3 a character), never as \\u escapes (6)",
+      "fill": {
+        "focus": {
+          "unit": "認知",
+          "count": 1000
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 6000,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 6184,
+        "recordBytes": 7777,
+        "notTheMeasure": {
+          "asciiEscapedBytes": 13777
+        },
+        "within": true,
+        "over": []
+      }
+    },
+    {
+      "label": "one category at MAX_CATEGORY_TEXT",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 262144
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262144,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 262328,
+        "recordBytes": 263921,
+        "within": true,
+        "over": []
+      }
+    },
+    {
+      "label": "one category a byte over MAX_CATEGORY_TEXT",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 262145
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262145,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 262329,
+        "recordBytes": 263922,
+        "within": false,
+        "over": [
+          "MAX_CATEGORY_TEXT"
+        ]
+      }
+    },
+    {
+      "label": "three-byte characters: within the schema maxLength, over MAX_CATEGORY_TEXT",
+      "fill": {
+        "focus": {
+          "unit": "漢",
+          "count": 87382
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262146,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 262330,
+        "recordBytes": 263923,
+        "notTheMeasure": {
+          "asciiEscapedBytes": 526069
+        },
+        "within": false,
+        "over": [
+          "MAX_CATEGORY_TEXT"
+        ]
+      }
+    },
+    {
+      "label": "the seven texts at MAX_RECORD_TEXT",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 262144
+        },
+        "issue": {
+          "unit": "b",
+          "count": 261999
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262144,
+          "issue": 261999,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 524288,
+        "recordBytes": 525881,
+        "within": true,
+        "over": []
+      }
+    },
+    {
+      "label": "the seven texts a byte over MAX_RECORD_TEXT",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 262144
+        },
+        "issue": {
+          "unit": "b",
+          "count": 262000
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262144,
+          "issue": 262000,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 524289,
+        "recordBytes": 525882,
+        "within": false,
+        "over": [
+          "MAX_RECORD_TEXT"
+        ]
+      }
+    },
+    {
+      "label": "the encoded record at MAX_RECORD_BYTES",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 95266
+        }
+      },
+      "applicationBytes": 480000,
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 95266,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 95450,
+        "recordBytes": 737280,
+        "within": true,
+        "over": []
+      }
+    },
+    {
+      "label": "the encoded record a byte over MAX_RECORD_BYTES, every text within",
+      "fill": {
+        "focus": {
+          "unit": "a",
+          "count": 95267
+        }
+      },
+      "applicationBytes": 480000,
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 95267,
+          "issue": 39,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 95451,
+        "recordBytes": 737281,
+        "within": false,
+        "over": [
+          "MAX_RECORD_BYTES"
+        ]
+      }
+    }
+  ]
+}

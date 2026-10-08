@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/sym-attest-frame.schema.json",
+  "title": "sym-attest-v1 extension frames (Draft Candidate Extension, §16.4)",
+  "description": "The four frames of the sym-attest-v1 extension (/spec/mmp/extensions/sym-attest), sent only where the extension was negotiated, as the inner frame of control-encrypted. Every object is closed. Shape only: chain, root and signature rules are in the extension text.",
+  "oneOf": [
+    { "$ref": "#/$defs/attestationFrame" },
+    { "$ref": "#/$defs/checkpointFrame" },
+    { "$ref": "#/$defs/witnessFrame" },
+    { "$ref": "#/$defs/nodeStatsFrame" }
+  ],
+  "$defs": {
+    "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "room": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "position": { "type": "integer", "minimum": 1 },
+    "hex64": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "link": { "anyOf": [{ "const": "genesis" }, { "$ref": "#/$defs/hex64" }] },
+    "role": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+    "sig": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" },
+    "categoryVerdict": { "enum": ["admit", "guard", "redundant", "reject", "silent"] },
+    "attestationFrame": {
+      "type": "object",
+      "required": ["type", "attestation"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "sym-attest-attestation" },
+        "attestation": {
+          "type": "object",
+          "required": ["of", "assertionId", "by", "at", "room", "method", "verdict", "categories", "role", "seq", "prev", "sigAlg", "sig"],
+          "additionalProperties": false,
+          "properties": {
+            "of": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" },
+            "assertionId": { "type": "string", "pattern": "^asrt-[0-9a-f]{64}$" },
+            "by": { "$ref": "#/$defs/nodeId" },
+            "at": { "$ref": "#/$defs/time" },
+            "room": { "$ref": "#/$defs/room" },
+            "method": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$" },
+            "verdict": { "enum": ["aligned", "guarded", "redundant", "rejected"] },
+            "categories": {
+              "type": "object",
+              "description": "Exactly the seven CAT7 categories.",
+              "required": ["focus", "issue", "intent", "motivation", "commitment", "perspective", "mood"],
+              "additionalProperties": false,
+              "properties": {
+                "focus": { "$ref": "#/$defs/categoryVerdict" },
+                "issue": { "$ref": "#/$defs/categoryVerdict" },
+                "intent": { "$ref": "#/$defs/categoryVerdict" },
+                "motivation": { "$ref": "#/$defs/categoryVerdict" },
+                "commitment": { "$ref": "#/$defs/categoryVerdict" },
+                "perspective": { "$ref": "#/$defs/categoryVerdict" },
+                "mood": { "$ref": "#/$defs/categoryVerdict" }
+              }
+            },
+            "role": { "$ref": "#/$defs/role" },
+            "seq": { "$ref": "#/$defs/position" },
+            "prev": { "$ref": "#/$defs/link", "description": "genesis exactly when seq is 1." },
+            "sigAlg": { "const": "ed25519" },
+            "sig": { "$ref": "#/$defs/sig" }
+          },
+          "if": { "properties": { "seq": { "const": 1 } }, "required": ["seq"] },
+          "then": { "properties": { "prev": { "const": "genesis" } } },
+          "else": { "properties": { "prev": { "$ref": "#/$defs/hex64" } } }
+        }
+      }
+    },
+    "checkpointFrame": {
+      "type": "object",
+      "required": ["type", "checkpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "sym-attest-checkpoint" },
+        "checkpoint": {
+          "type": "object",
+          "required": ["by", "room", "fromSeq", "uptoSeq", "prev", "root", "at", "sigAlg", "sig"],
+          "additionalProperties": false,
+          "properties": {
+            "by": { "$ref": "#/$defs/nodeId" },
+            "room": { "$ref": "#/$defs/room" },
+            "fromSeq": { "$ref": "#/$defs/position" },
+            "uptoSeq": { "$ref": "#/$defs/position" },
+            "prev": { "$ref": "#/$defs/link", "description": "genesis exactly when fromSeq is 1; otherwise the previous checkpoint's root." },
+            "root": { "$ref": "#/$defs/hex64" },
+            "at": { "$ref": "#/$defs/time" },
+            "sigAlg": { "const": "ed25519" },
+            "sig": { "$ref": "#/$defs/sig" }
+          },
+          "if": { "properties": { "fromSeq": { "const": 1 } }, "required": ["fromSeq"] },
+          "then": { "properties": { "prev": { "const": "genesis" } } },
+          "else": { "properties": { "prev": { "$ref": "#/$defs/hex64" } } }
+        }
+      }
+    },
+    "witnessFrame": {
+      "type": "object",
+      "required": ["type", "witness"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "sym-attest-witness" },
+        "witness": {
+          "type": "object",
+          "required": ["attester", "room", "uptoSeq", "root", "by", "role", "at", "sigAlg", "sig"],
+          "additionalProperties": false,
+          "properties": {
+            "attester": { "$ref": "#/$defs/nodeId" },
+            "room": { "$ref": "#/$defs/room" },
+            "uptoSeq": { "$ref": "#/$defs/position" },
+            "root": { "$ref": "#/$defs/hex64" },
+            "by": { "$ref": "#/$defs/nodeId" },
+            "role": { "$ref": "#/$defs/role" },
+            "at": { "$ref": "#/$defs/time" },
+            "sigAlg": { "const": "ed25519" },
+            "sig": { "$ref": "#/$defs/sig" }
+          }
+        }
+      }
+    },
+    "nodeStatsFrame": {
+      "type": "object",
+      "required": ["type", "stats"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "sym-attest-node-stats" },
+        "stats": {
+          "type": "object",
+          "required": ["emitted", "admitted", "memory", "at"],
+          "additionalProperties": false,
+          "properties": {
+            "emitted": { "type": "integer", "minimum": 0 },
+            "admitted": { "type": "integer", "minimum": 0 },
+            "memory": { "type": "integer", "minimum": 0 },
+            "at": { "$ref": "#/$defs/time" }
+          }
+        }
+      }
+    }
+  }
+}

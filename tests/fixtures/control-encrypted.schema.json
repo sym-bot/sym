@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/control-encrypted.schema.json",
+  "title": "MMP v2.0 control-encrypted envelope (§18.2.1)",
+  "description": "The sealed envelope of one control frame. The plaintext is the minified JSON of one inner frame (control-frame.schema.json and the other inner schemas); the AAD is mmp-aead-control-v2 over version, session, direction and sequence. It shares its direction's sequence counter with cmb-encrypted.",
+  "type": "object",
+  "required": [
+    "type",
+    "protocolVersion",
+    "suite",
+    "sessionId",
+    "sequence",
+    "direction",
+    "sealed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "control-encrypted"
+    },
+    "protocolVersion": {
+      "const": "2.0"
+    },
+    "suite": {
+      "const": "X25519-HKDF-SHA256-ChaCha20-Poly1305"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "sequence": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,28})$",
+      "description": "Unsigned decimal, less than 2^96 (the AEAD nonce is the sequence in 96 bits)."
+    },
+    "direction": {
+      "enum": [
+        "client-to-server",
+        "server-to-client"
+      ]
+    },
+    "sealed": {
+      "type": "string",
+      "minLength": 22,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Unpadded base64url of the ciphertext followed by the 16-byte Poly1305 tag; at least the tag."
+    }
+  }
+}

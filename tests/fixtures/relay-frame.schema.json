@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/relay-frame.schema.json",
+  "title": "MMP v2.0 relay transport frames",
+  "oneOf": [
+    { "$ref": "#/$defs/auth" }, { "$ref": "#/$defs/peers" },
+    { "$ref": "#/$defs/ping" }, { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/reauth" }, { "$ref": "#/$defs/joined" },
+    { "$ref": "#/$defs/left" }, { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "wake": {
+      "type": "object",
+      "required": ["platform", "token", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "environment": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "auth": {
+      "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "relay-auth" }, "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "room": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$", "description": "§5.8 room identifier; absent means default. Addressing, never permission." },
+        "engine": { "type": "string", "minLength": 1, "maxLength": 32, "description": "Implementation label for the relay operator's logs; never forwarded." },
+        "wakeChannel": { "$ref": "#/$defs/wake" }
+      }
+    },
+    "peer": {
+      "type": "object", "required": ["nodeId", "name"], "additionalProperties": false,
+      "properties": {
+        "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "offline": { "type": "boolean" }, "wakeChannel": { "$ref": "#/$defs/wake" }
+      }
+    },
+    "peers": {
+      "type": "object", "required": ["type", "peers"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "relay-peers" }, "peers": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/peer" } },
+        "features": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" } }
+      }
+    },
+    "ping": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-ping" } } },
+    "pong": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-pong" } } },
+    "reauth": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-reauth" } } },
+    "joined": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-joined" }, "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
+    "left": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-left" }, "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
+    "error": {
+      "type": "object", "required": ["type", "message"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "relay-error" }, "message": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+        "code": { "type": "integer", "minimum": 4000, "maximum": 4999 },
+        "reason": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" }
+      }
+    }
+  }
+}

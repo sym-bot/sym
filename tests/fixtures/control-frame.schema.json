@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/control-frame.schema.json",
+  "title": "MMP v2.0 peer control frames",
+  "description": "On a CONNECTED Core Secure session these frames travel only as the inner frame of a control-encrypted envelope (§7.1, §18.2.1; the envelope is control-encrypted.schema.json), except ping and pong, which may also travel in clear, and error, which is also defined in clear (§7.4). Validating a frame here says nothing about whether it may appear on the wire in clear.",
+  "oneOf": [
+    { "$ref": "#/$defs/peerInfo" },
+    { "$ref": "#/$defs/wakeChannel" },
+    { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/ping" },
+    { "$ref": "#/$defs/pong" },
+    { "$ref": "#/$defs/mood" },
+    { "$ref": "#/$defs/cmbAnchors" }
+  ],
+  "$defs": {
+    "mood": {
+      "type": "object",
+      "description": "A session-scoped mood frame (§9.3), sent only as the inner frame of control-encrypted on a confirmed Core Secure session. It names no sender: a receiver attributes it to the session's proven nodeId and name. It is not a record and carries no signature; it is never stored, relayed or remixed. timestamp is the sender's, information only.",
+      "required": ["type", "mood"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "mood" },
+        "mood": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "context": { "anyOf": [{ "type": "string", "maxLength": 4096 }, { "type": "null" }] },
+        "timestamp": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cmbAnchors": {
+      "type": "object",
+      "description": "Sealed control frame (§9.4), the first frame a node sends on a session it admits: the cognition keys of its own records about to be replayed on this session, in send order, or an empty list when none follow.",
+      "required": ["type", "keys"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "cmb-anchors" },
+        "keys": { "type": "array", "maxItems": 50, "items": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" } }
+      }
+    },
+    "wake": {
+      "type": "object",
+      "required": ["platform", "token", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "environment": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "peerInfo": {
+      "type": "object",
+      "required": ["type", "peers"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "peer-info" },
+        "peers": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "required": ["nodeId", "name", "lastSeen"],
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": { "type": "string", "format": "uuid" },
+              "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+              "wakeChannel": { "$ref": "#/$defs/wake" },
+              "lastSeen": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "wakeChannel": {
+      "type": "object",
+      "required": ["type", "platform", "token", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "wake-channel" },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "environment": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["type", "code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "error" },
+        "code": { "type": "integer", "minimum": 1000, "maximum": 9999 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "detail": { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "ping": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "ping" } } },
+    "pong": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "pong" } } }
+  }
+}

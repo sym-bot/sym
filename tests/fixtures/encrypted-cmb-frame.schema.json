@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/encrypted-cmb-frame.schema.json",
+  "title": "MMP v2.0 Core Secure encrypted CMB transport envelope",
+  "type": "object",
+  "required": ["type", "protocolVersion", "suite", "sessionId", "sequence", "direction", "metadata", "sealed"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "cmb-encrypted" },
+    "protocolVersion": { "const": "2.0" },
+    "suite": { "const": "X25519-HKDF-SHA256-ChaCha20-Poly1305" },
+    "sessionId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "direction": { "enum": ["client-to-server", "server-to-client"] },
+    "metadata": {
+      "type": "object",
+      "description": "Clear routing and verification metadata. metadata.application omits data; all members are AEAD-bound and record-signed.",
+      "required": [
+        "key", "addressScheme", "assertionId", "signatureSuite",
+        "createdByNodeId", "createdBy", "createdTimestamp", "room", "to",
+        "lineage", "application", "sigAlg", "sig"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" },
+        "addressScheme": { "const": "mmp-cmb-merkle-v2" },
+        "assertionId": { "type": "string", "pattern": "^asrt-[0-9a-f]{64}$" },
+        "signatureSuite": { "const": "mmp-sig-v2.0" },
+        "createdByNodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+        "createdBy": { "type": "string", "minLength": 1 },
+        "createdTimestamp": { "type": "integer", "minimum": 0 },
+        "room": { "type": "string", "minLength": 1 },
+        "to": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }, { "type": "null" }] },
+        "lineage": { "anyOf": [{ "$ref": "cmb.schema.json#/$defs/lineage" }, { "type": "null" }] },
+        "application": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["mediaType", "schema", "encoding", "byteLength", "digest"],
+              "additionalProperties": false,
+              "properties": {
+                "mediaType": { "type": "string", "minLength": 1 },
+                "schema": { "type": "string", "format": "uri" },
+                "encoding": { "const": "base64url" },
+                "byteLength": { "type": "integer", "minimum": 0 },
+                "digest": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "sigAlg": { "const": "ed25519" },
+        "sig": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+      }
+    },
+    "sealed": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Unpadded base64url ciphertext concatenated with the 16-byte Poly1305 tag."
+    }
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/cmb.schema.json",
+  "title": "MMP v2.0 Cognitive Memory Block — corrected Core Secure profile",
+  "description": "The decrypted logical record has exactly two top-level sections. CAT7 cognition is content-addressed; metadata carries authenticated authorship, audience, descent and optional application bytes.",
+  "type": "object",
+  "required": ["categories", "metadata"],
+  "additionalProperties": false,
+  "properties": {
+    "categories": {
+      "type": "object",
+      "description": "The seven CAT7 categories. An unrecognised category is allowed here and dropped by the verifier (§8, §8.8.5 step 1): it is outside the address and the signature.",
+      "required": ["focus", "issue", "intent", "motivation", "commitment", "perspective", "mood"],
+      "additionalProperties": true,
+      "properties": {
+        "focus": { "$ref": "#/$defs/category" },
+        "issue": { "$ref": "#/$defs/category" },
+        "intent": { "$ref": "#/$defs/category" },
+        "motivation": { "$ref": "#/$defs/category" },
+        "commitment": { "$ref": "#/$defs/category" },
+        "perspective": { "$ref": "#/$defs/category" },
+        "mood": { "$ref": "#/$defs/moodCategory" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "key", "addressScheme", "assertionId", "signatureSuite",
+        "createdByNodeId", "createdBy", "createdTimestamp", "room", "to",
+        "lineage", "sigAlg", "sig"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" },
+        "addressScheme": { "const": "mmp-cmb-merkle-v2" },
+        "assertionId": { "type": "string", "pattern": "^asrt-[0-9a-f]{64}$" },
+        "signatureSuite": { "const": "mmp-sig-v2.0" },
+        "createdByNodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "The author's nodeId, in its one lowercase spelling (§3.1.1)." },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Signed display label, NFC (§8.8.5). Never used for identity resolution or routing."
+        },
+        "createdTimestamp": { "type": "integer", "minimum": 0 },
+        "room": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Signed room identifier, NFC (§8.8.5)." },
+        "to": {
+          "description": "The record's audience (§9.2.2): null for room-bound, or the recipient's nodeId in its one lowercase spelling.",
+          "anyOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+            { "type": "null" }
+          ]
+        },
+        "lineage": {
+          "anyOf": [
+            { "$ref": "#/$defs/lineage" },
+            { "type": "null" }
+          ]
+        },
+        "application": {
+          "anyOf": [
+            { "$ref": "application.schema.json" },
+            { "type": "null" }
+          ]
+        },
+        "sigAlg": { "const": "ed25519" },
+        "sig": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "Unpadded base64url Ed25519 signature over mmp-sig-v2.0."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "categoryMeta": {
+      "type": "object",
+      "required": ["key", "parents"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "parents": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "type": "string", "maxLength": 256 }
+        }
+      }
+    },
+    "category": {
+      "type": "object",
+      "required": ["text", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string", "maxLength": 262144, "description": "At most MAX_CATEGORY_TEXT (262,144) UTF-8 bytes after NFC (§8.8.6); this schema bound counts characters, so it is necessary, not sufficient." },
+        "meta": { "$ref": "#/$defs/categoryMeta" }
+      }
+    },
+    "moodCategory": {
+      "type": "object",
+      "required": ["text", "meta"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string", "maxLength": 262144, "description": "At most MAX_CATEGORY_TEXT (262,144) UTF-8 bytes after NFC (§8.8.6); this schema bound counts characters, so it is necessary, not sufficient." },
+        "meta": { "$ref": "#/$defs/categoryMeta" },
+        "valence": { "type": "number", "minimum": -1, "maximum": 1, "description": "Unsigned under mmp-sig-v2.0; dropped by a Core Secure verifier (§8.8.4)." },
+        "arousal": { "type": "number", "minimum": -1, "maximum": 1, "description": "Unsigned under mmp-sig-v2.0; dropped by a Core Secure verifier (§8.8.4)." }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "description": "parents is signed. method is optional, unsigned and dropped by a Core Secure verifier (§8.8.4).",
+      "required": ["parents"],
+      "additionalProperties": false,
+      "properties": {
+        "parents": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" }
+        },
+        "method": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

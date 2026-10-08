@@ -1,0 +1,123 @@
+{
+  "protocolVersion": "2.0",
+  "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+  "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+  "keysFrom": "handshake-v2.json expected.clientToServerKeyHex and expected.serverToClientKeyHex",
+  "aadRule": "UTF8(\"mmp-aead-control-v2\\n\") || lp(\"2.0\") || lp(sessionId) || lp(direction) || lp(sequence); plaintext is the minified JSON of the inner frame",
+  "cases": [
+    {
+      "direction": "server-to-client",
+      "sequence": "1",
+      "trafficKeyHex": "cfcddba80535583d252d8e744d55fe9cc792c7a63facbe5b13c5cb100bc289ae",
+      "nonceHex": "000000000000000000000001",
+      "aadHex": "6d6d702d616561642d636f6e74726f6c2d76320a333a322e3033323a663835333833653865626238383761316665393537386164616261653462356431363a7365727665722d746f2d636c69656e74313a31",
+      "plaintextUtf8": "{\"type\":\"mood\",\"mood\":\"calm, focused\",\"context\":null,\"timestamp\":1786611600000}",
+      "frame": {
+        "type": "control-encrypted",
+        "protocolVersion": "2.0",
+        "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+        "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+        "sequence": "1",
+        "direction": "server-to-client",
+        "sealed": "GbLKtJTaPcdk1O8C8LploXIAwYV-6lOuX8_VW6H2zf3gSviWN06Zb0Gn7uaO0nkZmj005je4V36vqoa35sHanYOgcKMywstLeNv_Cr1YIOvvlFxmUH6rTbdNW1AcWw8"
+      },
+      "inner": {
+        "type": "mood",
+        "mood": "calm, focused",
+        "context": null,
+        "timestamp": 1786611600000
+      }
+    },
+    {
+      "direction": "client-to-server",
+      "sequence": "2",
+      "trafficKeyHex": "789c875b5646722f94938d29a7712fcab924873cf5df4c1cf44ac18836990130",
+      "nonceHex": "000000000000000000000002",
+      "aadHex": "6d6d702d616561642d636f6e74726f6c2d76320a333a322e3033323a663835333833653865626238383761316665393537386164616261653462356431363a636c69656e742d746f2d736572766572313a32",
+      "plaintextUtf8": "{\"type\":\"cmb-fetch\",\"reqId\":\"fetch-0001\",\"key\":\"cmb-abababababababababababababababababababababababababababababababab\"}",
+      "frame": {
+        "type": "control-encrypted",
+        "protocolVersion": "2.0",
+        "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+        "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+        "sequence": "2",
+        "direction": "client-to-server",
+        "sealed": "yFkKncb_oRSPUTXn5TlDxmKW7ag_ml_NvDUn0aNUpjw6U3MqXfFOGbIt8Yrd0l1NFIb8Hle7xDp5iIkf9T_f2_XmIuQup1Ja16zULjmhGozMdSVRYoZeqQCtFrrg-HGiN0U02iOm_nQ2Zk53ywUwaKz8TOvstq3piG-xtkDwMmzwDXTFWCg"
+      },
+      "inner": {
+        "type": "cmb-fetch",
+        "reqId": "fetch-0001",
+        "key": "cmb-abababababababababababababababababababababababababababababababab"
+      }
+    },
+    {
+      "direction": "server-to-client",
+      "sequence": "2",
+      "trafficKeyHex": "cfcddba80535583d252d8e744d55fe9cc792c7a63facbe5b13c5cb100bc289ae",
+      "nonceHex": "000000000000000000000002",
+      "aadHex": "6d6d702d616561642d636f6e74726f6c2d76320a333a322e3033323a663835333833653865626238383761316665393537386164616261653462356431363a7365727665722d746f2d636c69656e74313a32",
+      "plaintextUtf8": "{\"type\":\"cmb-fetch-result\",\"reqId\":\"fetch-0001\",\"returned\":[],\"missing\":[\"cmb-abababababababababababababababababababababababababababababababab\"]}",
+      "frame": {
+        "type": "control-encrypted",
+        "protocolVersion": "2.0",
+        "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+        "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+        "sequence": "2",
+        "direction": "server-to-client",
+        "sealed": "gF6OsSQ5n5YAUApzZdIvhNzHl8jhYL-Adz5A9sIhF9Cyg3fdb3qQUW-Bjw-auJE_jaFfq1dQZ0OTEWXUISX20UW1qcxNI-cOzn3_gLuJpNGznClOiKE-dLfLtZss040Qlz9ovjYxs6pyrSuN0eS54Fv16tzSup-dd5ju4OWyll_YGCwCsBEFLail8plty--iEfaWO0jFZkbAvjBg3hqJSHg"
+      },
+      "inner": {
+        "type": "cmb-fetch-result",
+        "reqId": "fetch-0001",
+        "returned": [],
+        "missing": [
+          "cmb-abababababababababababababababababababababababababababababababab"
+        ]
+      }
+    },
+    {
+      "direction": "client-to-server",
+      "sequence": "3",
+      "trafficKeyHex": "789c875b5646722f94938d29a7712fcab924873cf5df4c1cf44ac18836990130",
+      "nonceHex": "000000000000000000000003",
+      "aadHex": "6d6d702d616561642d636f6e74726f6c2d76320a333a322e3033323a663835333833653865626238383761316665393537386164616261653462356431363a636c69656e742d746f2d736572766572313a33",
+      "plaintextUtf8": "{\"type\":\"ping\"}",
+      "frame": {
+        "type": "control-encrypted",
+        "protocolVersion": "2.0",
+        "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+        "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+        "sequence": "3",
+        "direction": "client-to-server",
+        "sealed": "LZOJ6S-sr9C2uDf87MPv_hDZ61TklBd3s-oK_BIedw"
+      },
+      "inner": {
+        "type": "ping"
+      }
+    }
+  ],
+  "innerRefused": {
+    "rule": "An authentic envelope whose inner frame §7.1 forbids: it opens, so the receiver advances to the next sequence, refuses the inner frame, and changes nothing else (§18.2.1).",
+    "direction": "server-to-client",
+    "sequence": "3",
+    "trafficKeyHex": "cfcddba80535583d252d8e744d55fe9cc792c7a63facbe5b13c5cb100bc289ae",
+    "nonceHex": "000000000000000000000003",
+    "aadHex": "6d6d702d616561642d636f6e74726f6c2d76320a333a322e3033323a663835333833653865626238383761316665393537386164616261653462356431363a7365727665722d746f2d636c69656e74313a33",
+    "plaintextUtf8": "{\"type\":\"cmb\"}",
+    "frame": {
+      "type": "control-encrypted",
+      "protocolVersion": "2.0",
+      "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
+      "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
+      "sequence": "3",
+      "direction": "server-to-client",
+      "sealed": "XxQXdbOsyXEmwFoTbgkK-pui29fRzGJbcEmP2pXC"
+    },
+    "expected": {
+      "opens": true,
+      "innerAccepted": false,
+      "nextSequence": "4",
+      "sessionOpen": true
+    }
+  }
+}
