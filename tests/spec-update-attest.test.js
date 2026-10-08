@@ -118,7 +118,7 @@ describe('equivocation, the attester\'s role and checkpoints (#27)', () => {
       A._gossipToRoster = (f) => gossiped.push(f.type);
       A._witnessCheckpoint = () => {};
       const s = admitAs(A, identity('relayer'));
-      const cp = (root) => { const o = { type: 'checkpoint', by: X.nodeId, roster: A._room, upto_seq: 8, root, at: Date.now() }; signCheckpoint(o, X.privateKey); return o; };
+      const cp = (root) => { const o = { type: 'checkpoint', by: X.nodeId, roster: A._room, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root, at: Date.now() }; signCheckpoint(o, X.privateKey); return o; };
       assert.strictEqual(A._ingestCheckpoint(cp(hex()), s.nodeId, s).ok, true);
       assert.strictEqual(gossiped.length, 1);
       const r = A._ingestCheckpoint(cp(hex()), s.nodeId, s);
@@ -150,13 +150,13 @@ describe('equivocation, the attester\'s role and checkpoints (#27)', () => {
 
   it('no checkpoint root is signed over a suffix of this node\'s chain (D1)', async () => {
     try {
-      const A = node('d1');
+      const A = node('d1', { checkpointInterval: 0 });
       for (let i = 0; i < 3; i++) A._buildAdmissionAttestation(`cmb-${hex()}`, 'aligned', CATS7, 'heuristic', `asrt-${hex()}`);
       const full = A._attestations.chainOf(A.nodeId);
       assert.strictEqual(full.length, 3);
-      assert.ok(A._emitCheckpoint(), 'over the whole chain, a checkpoint');
-      A._attestations.chainOf = () => full.slice(1); // the store evicted seq 1
-      assert.strictEqual(A._emitCheckpoint(), null, 'over a suffix, none');
+      A._attestations.chainOf = () => full.slice(1); // the store evicted seq 1 before any checkpoint
+      assert.strictEqual(A._emitCheckpoint(), null, 'over a suffix, none: the chain starts at seq 1 or not at all');
+      // (The chained construction, tests/spec-update-attest-chain.test.js, carries this to every later segment.)
     } finally { await stopAll(); }
   });
 });

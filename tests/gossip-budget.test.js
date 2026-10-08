@@ -73,11 +73,11 @@ function* busyRoom(keys, G, seconds) {
         seq.set(k.id, n);
         frames.push(attestation(k, n));
         if (n % 8 === 0) {
-          const cp = signed({ type: 'checkpoint', by: k.id, roster: ROOM, upto_seq: n, root: `root-${k.id}-${n}`, at: n }, k.priv, signCheckpoint);
+          const cp = signed({ type: 'checkpoint', by: k.id, roster: ROOM, from_seq: n, upto_seq: n, prev: (n) === 1 ? 'genesis' : `p${n}`, root: `root-${k.id}-${n}`, at: n }, k.priv, signCheckpoint);
           frames.push({ type: 'checkpoint', checkpoint: cp });
           for (const w of keys) {
             if (w === k) continue;
-            frames.push({ type: 'witness', witness: signed({ type: 'witness', attester: k.id, roster: ROOM, upto_seq: n, root: cp.root, by: w.id, role: 'participant', at: n }, w.priv, signWitness) });
+            frames.push({ type: 'witness', witness: signed({ type: 'witness', attester: k.id, roster: ROOM, from_seq: n, upto_seq: n, root: cp.root, by: w.id, role: 'participant', at: n }, w.priv, signWitness) });
           }
         }
       }
@@ -139,11 +139,11 @@ describe('gossip budget — only new statements spend it', () => {
       const spent = () => node._gossipNewLane - tokens();
       // One of each held: an attestation, a checkpoint and its witness, a conflict, a waiting witness.
       const att = attestation(A, 1);
-      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
-      const fork = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'forked', at: 2 }, A.priv, signCheckpoint);
-      const wit = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
-      const witFork = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'forked', by: W.id, role: 'participant', at: 2 }, W.priv, signWitness);
-      const waiting = signed({ type: 'witness', attester: X.id, roster: ROOM, upto_seq: 16, root: 'r16', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
+      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, A.priv, signCheckpoint);
+      const fork = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'forked', at: 2 }, A.priv, signCheckpoint);
+      const wit = signed({ type: 'witness', attester: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
+      const witFork = signed({ type: 'witness', attester: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, root: 'forked', by: W.id, role: 'participant', at: 2 }, W.priv, signWitness);
+      const waiting = signed({ type: 'witness', attester: X.id, roster: ROOM, from_seq: 16, upto_seq: 16, root: 'r16', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
       for (const f of [att, { type: 'checkpoint', checkpoint: cp }, { type: 'checkpoint', checkpoint: fork }, { type: 'witness', witness: wit }, { type: 'witness', witness: witFork }, { type: 'witness', witness: waiting }]) ingest(node, 'p', f);
       assert.strictEqual(node._attestations.hasConflict(A.id, 8), true);
       assert.strictEqual(node._attestations.witnessSeen(X.id, 16, W.id).root, 'r16', 'one waits for its checkpoint');
@@ -176,10 +176,11 @@ describe('gossip budget — only new statements spend it', () => {
 
   it('a checkpoint older than every position held is dropped before it', () => {
     withNode(1, ({ node, keys: [A] }) => {
-      for (let n = 1; n <= 32; n++) ingest(node, 'p', { type: 'checkpoint', checkpoint: signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 100 + n, root: `r${n}`, at: n }, A.priv, signCheckpoint) });
+      for (let n = 1; n <= 32; n++) ingest(node, 'p', { type: 'checkpoint', checkpoint: signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 100 + n, upto_seq: 100 + n, prev: (100 + n) === 1 ? 'genesis' : `p${100 + n}`, root: `r${n}`, at: n }, A.priv, signCheckpoint) });
       const spent = node._gossipNewLane - node._gossipBuckets.get('p').tokens;
       for (let i = 0; i < 1000; i++) {
-        const r = ingest(node, 'p', { type: 'checkpoint', checkpoint: { type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: i % 100, root: 'old', at: 1, sig: forgedSig() } });
+        const pos = (i % 99) + 1;
+        const r = ingest(node, 'p', { type: 'checkpoint', checkpoint: { type: 'checkpoint', by: A.id, roster: ROOM, from_seq: pos, upto_seq: pos, prev: pos === 1 ? 'genesis' : `p${pos}`, root: 'old', at: 1, sig: forgedSig() } });
         assert.strictEqual(r.reason, 'stale');
       }
       assert.strictEqual(node._gossipNewLane - node._gossipBuckets.get('p').tokens, spent);
@@ -228,7 +229,7 @@ describe('gossip budget — what it reports, and what it keeps', () => {
       const t0 = clock.t;
       for (let i = 0; i < 40000; i++) {
         clock.t = t0 + Math.floor(i / 8);   // 8,000 a second for 5 s
-        const f = i % 2 ? forgedAttestation(keys[i % 2]) : { type: 'witness', witness: { type: 'witness', attester: 'x', roster: ROOM, upto_seq: i, root: 'r', by: keys[0].id, role: 'participant', at: 1, sig: forgedSig() } };
+        const f = i % 2 ? forgedAttestation(keys[i % 2]) : { type: 'witness', witness: { type: 'witness', attester: 'x', roster: ROOM, from_seq: i, upto_seq: i, root: 'r', by: keys[0].id, role: 'participant', at: 1, sig: forgedSig() } };
         if (ingest(node, 'flooder', f).reason === 'over-budget') dropped++;
       }
       assert.ok(dropped > 10000, `${dropped} dropped`);
@@ -336,8 +337,8 @@ describe('signature spelling', () => {
 
   it('a checkpoint or witness not spelled canonically is refused too, before any signature check', () => {
     withNode(2, ({ node, keys: [A, W] }) => {
-      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
-      const w = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
+      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, A.priv, signCheckpoint);
+      const w = signed({ type: 'witness', attester: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
       assert.strictEqual(node._ingestCheckpoint({ ...cp, sig: `${cp.sig}=` }, 'm').reason, 'non-canonical-signature');
       assert.strictEqual(node._ingestWitness({ ...w, sig: ` ${w.sig}` }, 'm').reason, 'non-canonical-signature');
       assert.strictEqual(node._gossipBuckets.has('m'), false);
@@ -354,7 +355,7 @@ describe('signature spelling', () => {
       node._gossipToRoster = (f) => sent.push(f);
       const verdicts = { focus: 'admit', issue: 'admit', intent: 'admit', motivation: 'admit', commitment: 'admit', perspective: 'admit', mood: 'admit' };
       for (let i = 0; i < 200; i++) assert.ok(node._buildAdmissionAttestation(`cmb-own-${i}`, 'aligned', verdicts, 'heuristic'));
-      node._ingestCheckpoint(signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint), 'p');
+      node._ingestCheckpoint(signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, A.priv, signCheckpoint), 'p');
       const ownFrames = sent.filter((f) => (f.attestation || f.checkpoint || f.witness).by === node.nodeId);
       assert.deepStrictEqual([...new Set(ownFrames.map((f) => f.type))].sort(), ['sym-attest-attestation', 'sym-attest-checkpoint', 'sym-attest-witness']);
       const own = ownFrames.map((f) => f.attestation || f.checkpoint || f.witness);
@@ -364,7 +365,7 @@ describe('signature spelling', () => {
       const seq = node._attestSeq;
       const before = sent.length;
       const cps = node._attestations.checkpointsOf(node.nodeId).length;
-      const cp16 = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 16, root: 'r16', at: 2 }, A.priv, signCheckpoint);
+      const cp16 = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 16, upto_seq: 16, prev: (16) === 1 ? 'genesis' : `p${16}`, root: 'r16', at: 2 }, A.priv, signCheckpoint);
       crypto.sign = (...a) => realSign(...a).subarray(0, 63);
       try {
         assert.strictEqual(node._buildAdmissionAttestation('cmb-short', 'aligned', verdicts, 'heuristic'), null);

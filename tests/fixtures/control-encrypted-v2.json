@@ -3,6 +3,7 @@
   "suite": "X25519-HKDF-SHA256-ChaCha20-Poly1305",
   "sessionId": "f85383e8ebb887a1fe9578adabae4b5d",
   "keysFrom": "handshake-v2.json expected.clientToServerKeyHex and expected.serverToClientKeyHex",
+  "positions": "These positions continue e2e-v2.json cases on the same session, because cmb-encrypted and control-encrypted share one counter per direction: client-to-server 2 and 3 follow e2e-v2 sequences 0 and 1, and server-to-client 1 to 3 follow its 0. No traffic key seals two frames under one nonce.",
   "aadRule": "UTF8(\"mmp-aead-control-v2\\n\") || lp(\"2.0\") || lp(sessionId) || lp(direction) || lp(sequence); plaintext is the minified JSON of the inner frame",
   "cases": [
     {

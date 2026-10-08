@@ -57,8 +57,8 @@ describe('N1: the forgery penalty is charged only to a session that signed in it
       deliver(b, sA, { type: 'cmb', cmb: signedRecord(X, { categories: { focus: 'X said this' }, room: b._room }) });
       // 2. X's genuine attestation, checkpoint and witness, relayed by A.
       b._ingestAttestation(signedAs({ of: `cmb-${hex()}`, by: X.nodeId, at: Date.now(), roster: b._room, verdict: 'aligned', categories: CATS7, seq: 1, prev: 'genesis' }, X.privateKey, signAttestation), A.nodeId, A.name, sA);
-      b._ingestCheckpoint(signedAs({ by: X.nodeId, upto_seq: 1, root: hex(), at: Date.now(), roster: b._room }, X.privateKey, signCheckpoint), A.nodeId, sA);
-      b._ingestWitness(signedAs({ attester: A.nodeId, upto_seq: 1, root: hex(), by: X.nodeId, role: 'participant', at: Date.now(), roster: b._room }, X.privateKey, signWitness), A.nodeId, sA);
+      b._ingestCheckpoint(signedAs({ by: X.nodeId, from_seq: 1, upto_seq: 1, prev: (1) === 1 ? 'genesis' : `p${1}`, root: hex(), at: Date.now(), roster: b._room }, X.privateKey, signCheckpoint), A.nodeId, sA);
+      b._ingestWitness(signedAs({ attester: A.nodeId, from_seq: 1, upto_seq: 1, root: hex(), by: X.nodeId, role: 'participant', at: Date.now(), roster: b._room }, X.privateKey, signWitness), A.nodeId, sA);
 
       assert.strictEqual(sA.closed, false, 'the honest relayer\'s session is not closed');
       assert.strictEqual(b._penalised(A.nodeId), false, 'and the relayer is not refused');

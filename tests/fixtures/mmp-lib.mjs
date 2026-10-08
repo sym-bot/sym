@@ -143,6 +143,7 @@ export function recordProjectionV2(record) {
   const isNFC = (v) => typeof v === 'string' && v === v.normalize('NFC');
   for (const name of CAT7) if (!isNFC(record.categories[name].text)) return { ok: false, refusedBy: 'not NFC', member: `categories.${name}.text` };
   for (const member of ['createdBy', 'room']) if (!isNFC(record.metadata[member])) return { ok: false, refusedBy: 'not NFC', member: `metadata.${member}` };
+  if (record.metadata.application != null && !isNFC(record.metadata.application.schema)) return { ok: false, refusedBy: 'not NFC', member: 'metadata.application.schema' };
   const categories = Object.fromEntries(CAT7.map((name) => {
     const c = record.categories[name];
     return [name, { text: c.text, meta: { key: c.meta.key, parents: sortedBytewise(c.meta.parents) } }];
@@ -849,4 +850,89 @@ export function lifecycleAuthority(entries, inScope = () => false) {
 export function authorityOrder(entries) {
   const rank = (s) => (s.kind === 'grant' ? 1 : 0);
   return [...entries].sort((a, b) => a.depth - b.depth || rank(a.s) - rank(b.s) || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+}
+
+// sym-attest-v1 (Draft Candidate Extension, /spec/mmp/extensions/sym-attest): the four signed
+// constructions and the chained checkpoint root.
+const ATTEST_DOMAIN = {
+  attestation: 'mmp-attest-v1\n',
+  checkpoint: 'mmp-attest-checkpoint-v1\n',
+  witness: 'mmp-attest-witness-v1\n',
+  leaf: 'mmp-attest-leaf-v1\n',
+  node: 'mmp-attest-node-v1\n',
+  chain: 'mmp-attest-chain-v1\n',
+};
+const nfcText = (v) => String(v).normalize('NFC');
+
+export function attestationPayloadV1(a) {
+  return Buffer.concat([
+    Buffer.from(ATTEST_DOMAIN.attestation, 'utf8'),
+    lp(a.of), lp(a.assertionId), lp(a.by), lp(decimal(a.at)), lp(nfcText(a.room)),
+    lp(a.method), lp(a.verdict),
+    ...CAT7.map((name) => lp(a.categories[name])),
+    lp(a.role), lp(decimal(a.seq)), lp(a.prev),
+  ]);
+}
+
+// prev of the next attestation: the lowercase hex SHA-256 of this one's signature bytes.
+export function attestChainLink(sigBase64url) {
+  return sha256Hex(Buffer.from(sigBase64url, 'base64url'));
+}
+
+// The promote-odd Merkle root over a segment's signature bytes, in seq order.
+export function attestSegmentRoot(sigsBase64url) {
+  if (sigsBase64url.length === 0) throw new Error('a segment holds at least one attestation');
+  let level = sigsBase64url.map((s) => sha256(Buffer.concat([Buffer.from(ATTEST_DOMAIN.leaf, 'utf8'), Buffer.from(s, 'base64url')])));
+  while (level.length > 1) {
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) {
+      next.push(i + 1 < level.length ? sha256(Buffer.concat([Buffer.from(ATTEST_DOMAIN.node, 'utf8'), level[i], level[i + 1]])) : level[i]);
+    }
+    level = next;
+  }
+  return level[0].toString('hex');
+}
+
+export function attestCheckpointRoot({ prev, fromSeq, uptoSeq, segmentRoot }) {
+  return sha256Hex(Buffer.concat([
+    Buffer.from(ATTEST_DOMAIN.chain, 'utf8'),
+    lp(prev), lp(decimal(fromSeq)), lp(decimal(uptoSeq)), lp(segmentRoot),
+  ]));
+}
+
+export function attestCheckpointPayloadV1(cp) {
+  return Buffer.concat([
+    Buffer.from(ATTEST_DOMAIN.checkpoint, 'utf8'),
+    lp(cp.by), lp(nfcText(cp.room)), lp(decimal(cp.fromSeq)), lp(decimal(cp.uptoSeq)),
+    lp(cp.prev), lp(cp.root), lp(decimal(cp.at)),
+  ]);
+}
+
+export function attestWitnessPayloadV1(w) {
+  return Buffer.concat([
+    Buffer.from(ATTEST_DOMAIN.witness, 'utf8'),
+    lp(w.attester), lp(nfcText(w.room)), lp(decimal(w.fromSeq)), lp(decimal(w.uptoSeq)), lp(w.root),
+    lp(w.by), lp(w.role), lp(decimal(w.at)),
+  ]);
+}
+
+// §5.2: the same checkpoint is not a conflict; otherwise overlapping ranges, or one prev with two
+// children, prove two histories. Returns the reasons, empty when the two can lie on one chain.
+export function attestCheckpointConflict(a, b) {
+  if (a.by !== b.by) return [];
+  const same = a.fromSeq === b.fromSeq && a.uptoSeq === b.uptoSeq && a.prev === b.prev && a.root === b.root;
+  if (same) return [];
+  const reasons = [];
+  if (a.fromSeq <= b.uptoSeq && b.fromSeq <= a.uptoSeq) reasons.push('overlapping ranges');
+  if (a.prev === b.prev) reasons.push('same prev');
+  return reasons;
+}
+
+// §5.2 link checks: the range is not reversed, and when the checkpoint named by prev is held, the new
+// one starts right after it. A failure is malformed, not evidence.
+export function attestCheckpointLinkValid(cp, prevCheckpoint = null) {
+  if (cp.uptoSeq < cp.fromSeq) return false;
+  if ((cp.fromSeq === 1) !== (cp.prev === 'genesis')) return false;
+  if (prevCheckpoint && prevCheckpoint.root === cp.prev && cp.fromSeq !== prevCheckpoint.uptoSeq + 1) return false;
+  return true;
 }

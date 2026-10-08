@@ -236,6 +236,21 @@ test('relay-auth names the nodeId in its lowercase form; a closed socket forgets
   } finally { c.stop(); await relay.close(); }
 });
 
+test('relay-auth and relay-pong are paced inside the bucket (MMP 2.0 update 1, §19.1 headroom)', async () => {
+  const at = [];
+  const relay = fakeRelay((ws, n) => {
+    at.push(Date.now());
+    if (n === 1) { ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })); ws.send(JSON.stringify({ type: 'relay-ping' })); }
+  });
+  const c = client(relay.url, { rate: { perSecond: 4, burst: 1 } });
+  try {
+    c.rc.connect();
+    for (let t = 0; t < 3000 && at.length < 2; t += 10) await wait(10);
+    assert.strictEqual(at.length, 2, 'the auth, then the pong');
+    assert.ok(at[1] - at[0] >= 200, `the pong waited for a token (${at[1] - at[0]} ms after the auth, at 4 a second, burst 1)`);
+  } finally { c.stop(); await relay.close(); }
+});
+
 test('a socket destroy() let go never schedules a reconnect when its close arrives', async () => {
   const relay = fakeRelay((ws) => ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })));
   const c = client(relay.url);

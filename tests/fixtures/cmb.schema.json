@@ -43,7 +43,7 @@
           "description": "Signed display label, NFC (§8.8.5). Never used for identity resolution or routing."
         },
         "createdTimestamp": { "type": "integer", "minimum": 0 },
-        "room": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Signed room identifier, NFC (§8.8.5)." },
+        "room": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$", "description": "Signed room identifier, a §5.8 identifier (and so NFC, §8.8.5)." },
         "to": {
           "description": "The record's audience (§9.2.2): null for room-bound, or the recipient's nodeId in its one lowercase spelling.",
           "anyOf": [

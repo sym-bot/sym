@@ -44,7 +44,7 @@ function withNode(n, fn) {
   } finally { fs.rmSync(nodeDir(name), { recursive: true, force: true }); }
 }
 
-const checkpoint = (k, upto_seq, at = upto_seq) => signed({ type: 'checkpoint', by: k.id, roster: ROOM, upto_seq, root: `root-${k.id}-${upto_seq}`, at }, k.priv);
+const checkpoint = (k, upto_seq, at = upto_seq) => signed({ type: 'checkpoint', by: k.id, roster: ROOM, from_seq: upto_seq, upto_seq, prev: upto_seq === 1 ? 'genesis' : `p${upto_seq}`, root: `root-${k.id}-${upto_seq}`, at }, k.priv);
 function signed(fields, priv) { const o = { ...fields }; signCheckpoint(o, priv); return o; }
 const witnessesBy = (sent, node, attester) => sent.filter((f) => f.type === 'sym-attest-witness' && f.witness.by === node.nodeId && f.witness.attester === attester);
 const relayed = (sent, attester) => sent.filter((f) => f.type === 'sym-attest-checkpoint' && f.checkpoint.by === attester);
@@ -82,7 +82,7 @@ describe('checkpoint rate — one attester', () => {
       assert.strictEqual(witnessesBy(sent, node, A.id).length, outcome.taken);
       // A second root for a position it holds is still recorded as a conflict: that spends nothing.
       const heldPos = node._attestations.latestCheckpoint(A.id).upto_seq;
-      const fork = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: heldPos, root: 'forked', at: 1 }, A.priv);
+      const fork = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: heldPos, upto_seq: heldPos, prev: (heldPos) === 1 ? 'genesis' : `p${heldPos}`, root: 'forked', at: 1 }, A.priv);
       assert.strictEqual(node._ingestCheckpoint(fork, 'peer-0').reason, 'conflict');
       assert.strictEqual(node._attestations.hasConflict(A.id, heldPos), true);
     });
@@ -123,7 +123,7 @@ describe('checkpoint rate — one attester', () => {
       for (let i = 0; i < 2000; i++) {
         clock.t = t0 + Math.floor(i / 2);
         pos += 8;
-        const forged = { type: 'checkpoint', by: H.id, roster: ROOM, upto_seq: pos, root: 'x', at: 1, sig: crypto.randomBytes(64).toString('base64url') };
+        const forged = { type: 'checkpoint', by: H.id, roster: ROOM, from_seq: pos, upto_seq: pos, prev: (pos) === 1 ? 'genesis' : `p${pos}`, root: 'x', at: 1, sig: crypto.randomBytes(64).toString('base64url') };
         assert.strictEqual(node._ingestCheckpoint(forged, 'mallory').reason, 'bad-signature');
       }
       // Its own checkpoints, a burst of them, are all still taken.

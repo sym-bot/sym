@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meshcognition.org/spec/mmp/schema/control-frame.schema.json",
   "title": "MMP v2.0 peer control frames",
-  "description": "On a CONNECTED Core Secure session these frames travel only as the inner frame of a control-encrypted envelope (§7.1, §18.2.1; the envelope is control-encrypted.schema.json), except ping and pong, which may also travel in clear, and error, which is also defined in clear (§7.4). Validating a frame here says nothing about whether it may appear on the wire in clear.",
+  "description": "On a CONNECTED Core Secure session these frames travel only as the inner frame of a control-encrypted envelope (§7.1, §18.2.1; the envelope is control-encrypted.schema.json), except ping and pong, which may also travel in clear, and error, which a receiver may also read in clear, where it changes nothing (§7.1, §7.2). Validating a frame here says nothing about whether it may appear on the wire in clear.",
   "oneOf": [
     { "$ref": "#/$defs/peerInfo" },
     { "$ref": "#/$defs/wakeChannel" },
@@ -27,7 +27,7 @@
     },
     "cmbAnchors": {
       "type": "object",
-      "description": "Sealed control frame (§9.4), the first frame a node sends on a session it admits: the cognition keys of its own records about to be replayed on this session, in send order, or an empty list when none follow.",
+      "description": "Sealed control frame (§9.4), the first sealed frame a node sends on a session after admitting it: the cognition keys of its own records about to be replayed on this session, in send order, or an empty list when none follow.",
       "required": ["type", "keys"],
       "additionalProperties": false,
       "properties": {
@@ -59,7 +59,7 @@
             "required": ["nodeId", "name", "lastSeen"],
             "additionalProperties": false,
             "properties": {
-              "nodeId": { "type": "string", "format": "uuid" },
+              "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
               "name": { "type": "string", "minLength": 1, "maxLength": 255 },
               "wakeChannel": { "$ref": "#/$defs/wake" },
               "lastSeen": { "type": "integer", "minimum": 0 }

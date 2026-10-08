@@ -51,11 +51,12 @@ describe('the signed constructions (sym-attest-v1 §5)', () => {
   });
 
   it('a checkpoint and a witness sign under their own tags; no signature verifies as another construction', () => {
-    const cp = { by: A.nodeId, roster: 'r', upto_seq: 8, root: hex('1'), at: 5 };
-    assert.ok(core.checkpointPayload(cp).equals(Buffer.concat([Buffer.from('mmp-attest-checkpoint-v1\n'), lp(A.nodeId), lp('r'), lp('8'), lp(hex('1')), lp('5')])));
+    // The chained checkpoint (MMP 2.0 update 1): fromSeq and prev are signed; so is a witness's fromSeq.
+    const cp = { by: A.nodeId, roster: 'r', from_seq: 5, upto_seq: 8, prev: hex('0'), root: hex('1'), at: 5 };
+    assert.ok(core.checkpointPayload(cp).equals(Buffer.concat([Buffer.from('mmp-attest-checkpoint-v1\n'), lp(A.nodeId), lp('r'), lp('5'), lp('8'), lp(hex('0')), lp(hex('1')), lp('5')])));
     const W = identity('witness');
-    const w = { attester: A.nodeId, roster: 'r', upto_seq: 8, root: hex('1'), by: W.nodeId, role: 'validator', at: 6 };
-    assert.ok(core.witnessPayload(w).equals(Buffer.concat([Buffer.from('mmp-attest-witness-v1\n'), lp(A.nodeId), lp('r'), lp('8'), lp(hex('1')), lp(W.nodeId), lp('validator'), lp('6')])));
+    const w = { attester: A.nodeId, roster: 'r', from_seq: 5, upto_seq: 8, root: hex('1'), by: W.nodeId, role: 'validator', at: 6 };
+    assert.ok(core.witnessPayload(w).equals(Buffer.concat([Buffer.from('mmp-attest-witness-v1\n'), lp(A.nodeId), lp('r'), lp('5'), lp('8'), lp(hex('1')), lp(W.nodeId), lp('validator'), lp('6')])));
     core.signCheckpoint(cp, A.privateKey);
     assert.strictEqual(core.verifyCheckpoint(cp, A.publicKey).valid, true);
     // Domain separation: a checkpoint's signature is no witness's, and no attestation's.
@@ -99,10 +100,13 @@ describe('the wire form (sym-attest-v1 §5, §6 step 1)', () => {
       { ...w, seq: 1, prev: hex('c') }, { ...w, seq: 2, prev: 'genesis' }, { ...w, seq: 0 }, { ...w, sig: `${w.sig}=` }, { ...w, sigAlg: 'rsa' },
     ];
     for (const b of bad) assert.strictEqual(core.fromWireAttestation(b), null, JSON.stringify(Object.keys(b)));
-    const cp = core.signCheckpoint({ by: A.nodeId, roster: 'r', upto_seq: 8, root: hex('1'), at: 5 }, A.privateKey);
+    const cp = core.signCheckpoint({ by: A.nodeId, roster: 'room-e', from_seq: 5, upto_seq: 8, prev: hex('0'), root: hex('1'), at: 5 }, A.privateKey);
     const wc = core.toWireCheckpoint(cp);
-    assert.deepStrictEqual(Object.keys(wc).sort(), ['at', 'by', 'room', 'root', 'sig', 'sigAlg', 'uptoSeq']);
+    assert.deepStrictEqual(Object.keys(wc).sort(), ['at', 'by', 'fromSeq', 'prev', 'room', 'root', 'sig', 'sigAlg', 'uptoSeq']);
     assert.strictEqual(core.fromWireCheckpoint({ ...wc, uptoSeq: undefined, upto_seq: 8 }), null, '0.13\'s field name is not read');
+    assert.strictEqual(core.fromWireCheckpoint({ ...wc, note: 'x' }), null, 'closed');
+    assert.strictEqual(core.fromWireCheckpoint({ ...wc, prev: 'genesis' }), null, 'genesis exactly when fromSeq is 1');
+    assert.strictEqual(core.fromWireCheckpoint({ ...wc, fromSeq: 1 }), null);
     assert.strictEqual(core.verifyCheckpoint(core.fromWireCheckpoint(wc), A.publicKey).valid, true);
   });
 
@@ -124,10 +128,12 @@ describe('the wire form (sym-attest-v1 §5, §6 step 1)', () => {
       const types = new Set(sent.map((f) => f.type));
       assert.ok(types.has('sym-attest-attestation') && types.has('sym-attest-checkpoint'), [...types].join(','));
       assert.ok([...types].every((t) => t.startsWith('sym-attest-')), 'only the extension\'s frames (a peer\'s witness, relayed once, among them)');
-      assert.ok(sent.every((f) => { const o = f.attestation || f.checkpoint || f.witness; return !('roster' in o) && !('upto_seq' in o); }));
+      assert.ok(sent.every((f) => { const o = f.attestation || f.checkpoint || f.witness; return !('roster' in o) && !('upto_seq' in o) && !('from_seq' in o); }));
       assert.deepStrictEqual(got.map((e) => [e.method, e.assertionId, e.room]), [['heuristic', `asrt-${hex('8')}`, 'sa-room'], ['neural', `asrt-${hex('6')}`, 'sa-room']]);
       assert.strictEqual(got[1].prev, core.chainLink(a._attestations.chainOf(a.nodeId)[0].sig));
-      assert.strictEqual(b._attestations.checkpointAt(a.nodeId, 2).root, core.attestMerkleRoot(a._attestations.chainOf(a.nodeId).map((x) => x.sig)));
+      // The first checkpoint is chained to genesis over seq 1..2 (MMP 2.0 update 1).
+      const segmentRoot = core.attestMerkleRoot(a._attestations.chainOf(a.nodeId).map((x) => x.sig));
+      assert.strictEqual(b._attestations.checkpointAt(a.nodeId, 2).root, core.attestCheckpointRoot({ prev: 'genesis', fromSeq: 1, uptoSeq: 2, segmentRoot }));
       const rec = a.reconcileChain(a.nodeId);
       assert.strictEqual(rec.consistent, true, 'the attester reconciles its own v1 checkpoint');
     } finally { for (const n of [a, b]) { await n.stop(); fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } }

@@ -7,6 +7,180 @@
   },
   "cases": [
     {
+      "label": "a signed record with an application, as published",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            }
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "zoë",
+          "createdTimestamp": 1786611600000,
+          "room": "conformance-room",
+          "to": null,
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": {
+            "mediaType": "application/json",
+            "schema": "https://meshcognition.org/schema/café-v1.json",
+            "encoding": "base64url",
+            "byteLength": 16,
+            "digest": "sha256-a1aa2c0f4350bff317d862929d35436ff3521e2d11f0c38fa95b3e2563823a32",
+            "data": "eyJtZW51IjoiY2Fmw6kifQ"
+          },
+          "assertionId": "asrt-8c29099c3a16e9c3dec34b73a8b96b7e77366d0ed5bb79e1fc9e1d2481f27cfc",
+          "sigAlg": "ed25519",
+          "sig": "E4Lw9knqeVNuXY1plB9IBe2M_GyaX0nmAcDsH5bG3fqwpUg6zFK_tukUYzfyXB9uClCJfVDtoAgH4gi6lAKBAw"
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "projection": {
+          "categories": {
+            "focus": {
+              "text": "review the café menu",
+              "meta": {
+                "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+                "parents": []
+              }
+            },
+            "issue": {
+              "text": "the public vectors and runtime disagree",
+              "meta": {
+                "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+                "parents": [
+                  "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                  "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+                ]
+              }
+            },
+            "intent": {
+              "text": "make independent implementations interoperate",
+              "meta": {
+                "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+                "parents": []
+              }
+            },
+            "motivation": {
+              "text": "a protocol claim must be executable",
+              "meta": {
+                "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+                "parents": []
+              }
+            },
+            "commitment": {
+              "text": "one contract drives every implementation",
+              "meta": {
+                "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+                "parents": []
+              }
+            },
+            "perspective": {
+              "text": "protocol editor",
+              "meta": {
+                "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+                "parents": []
+              }
+            },
+            "mood": {
+              "text": "calm",
+              "meta": {
+                "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+                "parents": []
+              }
+            }
+          },
+          "metadata": {
+            "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+            "addressScheme": "mmp-cmb-merkle-v2",
+            "assertionId": "asrt-8c29099c3a16e9c3dec34b73a8b96b7e77366d0ed5bb79e1fc9e1d2481f27cfc",
+            "signatureSuite": "mmp-sig-v2.0",
+            "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+            "createdBy": "zoë",
+            "createdTimestamp": 1786611600000,
+            "room": "conformance-room",
+            "to": null,
+            "lineage": {
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            },
+            "application": {
+              "mediaType": "application/json",
+              "schema": "https://meshcognition.org/schema/café-v1.json",
+              "encoding": "base64url",
+              "byteLength": 16,
+              "digest": "sha256-a1aa2c0f4350bff317d862929d35436ff3521e2d11f0c38fa95b3e2563823a32",
+              "data": "eyJtZW51IjoiY2Fmw6kifQ"
+            },
+            "sigAlg": "ed25519",
+            "sig": "E4Lw9knqeVNuXY1plB9IBe2M_GyaX0nmAcDsH5bG3fqwpUg6zFK_tukUYzfyXB9uClCJfVDtoAgH4gi6lAKBAw"
+          }
+        },
+        "projectionSha256": "734749af38e445f22caad0d683b699b268e691aa736ee5937d589769e260e2c3"
+      }
+    },
+    {
       "label": "valence, arousal and lineage.method are dropped",
       "record": {
         "categories": {
@@ -945,6 +1119,166 @@
       }
     },
     {
+      "label": "createdBy of 256 astral characters: the cap counts code points, not UTF-16 units",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            }
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞",
+          "createdTimestamp": 1786611600000,
+          "room": "conformance-room",
+          "to": null,
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": null,
+          "assertionId": "asrt-c203ab1b5a4bb6adbc837a39d3d5ef6d5736e56515718f1543826778bee50dc8",
+          "sigAlg": "ed25519",
+          "sig": "OkIVJp-M66Ighvh2vIqv3UAEd_G7YBnIy0zZj0Zhlue6S0OXBzMajdG7Cob9YRLzXFeLlYtf-AwLNYUH9ZVrCA"
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "projection": {
+          "categories": {
+            "focus": {
+              "text": "review the café menu",
+              "meta": {
+                "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+                "parents": []
+              }
+            },
+            "issue": {
+              "text": "the public vectors and runtime disagree",
+              "meta": {
+                "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+                "parents": [
+                  "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                  "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+                ]
+              }
+            },
+            "intent": {
+              "text": "make independent implementations interoperate",
+              "meta": {
+                "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+                "parents": []
+              }
+            },
+            "motivation": {
+              "text": "a protocol claim must be executable",
+              "meta": {
+                "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+                "parents": []
+              }
+            },
+            "commitment": {
+              "text": "one contract drives every implementation",
+              "meta": {
+                "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+                "parents": []
+              }
+            },
+            "perspective": {
+              "text": "protocol editor",
+              "meta": {
+                "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+                "parents": []
+              }
+            },
+            "mood": {
+              "text": "calm",
+              "meta": {
+                "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+                "parents": []
+              }
+            }
+          },
+          "metadata": {
+            "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+            "addressScheme": "mmp-cmb-merkle-v2",
+            "assertionId": "asrt-c203ab1b5a4bb6adbc837a39d3d5ef6d5736e56515718f1543826778bee50dc8",
+            "signatureSuite": "mmp-sig-v2.0",
+            "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+            "createdBy": "𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞",
+            "createdTimestamp": 1786611600000,
+            "room": "conformance-room",
+            "to": null,
+            "lineage": {
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            },
+            "application": null,
+            "sigAlg": "ed25519",
+            "sig": "OkIVJp-M66Ighvh2vIqv3UAEd_G7YBnIy0zZj0Zhlue6S0OXBzMajdG7Cob9YRLzXFeLlYtf-AwLNYUH9ZVrCA"
+          }
+        },
+        "projectionSha256": "cbcd504cb204f21798ce60570cd1256b8be15ea354d5ad08eaae7aec60540637"
+      }
+    },
+    {
       "label": "a rewritten meta.key",
       "record": {
         "categories": {
@@ -1200,6 +1534,351 @@
       "expected": {
         "accepted": false,
         "refusedBy": "step 1: not NFC"
+      }
+    },
+    {
+      "label": "application.schema in NFD, though it signs the same",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            }
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "zoë",
+          "createdTimestamp": 1786611600000,
+          "room": "conformance-room",
+          "to": null,
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": {
+            "mediaType": "application/json",
+            "schema": "https://meshcognition.org/schema/café-v1.json",
+            "encoding": "base64url",
+            "byteLength": 16,
+            "digest": "sha256-a1aa2c0f4350bff317d862929d35436ff3521e2d11f0c38fa95b3e2563823a32",
+            "data": "eyJtZW51IjoiY2Fmw6kifQ"
+          },
+          "assertionId": "asrt-8c29099c3a16e9c3dec34b73a8b96b7e77366d0ed5bb79e1fc9e1d2481f27cfc",
+          "sigAlg": "ed25519",
+          "sig": "E4Lw9knqeVNuXY1plB9IBe2M_GyaX0nmAcDsH5bG3fqwpUg6zFK_tukUYzfyXB9uClCJfVDtoAgH4gi6lAKBAw"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "refusedBy": "step 1: not NFC"
+      }
+    },
+    {
+      "label": "a room outside the §5.8 grammar (an NFD spelling)",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            },
+            "valence": 0.2,
+            "arousal": -0.1
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "zoë",
+          "createdTimestamp": 1786611600000,
+          "room": "équipe",
+          "to": null,
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": null,
+          "assertionId": "asrt-dff1bf3d7fe9a7a446aab9759db2b7ea5fe6e415270b2f62ae0e22ecb456d24b",
+          "sigAlg": "ed25519",
+          "sig": "we3Ny_mwTSVDw4Tqg2qRc0ILxuAcHQK9JOghYZ76QEutab0C-E07IftV0c93W0CJygb9JoJzU7rWHnHWfEP6Bg"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "refusedBy": "step 1: record schema"
+      }
+    },
+    {
+      "label": "an uppercase to",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            }
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "zoë",
+          "createdTimestamp": 1786611600000,
+          "room": "conformance-room",
+          "to": "018F47A0-7B21-7ABC-8DEF-FEDCBA987654",
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": null,
+          "assertionId": "asrt-eea0f6f57d28c999bb3eee87115d27593e84248c2b0b3132ef6859060c36ee1e",
+          "sigAlg": "ed25519",
+          "sig": "V2bOV4h91QWFaHvq4i9d-cjnHRYE7uHs4tmMMVEWLRzhbL9Ihyz_Yv2o7EgwXiMOqMcorLBeij-S8TiqSEqDBQ"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "refusedBy": "step 1: record schema"
+      }
+    },
+    {
+      "label": "createdBy of 257 astral characters",
+      "record": {
+        "categories": {
+          "focus": {
+            "text": "review the café menu",
+            "meta": {
+              "key": "d2ee95788fc6f697ee3997158c4c189432dc15835aa2efa2c8a57f030f1ceb86",
+              "parents": []
+            }
+          },
+          "issue": {
+            "text": "the public vectors and runtime disagree",
+            "meta": {
+              "key": "8f37da919d4165770650b6508b66af65f0710157209b10724e7cc4aab717da83",
+              "parents": [
+                "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+                "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+              ]
+            }
+          },
+          "intent": {
+            "text": "make independent implementations interoperate",
+            "meta": {
+              "key": "f47998bfc4aedee3ac20c485f9cd07caacccf622ceced426c02e178741718f67",
+              "parents": []
+            }
+          },
+          "motivation": {
+            "text": "a protocol claim must be executable",
+            "meta": {
+              "key": "9dfa469fab3eeb8c98f79df69c3b2f02f277a017f9cbe3bf0f32ccbf9a4f129d",
+              "parents": []
+            }
+          },
+          "commitment": {
+            "text": "one contract drives every implementation",
+            "meta": {
+              "key": "d3bbf94949feceaea72667efe8c43a4bf3aed557ecc632caf82b7c3f2447e3c8",
+              "parents": []
+            }
+          },
+          "perspective": {
+            "text": "protocol editor",
+            "meta": {
+              "key": "3e48fe2e89a1e02f5c17c08e853bd09d5355d18a491a1bd926568089626ffa35",
+              "parents": []
+            }
+          },
+          "mood": {
+            "text": "calm",
+            "meta": {
+              "key": "d816b3859d6849569138dba79c0f1c82b7ce827a74ae63072d04f6f8a96a0e8f",
+              "parents": []
+            }
+          }
+        },
+        "metadata": {
+          "key": "cmb-15087b3c3a0a6b79971af8f56ebeccafbe4e5f71e4f88bd26c30ba99c7fe341e",
+          "addressScheme": "mmp-cmb-merkle-v2",
+          "signatureSuite": "mmp-sig-v2.0",
+          "createdByNodeId": "018f47a0-7b21-7abc-8def-0123456789ab",
+          "createdBy": "𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞𝄞",
+          "createdTimestamp": 1786611600000,
+          "room": "conformance-room",
+          "to": null,
+          "lineage": {
+            "parents": [
+              "cmb-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+              "cmb-f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+            ],
+            "method": "SVAF-v2"
+          },
+          "application": null,
+          "assertionId": "asrt-b5927bcf002c23babc4dae8c6bb4f004bfecd16d3c9833ec15dc459b52273448",
+          "sigAlg": "ed25519",
+          "sig": "S8fcC7igmjPTIrvlQreWDw_-RQXfXwdp37p5Kbr_4cfRkFpQFUwa4BSYeZO8MVtRcs9BbBzKPpMKiCZ_2qUuAg"
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "refusedBy": "step 1: record schema"
       }
     },
     {

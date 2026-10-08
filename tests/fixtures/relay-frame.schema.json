@@ -33,7 +33,7 @@
     "peer": {
       "type": "object", "required": ["nodeId", "name"], "additionalProperties": false,
       "properties": {
-        "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 },
         "offline": { "type": "boolean" }, "wakeChannel": { "$ref": "#/$defs/wake" }
       }
     },
@@ -47,8 +47,8 @@
     "ping": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-ping" } } },
     "pong": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-pong" } } },
     "reauth": { "type": "object", "required": ["type"], "additionalProperties": false, "properties": { "type": { "const": "relay-reauth" } } },
-    "joined": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-joined" }, "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
-    "left": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-left" }, "nodeId": { "type": "string", "format": "uuid" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
+    "joined": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-joined" }, "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
+    "left": { "type": "object", "required": ["type", "nodeId", "name"], "additionalProperties": false, "properties": { "type": { "const": "relay-peer-left" }, "nodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }, "name": { "type": "string", "minLength": 1, "maxLength": 255 } } },
     "error": {
       "type": "object", "required": ["type", "message"], "additionalProperties": false,
       "properties": {

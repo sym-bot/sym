@@ -470,10 +470,10 @@ describe('the witness storm', () => {
       node._roster.bind('node-wit', WIT.pub, 'proven');
       const relayed = [];
       node._gossipToRoster = (frame) => relayed.push(frame.type);
-      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       assert.strictEqual(node._ingestCheckpoint(cp, 'node-att').ok, true);
       assert.deepStrictEqual(relayed, ['sym-attest-checkpoint', 'sym-attest-witness'], 'relayed once and witnessed once');
-      const copy = (at) => signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }, WIT.priv, signWitness);
+      const copy = (at) => signed({ type: 'witness', attester: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at }, WIT.priv, signWitness);
       assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, true);
       assert.strictEqual(node._ingestWitness(copy(2), 'node-wit').ok, false, 'a second signing of the same witness is not new');
       assert.strictEqual(node._ingestWitness(copy(1), 'node-wit').ok, false, 'nor is the first one, again');
@@ -489,14 +489,14 @@ describe('the witness storm', () => {
       node._roster.bind('node-att', ATT.pub, 'proven');
       node._roster.bind('node-wit', WIT.pub, 'proven');
       node._gossipToRoster = () => {};
-      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');
       assert.strictEqual(node._ingestCheckpoint({ ...cp, sig: 'not-a-signature' }, 'node-att').reason, 'duplicate', 'not even verified');
       const forgedSig = crypto.randomBytes(64).toString('base64url');
       assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: forgedSig }, 'node-att').reason, 'bad-signature', 'a different root is verified first');
       assert.strictEqual(node._ingestCheckpoint({ ...cp, root: 'forged', sig: 'garbage' }, 'node-att').reason, 'non-canonical-signature', 'one not spelled as a signature is not even verified');
       assert.strictEqual(node._attestations.hasConflict('node-att', 8), false, 'and an unverified one marks nothing');
-      const w = signed({ type: 'witness', attester: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 }, WIT.priv, signWitness);
+      const w = signed({ type: 'witness', attester: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, root: 'r8', by: 'node-wit', role: 'participant', at: 1 }, WIT.priv, signWitness);
       node._ingestWitness(w, 'node-wit');
       assert.strictEqual(node._ingestWitness({ ...w, sig: 'garbage' }, 'node-wit').reason, 'duplicate');
     });
@@ -510,7 +510,7 @@ describe('the witness storm', () => {
       node._gossipToRoster = (f) => relayed.push(f.type);
       const metrics = [];
       node.on('metric', (m) => metrics.push(m));
-      const cp = (root, at) => signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root, at }, ATT.priv, signCheckpoint);
+      const cp = (root, at) => signed({ type: 'checkpoint', by: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root, at }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp('r8', 1), 'peer-x');
       const n = relayed.length;
       assert.strictEqual(node._ingestCheckpoint(cp('r-after-reset', 2), 'peer-x').reason, 'conflict');
@@ -529,7 +529,7 @@ describe('the witness storm', () => {
     withNode('att-text-seq', { lifecycleRole: 'participant', room: 'g' }, (node) => {
       node._roster.bind('node-att', ATT.pub, 'proven');
       node._gossipToRoster = () => {};
-      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', upto_seq: 8, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
+      const cp = signed({ type: 'checkpoint', by: 'node-att', roster: 'g', from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, ATT.priv, signCheckpoint);
       node._ingestCheckpoint(cp, 'node-att');
       assert.strictEqual(node._ingestCheckpoint({ ...cp, upto_seq: '8' }, 'node-att').reason, 'malformed', 'refused before any signature check');
       assert.deepStrictEqual(node._attestations.checkpointsOf('node-att').map((c) => c.upto_seq), [8]);

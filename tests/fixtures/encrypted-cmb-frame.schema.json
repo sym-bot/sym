@@ -10,11 +10,11 @@
     "protocolVersion": { "const": "2.0" },
     "suite": { "const": "X25519-HKDF-SHA256-ChaCha20-Poly1305" },
     "sessionId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
-    "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$" },
+    "sequence": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,28})$", "description": "Unsigned decimal, at most 79228162514264337593543950335 (2^96 − 1), since the AEAD nonce is the sequence in 96 bits. The 29-digit pattern is necessary, not sufficient." },
     "direction": { "enum": ["client-to-server", "server-to-client"] },
     "metadata": {
       "type": "object",
-      "description": "Clear routing and verification metadata. metadata.application omits data; all members are AEAD-bound and record-signed.",
+      "description": "Clear routing and verification metadata, outside the ciphertext. metadata.application omits data. The AEAD binds key, assertionId, createdByNodeId, room and to (§18.2.1); the record signature binds what mmp-sig-v2.0 covers (§8.8.4); lineage.method is bound by neither, and a Core Secure verifier drops it (§8.8.4).",
       "required": [
         "key", "addressScheme", "assertionId", "signatureSuite",
         "createdByNodeId", "createdBy", "createdTimestamp", "room", "to",
@@ -27,9 +27,9 @@
         "assertionId": { "type": "string", "pattern": "^asrt-[0-9a-f]{64}$" },
         "signatureSuite": { "const": "mmp-sig-v2.0" },
         "createdByNodeId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
-        "createdBy": { "type": "string", "minLength": 1 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 256 },
         "createdTimestamp": { "type": "integer", "minimum": 0 },
-        "room": { "type": "string", "minLength": 1 },
+        "room": { "type": "string", "pattern": "^[a-z0-9._-]{1,64}$" },
         "to": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }, { "type": "null" }] },
         "lineage": { "anyOf": [{ "$ref": "cmb.schema.json#/$defs/lineage" }, { "type": "null" }] },
         "application": {
@@ -40,7 +40,7 @@
               "additionalProperties": false,
               "properties": {
                 "mediaType": { "type": "string", "minLength": 1 },
-                "schema": { "type": "string", "format": "uri" },
+                "schema": { "type": "string", "description": "Absolute schema URI or the empty string, as in application.schema.json." },
                 "encoding": { "const": "base64url" },
                 "byteLength": { "type": "integer", "minimum": 0 },
                 "digest": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" }
@@ -55,8 +55,10 @@
     },
     "sealed": {
       "type": "string",
+      "minLength": 22,
+      "maxLength": 983062,
       "pattern": "^[A-Za-z0-9_-]+$",
-      "description": "Unpadded base64url ciphertext concatenated with the 16-byte Poly1305 tag."
+      "description": "Unpadded base64url ciphertext concatenated with the 16-byte Poly1305 tag: at least the tag, and at most what a MAX_RECORD_BYTES plaintext produces (§8.8.6)."
     }
   }
 }

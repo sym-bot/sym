@@ -277,8 +277,8 @@ describe('an over-long signature (F5)', () => {
       const has = node._attestations.has.bind(node._attestations);
       node._attestations.has = (sig) => { lookups++; return has(sig); };
       const att = signed({ of: 'cmb-1', by: A.id, at: 1, roster: ROOM, method: 'heuristic', verdict: 'aligned', categories: {}, role: 'participant', seq: 1, prev: 'p' }, A.priv, signAttestation);
-      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: 8, root: 'r8', at: 1 }, A.priv, signCheckpoint);
-      const w = signed({ type: 'witness', attester: A.id, roster: ROOM, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
+      const cp = signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, prev: (8) === 1 ? 'genesis' : `p${8}`, root: 'r8', at: 1 }, A.priv, signCheckpoint);
+      const w = signed({ type: 'witness', attester: A.id, roster: ROOM, from_seq: 8, upto_seq: 8, root: 'r8', by: W.id, role: 'participant', at: 1 }, W.priv, signWitness);
       const ingest = (sig) => [
         node._ingestAttestation({ ...att, sig }, 'p', 'p').reason,
         node._ingestCheckpoint({ ...cp, sig }, 'p').reason,
@@ -302,11 +302,11 @@ describe('an over-long signature (F5)', () => {
 });
 
 describe('equivocation at one position (F6)', () => {
-  it('a further root for a conflicted position is dropped before the budget and the signature; the first conflict is kept although the rate is spent', () => {
+  it('after a conflict the attester\'s further checkpoints are dropped before the budget and the signature; the first conflict is kept although the rate is spent', () => {
     withNode({ checkpointRate: { perSecond: 4, burst: 2 } }, ({ node, sent, metrics }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
-      const cp = (seq, root) => signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: seq, root, at: seq }, A.priv, signCheckpoint);
+      const cp = (seq, root) => signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: seq, upto_seq: seq, prev: (seq) === 1 ? 'genesis' : `p${seq}`, root, at: seq }, A.priv, signCheckpoint);
       const ingest = (c) => node._ingestCheckpoint(c, 'p');
       assert.deepStrictEqual([ingest(cp(8, 'r8')).ok, ingest(cp(16, 'r16')).ok, ingest(cp(24, 'r24')).reason], [true, true, 'over-rate'], "the attester's rate is spent");
       const relayed = sent.length;
@@ -317,7 +317,7 @@ describe('equivocation at one position (F6)', () => {
       const tokens = node._gossipBuckets.get('p').tokens;
       for (let i = 0; i < 2000; i++) {
         const third = i % 2 ? { ...cp(8, 'r8'), root: `fork-${i}`, sig: forgedSig() } : cp(8, `fork-${i}`);
-        assert.strictEqual(ingest(third).reason, 'conflict');
+        assert.strictEqual(ingest(third).reason, 'attester-equivocated', 'sym-attest-v1 §6 step 6 (update 1): dropped unverified');
       }
       assert.strictEqual(node._gossipBuckets.get('p').tokens, tokens, 'a third root spends nothing: no signature is checked');
       assert.strictEqual(node._attestations.conflictAt(A.id, 8).root, 'forked', 'and changes nothing');
@@ -380,7 +380,7 @@ describe('part A2 review suggestions', () => {
       node._log = (m) => logs.push(m);
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
-      const cp = (seq) => signed({ type: 'checkpoint', by: A.id, roster: ROOM, upto_seq: seq, root: `r${seq}`, at: seq }, A.priv, signCheckpoint);
+      const cp = (seq) => signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: seq, upto_seq: seq, prev: (seq) === 1 ? 'genesis' : `p${seq}`, root: `r${seq}`, at: seq }, A.priv, signCheckpoint);
       assert.strictEqual(node._ingestCheckpoint(cp(8), 'peer-one-xyz').ok, true);
       assert.strictEqual(node._ingestCheckpoint(cp(16), 'peer-two-xyz').reason, 'over-rate');
       assert.ok(logs.some((l) => /over their rate .* brought by peer-two/.test(l)), logs.join('\n'));

@@ -106,11 +106,11 @@ describe('§18.3.2 at every verification site in sym', () => {
       return { bytes: () => core.attestationPayload(att), set: (sig) => { att.sig = sig; }, ok: () => core.verifyAttestation(att, id.publicKey).valid };
     },
     'checkpoints (verifyCheckpoint)': () => {
-      const cp = core.signCheckpoint({ by: id.nodeId, roster: 'default', uptoSeq: 3, root: 'r'.repeat(64), at: 1 }, id.privateKey);
+      const cp = core.signCheckpoint({ by: id.nodeId, roster: 'default', fromSeq: 1, uptoSeq: 3, prev: 'genesis', root: 'r'.repeat(64), at: 1 }, id.privateKey);
       return { bytes: () => core.checkpointPayload(cp), set: (sig) => { cp.sig = sig; }, ok: () => core.verifyCheckpoint(cp, id.publicKey).valid };
     },
     'witnesses (verifyWitness)': () => {
-      const w = core.signWitness({ attester: id.nodeId, by: id.nodeId, roster: 'default', uptoSeq: 3, root: 'r'.repeat(64), role: 'participant', at: 1 }, id.privateKey);
+      const w = core.signWitness({ attester: id.nodeId, by: id.nodeId, roster: 'default', fromSeq: 1, uptoSeq: 3, root: 'r'.repeat(64), role: 'participant', at: 1 }, id.privateKey);
       return { bytes: () => core.witnessPayload(w), set: (sig) => { w.sig = sig; }, ok: () => core.verifyWitness(w, id.publicKey).valid };
     },
     'room-join grants (verifyRoomGrant)': () => {

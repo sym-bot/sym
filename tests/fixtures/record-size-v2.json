@@ -1,7 +1,7 @@
 {
   "protocolVersion": "2.0",
   "measure": "MAX_CATEGORY_TEXT and MAX_RECORD_TEXT count the UTF-8 bytes of each category text after NFC; MAX_RECORD_BYTES counts the bytes of the RFC 8785 serialization of the two-section record, metadata.application.data included, which equals the UTF-8 length of ECMAScript JSON.stringify of it in any member order (§8.8.6)",
-  "usage": "Expand each case: the base record with each fill category text set to unit repeated count times and, when applicationBytes is given, metadata.application set to { mediaType: \"application/octet-stream\", schema: \"https://meshcognition.org/schema/size-fixture-v1.json\", encoding: \"base64url\", byteLength, digest, data } over that many bytes of 0x61. Measure; compare. Only the size verdict is pinned: an expanded record keeps the base key and signature.",
+  "usage": "Expand each case: the base record with each fill category text set to unit repeated count times and, when applicationBytes is given, metadata.application set to { mediaType: \"application/octet-stream\", schema: \"https://meshcognition.org/schema/size-fixture-v1.json\", encoding: \"base64url\", byteLength, digest, data } over that many bytes of 0x61. Its digest is \"sha256-\" followed by the lowercase hex SHA-256 of those bytes (§8.8.3), and data is their unpadded base64url. Measure; compare. Only the size verdict is pinned: an expanded record keeps the base key and signature.",
   "limits": {
     "MAX_CATEGORY_TEXT": 262144,
     "MAX_RECORD_TEXT": 524288,
@@ -264,6 +264,38 @@
         "over": [
           "MAX_RECORD_TEXT"
         ]
+      }
+    },
+    {
+      "label": "CJK text within every limit, which an encoder that escapes non-ASCII would measure over MAX_RECORD_BYTES",
+      "fill": {
+        "focus": {
+          "unit": "漢",
+          "count": 87357
+        },
+        "issue": {
+          "unit": "漢",
+          "count": 87357
+        }
+      },
+      "expected": {
+        "categoryTextBytes": {
+          "focus": 262071,
+          "issue": 262071,
+          "intent": 45,
+          "motivation": 35,
+          "commitment": 40,
+          "perspective": 15,
+          "mood": 10
+        },
+        "recordTextBytes": 524287,
+        "recordBytes": 525880,
+        "notTheMeasure": {
+          "asciiEscapedBytes": 1050022,
+          "asciiEscapedVerdict": "over MAX_RECORD_BYTES: the wrong measure refuses a record that is within"
+        },
+        "within": true,
+        "over": []
       }
     },
     {

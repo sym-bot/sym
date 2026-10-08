@@ -1,0 +1,707 @@
+{
+  "extension": "sym-attest-v1",
+  "status": "Draft Candidate Extension (/spec/mmp/extensions/sym-attest)",
+  "usage": "Verification only for signatures: check that your implementation ACCEPTS each sig over its pinned payload and key (§18.3.2), and never sign and compare bytes. Every payload, chain link, segment root and checkpoint root is deterministic and MUST reproduce exactly. The attestations of forkAttestations differ from attestations only from seq 5.",
+  "testKeys": {
+    "warning": "fixed test keys; never use as identities",
+    "attester": {
+      "nodeId": "018f47a0-7b21-7abc-8def-a77e57000001",
+      "privateSeedBase64url": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
+      "publicKeyBase64url": "wFDFY3pE-oYp__PMzOIwDLNipj2Z2V_FQUUmb0MyRFo"
+    },
+    "witness": {
+      "nodeId": "018f47a0-7b21-7abc-8def-a77e57000002",
+      "privateSeedBase64url": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
+      "publicKeyBase64url": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc"
+    }
+  },
+  "attestations": [
+    {
+      "attestation": {
+        "of": "cmb-1f7dc30b47a98552e43974825f489189077a611a1ef34d0ddb0bebea7c11577f",
+        "assertionId": "asrt-28a28578bdee2cc55fafe167311b3ae5ad3d56211a50750029a39d5234603e1b",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611601000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "aligned",
+        "categories": {
+          "focus": "admit",
+          "issue": "admit",
+          "intent": "admit",
+          "motivation": "admit",
+          "commitment": "admit",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 1,
+        "prev": "genesis",
+        "sigAlg": "ed25519",
+        "sig": "yEuzFidMZvtuHRHJY1k-6-s7HnqpGziu91E8p9sE_ihiT1W9P1jz_EjttUxadoSerdYwFUU1AtVlOB60gpepBw"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3166376463333062343761393835353265343339373438323566343839313839303737613631316131656633346430646462306265626561376331313537376636393a617372742d3238613238353738626465653263633535666166653136373331316233616535616433643536323131613530373530303239613339643532333436303365316233363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363031303030393a7465616d2d726f6f6d363a6e657572616c373a616c69676e6564353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d697431313a7061727469636970616e74313a31373a67656e65736973",
+      "chainLinkOfThis": "e2cc10c877bfb36206a8bec7bce9e0f9296b9fcb56f7c8a42c743dc2bb949bb4"
+    },
+    {
+      "attestation": {
+        "of": "cmb-1db1d8fe87dbee8468ae911b8e58a73111d4e0a3a9e270939334b9d20d3260ff",
+        "assertionId": "asrt-c0a615b9a2d02037e68bdf4c446cf432ab994dfab9e9ced99895c8786e606bb1",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611602000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "guarded",
+        "categories": {
+          "focus": "admit",
+          "issue": "guard",
+          "intent": "guard",
+          "motivation": "admit",
+          "commitment": "silent",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 2,
+        "prev": "e2cc10c877bfb36206a8bec7bce9e0f9296b9fcb56f7c8a42c743dc2bb949bb4",
+        "sigAlg": "ed25519",
+        "sig": "iUwGaE0FXvojhEsiEQouRWGKvQR2NNKfIh0bC4QPEaTnhda9t1P4V5nSTW45cvzk6COS6b8F6rkSjP4ooAgdDg"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3164623164386665383764626565383436386165393131623865353861373331313164346530613361396532373039333933333462396432306433323630666636393a617372742d6330613631356239613264303230333765363862646634633434366366343332616239393464666162396539636564393938393563383738366536303662623133363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363032303030393a7465616d2d726f6f6d363a6e657572616c373a67756172646564353a61646d6974353a6775617264353a6775617264353a61646d6974363a73696c656e74353a61646d6974353a61646d697431313a7061727469636970616e74313a3236343a65326363313063383737626662333632303661386265633762636539653066393239366239666362353666376338613432633734336463326262393439626234",
+      "chainLinkOfThis": "23726f1d67a56692ae97c9e10c848b05b0c5e801a31266b76f5b0972605b4044"
+    },
+    {
+      "attestation": {
+        "of": "cmb-450d6312ea3f7172c8a1b0b5228550a2d143c38d16cf28e6065c4f0f791dd5e5",
+        "assertionId": "asrt-12bb2870435fafa0fc24b95724d4afd8f949a15a45799ee2c4a8f2b0b322170c",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611603000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "rejected",
+        "categories": {
+          "focus": "reject",
+          "issue": "reject",
+          "intent": "reject",
+          "motivation": "silent",
+          "commitment": "silent",
+          "perspective": "reject",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 3,
+        "prev": "23726f1d67a56692ae97c9e10c848b05b0c5e801a31266b76f5b0972605b4044",
+        "sigAlg": "ed25519",
+        "sig": "AJgocPedUK4YuQizrJAidjuXef-N1uk6MvwXZl-2kT_Nc_KLN5k9GT0x5X5WznMIWq0l7kaydvJifg3TlrdxDQ"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3435306436333132656133663731373263386131623062353232383535306132643134336333386431366366323865363036356334663066373931646435653536393a617372742d3132626232383730343335666166613066633234623935373234643461666438663934396131356134353739396565326334613866326230623332323137306333363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363033303030393a7465616d2d726f6f6d363a6e657572616c383a72656a6563746564363a72656a656374363a72656a656374363a72656a656374363a73696c656e74363a73696c656e74363a72656a656374353a61646d697431313a7061727469636970616e74313a3336343a32333732366631643637613536363932616539376339653130633834386230356230633565383031613331323636623736663562303937323630356234303434",
+      "chainLinkOfThis": "30f766f9ba88d5e9e8a01f332914f52938b3c316a2d1717357ca92ad3d072336"
+    },
+    {
+      "attestation": {
+        "of": "cmb-65bf378c851144a530a78dde4177b2851a18c6d337aa71720a1fc4cc14fcfc15",
+        "assertionId": "asrt-c32f712a1378f1996a8e893f157b2df9316cbea86f11b0645f4c9d18589ccedd",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611604000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "redundant",
+        "categories": {
+          "focus": "redundant",
+          "issue": "redundant",
+          "intent": "redundant",
+          "motivation": "redundant",
+          "commitment": "silent",
+          "perspective": "redundant",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 4,
+        "prev": "30f766f9ba88d5e9e8a01f332914f52938b3c316a2d1717357ca92ad3d072336",
+        "sigAlg": "ed25519",
+        "sig": "FprAoe5I72tgd2ffMGbocG7FJmm0YfeDq5fEC51nrU-UAw_njV28zJ3amwWdPYvCbX7xMYVA0c6hrCAHzj0nBA"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3635626633373863383531313434613533306137386464653431373762323835316131386336643333376161373137323061316663346363313466636663313536393a617372742d6333326637313261313337386631393936613865383933663135376232646639333136636265613836663131623036343566346339643138353839636365646433363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363034303030393a7465616d2d726f6f6d363a6e657572616c393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74363a73696c656e74393a726564756e64616e74353a61646d697431313a7061727469636970616e74313a3436343a33306637363666396261383864356539653861303166333332393134663532393338623363333136613264313731373335376361393261643364303732333336",
+      "chainLinkOfThis": "1611f58545f2c3e7fc080327e1351d0fb04ab803fa637d5887e983d9d7d81072"
+    },
+    {
+      "attestation": {
+        "of": "cmb-ce23a6884f00f5e88a0b2ff746ff17dd90ae9ca0fbf697de426920a293f6998c",
+        "assertionId": "asrt-ad81fbac6c09dbdff0d5d6f2e4fb473afe2743e532cee809421ba10bcc133506",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611605000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "aligned",
+        "categories": {
+          "focus": "admit",
+          "issue": "admit",
+          "intent": "admit",
+          "motivation": "admit",
+          "commitment": "admit",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 5,
+        "prev": "1611f58545f2c3e7fc080327e1351d0fb04ab803fa637d5887e983d9d7d81072",
+        "sigAlg": "ed25519",
+        "sig": "3ta5NFflcI2KWcCYJeoMA3wAhTIjzp4ij5Q3_ciHv1fVcidI3opXraj3ePEwsEOUiZCM8GA2cLr-E_6eian7Aw"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d6365323361363838346630306635653838613062326666373436666631376464393061653963613066626636393764653432363932306132393366363939386336393a617372742d6164383166626163366330396462646666306435643666326534666234373361666532373433653533326365653830393432316261313062636331333335303633363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363035303030393a7465616d2d726f6f6d363a6e657572616c373a616c69676e6564353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d697431313a7061727469636970616e74313a3536343a31363131663538353435663263336537666330383033323765313335316430666230346162383033666136333764353838376539383364396437643831303732",
+      "chainLinkOfThis": "6d9ab323e22e9cb272b26869e47b2025ca7deb239079144381fbcf5190a3f882"
+    },
+    {
+      "attestation": {
+        "of": "cmb-8be42bc01c03d225a371ae4de5fe075f3c5eb0ec8b0251c3719093ac12620b56",
+        "assertionId": "asrt-b63dfb06722f00c6e368b2d98af4bab4306a74d59a5c3820207c62f4c3eff4d7",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611606000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "guarded",
+        "categories": {
+          "focus": "admit",
+          "issue": "guard",
+          "intent": "guard",
+          "motivation": "admit",
+          "commitment": "silent",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 6,
+        "prev": "6d9ab323e22e9cb272b26869e47b2025ca7deb239079144381fbcf5190a3f882",
+        "sigAlg": "ed25519",
+        "sig": "ydFu1OFixHEcShi_xC5dguOABaZCoMgVvApEwIFz5pYrX2TC2ffpK_phSkgE1HuWRqNxa-sdhkHoG6_uMdLzCQ"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3862653432626330316330336432323561333731616534646535666530373566336335656230656338623032353163333731393039336163313236323062353636393a617372742d6236336466623036373232663030633665333638623264393861663462616234333036613734643539613563333832303230376336326634633365666634643733363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363036303030393a7465616d2d726f6f6d363a6e657572616c373a67756172646564353a61646d6974353a6775617264353a6775617264353a61646d6974363a73696c656e74353a61646d6974353a61646d697431313a7061727469636970616e74313a3636343a36643961623332336532326539636232373262323638363965343762323032356361376465623233393037393134343338316662636635313930613366383832",
+      "chainLinkOfThis": "257aeb5f09c035ee4735c62497373d6e8c9ce609f1fe60c4a28c3498235f418c"
+    }
+  ],
+  "forkAttestations": [
+    {
+      "attestation": {
+        "of": "cmb-1f7dc30b47a98552e43974825f489189077a611a1ef34d0ddb0bebea7c11577f",
+        "assertionId": "asrt-28a28578bdee2cc55fafe167311b3ae5ad3d56211a50750029a39d5234603e1b",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611601000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "aligned",
+        "categories": {
+          "focus": "admit",
+          "issue": "admit",
+          "intent": "admit",
+          "motivation": "admit",
+          "commitment": "admit",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 1,
+        "prev": "genesis",
+        "sigAlg": "ed25519",
+        "sig": "yEuzFidMZvtuHRHJY1k-6-s7HnqpGziu91E8p9sE_ihiT1W9P1jz_EjttUxadoSerdYwFUU1AtVlOB60gpepBw"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3166376463333062343761393835353265343339373438323566343839313839303737613631316131656633346430646462306265626561376331313537376636393a617372742d3238613238353738626465653263633535666166653136373331316233616535616433643536323131613530373530303239613339643532333436303365316233363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363031303030393a7465616d2d726f6f6d363a6e657572616c373a616c69676e6564353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d6974353a61646d697431313a7061727469636970616e74313a31373a67656e65736973"
+    },
+    {
+      "attestation": {
+        "of": "cmb-1db1d8fe87dbee8468ae911b8e58a73111d4e0a3a9e270939334b9d20d3260ff",
+        "assertionId": "asrt-c0a615b9a2d02037e68bdf4c446cf432ab994dfab9e9ced99895c8786e606bb1",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611602000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "guarded",
+        "categories": {
+          "focus": "admit",
+          "issue": "guard",
+          "intent": "guard",
+          "motivation": "admit",
+          "commitment": "silent",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 2,
+        "prev": "e2cc10c877bfb36206a8bec7bce9e0f9296b9fcb56f7c8a42c743dc2bb949bb4",
+        "sigAlg": "ed25519",
+        "sig": "iUwGaE0FXvojhEsiEQouRWGKvQR2NNKfIh0bC4QPEaTnhda9t1P4V5nSTW45cvzk6COS6b8F6rkSjP4ooAgdDg"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3164623164386665383764626565383436386165393131623865353861373331313164346530613361396532373039333933333462396432306433323630666636393a617372742d6330613631356239613264303230333765363862646634633434366366343332616239393464666162396539636564393938393563383738366536303662623133363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363032303030393a7465616d2d726f6f6d363a6e657572616c373a67756172646564353a61646d6974353a6775617264353a6775617264353a61646d6974363a73696c656e74353a61646d6974353a61646d697431313a7061727469636970616e74313a3236343a65326363313063383737626662333632303661386265633762636539653066393239366239666362353666376338613432633734336463326262393439626234"
+    },
+    {
+      "attestation": {
+        "of": "cmb-450d6312ea3f7172c8a1b0b5228550a2d143c38d16cf28e6065c4f0f791dd5e5",
+        "assertionId": "asrt-12bb2870435fafa0fc24b95724d4afd8f949a15a45799ee2c4a8f2b0b322170c",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611603000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "rejected",
+        "categories": {
+          "focus": "reject",
+          "issue": "reject",
+          "intent": "reject",
+          "motivation": "silent",
+          "commitment": "silent",
+          "perspective": "reject",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 3,
+        "prev": "23726f1d67a56692ae97c9e10c848b05b0c5e801a31266b76f5b0972605b4044",
+        "sigAlg": "ed25519",
+        "sig": "AJgocPedUK4YuQizrJAidjuXef-N1uk6MvwXZl-2kT_Nc_KLN5k9GT0x5X5WznMIWq0l7kaydvJifg3TlrdxDQ"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3435306436333132656133663731373263386131623062353232383535306132643134336333386431366366323865363036356334663066373931646435653536393a617372742d3132626232383730343335666166613066633234623935373234643461666438663934396131356134353739396565326334613866326230623332323137306333363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363033303030393a7465616d2d726f6f6d363a6e657572616c383a72656a6563746564363a72656a656374363a72656a656374363a72656a656374363a73696c656e74363a73696c656e74363a72656a656374353a61646d697431313a7061727469636970616e74313a3336343a32333732366631643637613536363932616539376339653130633834386230356230633565383031613331323636623736663562303937323630356234303434"
+    },
+    {
+      "attestation": {
+        "of": "cmb-65bf378c851144a530a78dde4177b2851a18c6d337aa71720a1fc4cc14fcfc15",
+        "assertionId": "asrt-c32f712a1378f1996a8e893f157b2df9316cbea86f11b0645f4c9d18589ccedd",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611604000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "redundant",
+        "categories": {
+          "focus": "redundant",
+          "issue": "redundant",
+          "intent": "redundant",
+          "motivation": "redundant",
+          "commitment": "silent",
+          "perspective": "redundant",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 4,
+        "prev": "30f766f9ba88d5e9e8a01f332914f52938b3c316a2d1717357ca92ad3d072336",
+        "sigAlg": "ed25519",
+        "sig": "FprAoe5I72tgd2ffMGbocG7FJmm0YfeDq5fEC51nrU-UAw_njV28zJ3amwWdPYvCbX7xMYVA0c6hrCAHzj0nBA"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3635626633373863383531313434613533306137386464653431373762323835316131386336643333376161373137323061316663346363313466636663313536393a617372742d6333326637313261313337386631393936613865383933663135376232646639333136636265613836663131623036343566346339643138353839636365646433363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363034303030393a7465616d2d726f6f6d363a6e657572616c393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74393a726564756e64616e74363a73696c656e74393a726564756e64616e74353a61646d697431313a7061727469636970616e74313a3436343a33306637363666396261383864356539653861303166333332393134663532393338623363333136613264313731373335376361393261643364303732333336"
+    },
+    {
+      "attestation": {
+        "of": "cmb-ce23a6884f00f5e88a0b2ff746ff17dd90ae9ca0fbf697de426920a293f6998c",
+        "assertionId": "asrt-ad81fbac6c09dbdff0d5d6f2e4fb473afe2743e532cee809421ba10bcc133506",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611605000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "rejected",
+        "categories": {
+          "focus": "reject",
+          "issue": "reject",
+          "intent": "reject",
+          "motivation": "silent",
+          "commitment": "silent",
+          "perspective": "reject",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 5,
+        "prev": "1611f58545f2c3e7fc080327e1351d0fb04ab803fa637d5887e983d9d7d81072",
+        "sigAlg": "ed25519",
+        "sig": "PPgu42lpwBoPmcxIudw7j78KczstUHx_dT0rcD9nTfx3Wt-6iMsncWx0q_FMYZeXHW5hw3-p-38WhphyE7ZuDQ"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d6365323361363838346630306635653838613062326666373436666631376464393061653963613066626636393764653432363932306132393366363939386336393a617372742d6164383166626163366330396462646666306435643666326534666234373361666532373433653533326365653830393432316261313062636331333335303633363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363035303030393a7465616d2d726f6f6d363a6e657572616c383a72656a6563746564363a72656a656374363a72656a656374363a72656a656374363a73696c656e74363a73696c656e74363a72656a656374353a61646d697431313a7061727469636970616e74313a3536343a31363131663538353435663263336537666330383033323765313335316430666230346162383033666136333764353838376539383364396437643831303732"
+    },
+    {
+      "attestation": {
+        "of": "cmb-8be42bc01c03d225a371ae4de5fe075f3c5eb0ec8b0251c3719093ac12620b56",
+        "assertionId": "asrt-b63dfb06722f00c6e368b2d98af4bab4306a74d59a5c3820207c62f4c3eff4d7",
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "at": 1786611606000,
+        "room": "team-room",
+        "method": "neural",
+        "verdict": "guarded",
+        "categories": {
+          "focus": "admit",
+          "issue": "guard",
+          "intent": "guard",
+          "motivation": "admit",
+          "commitment": "silent",
+          "perspective": "admit",
+          "mood": "admit"
+        },
+        "role": "participant",
+        "seq": 6,
+        "prev": "a4f0fa351d31346f0eebf41fde7de5977d9f3d57f46bad178f5abdd1c382422f",
+        "sigAlg": "ed25519",
+        "sig": "ZIHu1k8zNtd_L6CBMhpuu-7Nrb6Vu1N31jcMNCyiJh4CkHnt8AtegqbgllRRd-3bielktZ_qEIY9v2vlbnIsCw"
+      },
+      "payloadHex": "6d6d702d6174746573742d76310a36383a636d622d3862653432626330316330336432323561333731616534646535666530373566336335656230656338623032353163333731393039336163313236323062353636393a617372742d6236336466623036373232663030633665333638623264393861663462616234333036613734643539613563333832303230376336326634633365666634643733363a30313866343761302d376232312d376162632d386465662d61373765353730303030303131333a31373836363131363036303030393a7465616d2d726f6f6d363a6e657572616c373a67756172646564353a61646d6974353a6775617264353a6775617264353a61646d6974363a73696c656e74353a61646d6974353a61646d697431313a7061727469636970616e74313a3636343a61346630666133353164333133343666306565626634316664653764653539373764396633643537663436626164313738663561626464316333383234323266"
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 1,
+        "prev": "genesis",
+        "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "at": 1786611601500,
+        "sigAlg": "ed25519",
+        "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+      },
+      "segmentRootHex": "b9829f179d0cec1e280c8dcc13391ea13f04504e3e219f6000e84153268c572a",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a31313a31373a67656e6573697336343a3636356633363161386539333434656535656433383338306461613435343538316262393239643538316637613466656437666237313331663337313937626131333a31373836363131363031353030"
+    },
+    {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "segmentRootHex": "8e0d5ba33c8bf9954c635b99a5d5089413532baa998fc6d8d18c73b70bf326d7",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a32313a3336343a3636356633363161386539333434656535656433383338306461613435343538316262393239643538316637613466656437666237313331663337313937626136343a3434313266363962623536653532353666653631326666356662633165353530623463633737336133663434666364353839663237323766663265616534346631333a31373836363131363033353030"
+    },
+    {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+        "at": 1786611606500,
+        "sigAlg": "ed25519",
+        "sig": "xV47BgwYlhtTL-4UzIhJb3GRlGtMJyDnScpiaKG-AyCymUUyTUHuWJrUjJVcXUZkglZALlpErekwnGsqwOQUAA"
+      },
+      "segmentRootHex": "115073deaae739db04cdbf2905804bfa9f619355cf88643dee5439e111462817",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a34313a3636343a3434313266363962623536653532353666653631326666356662633165353530623463633737336133663434666364353839663237323766663265616534346636343a3332356630333466343939373139316136313132356633643565656166353935336436613236396661616137663738633062396231373464376430623661306131333a31373836363131363036353030"
+    }
+  ],
+  "witness": {
+    "witness": {
+      "attester": "018f47a0-7b21-7abc-8def-a77e57000001",
+      "room": "team-room",
+      "fromSeq": 4,
+      "uptoSeq": 6,
+      "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+      "by": "018f47a0-7b21-7abc-8def-a77e57000002",
+      "role": "participant",
+      "at": 1786611607000,
+      "sigAlg": "ed25519",
+      "sig": "U7dkrqqEA6W-6tksS5B801b_4SdFN4O12D2vYdUQ3FuDg871FXHcyOcNXWXIhchLywCTPZLWP7kJyHOzudOACA"
+    },
+    "payloadHex": "6d6d702d6174746573742d7769746e6573732d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a34313a3636343a3332356630333466343939373139316136313132356633643565656166353935336436613236396661616137663738633062396231373464376430623661306133363a30313866343761302d376232312d376162632d386465662d61373765353730303030303231313a7061727469636970616e7431333a31373836363131363037303030"
+  },
+  "forkCheckpoints": {
+    "forkSameCut": {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "be1685d8baca9f33c2443802ca6ef5fc5f9dcda8bb2b21b1bb28db5515211fba",
+        "at": 1786611606600,
+        "sigAlg": "ed25519",
+        "sig": "EJC5HSB5rjSJyGNYMXvwgOy2cTO7KcmNSzeh46NnoEiYHUkBgEIwAWNqB9sUFhBHlPBTERpft7OhpCIsW8pJCQ"
+      },
+      "segmentRootHex": "05424f50a3dcfc40b567005047b65f1fb76d55445840e3a6366c4111d509fc17",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a34313a3636343a3434313266363962623536653532353666653631326666356662633165353530623463633737336133663434666364353839663237323766663265616534346636343a6265313638356438626163613966333363323434333830326361366566356663356639646364613862623262323162316262323864623535313532313166626131333a31373836363131363036363030"
+    },
+    "forkFirst": {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 2,
+        "prev": "genesis",
+        "root": "ace1de806d14db12247dfbad9b1f0f6d264fb7134e6d97e3d297cbb2a4c2626b",
+        "at": 1786611602600,
+        "sigAlg": "ed25519",
+        "sig": "iVv3zWK7iCNPp0PP1XrOTFI0D_FG48pJWc825jEebn-50gCX47f7i-uYnQB_yjg_3S8F_JVlwM3-139etRDFBA"
+      },
+      "segmentRootHex": "1168a6c7e5b760729fb0b6848946e4ea42abff32da703bd821892b99d2cced81",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a31313a32373a67656e6573697336343a6163653164653830366431346462313232343764666261643962316630663664323634666237313334653664393765336432393763626232613463323632366231333a31373836363131363032363030"
+    },
+    "forkOtherCut": {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 3,
+        "uptoSeq": 5,
+        "prev": "ace1de806d14db12247dfbad9b1f0f6d264fb7134e6d97e3d297cbb2a4c2626b",
+        "root": "cec1a6a1b22265787b018c5c5b2f690a1c17befcbbf6268c608c009463176f2f",
+        "at": 1786611605600,
+        "sigAlg": "ed25519",
+        "sig": "37cSBTKyX2tm3UDknvfSZImmmBGWEEpU0v_5IQILns2xOyOty_hIQOlg0QubzXopcvd8Yrj_JgzuXLCY20udCA"
+      },
+      "segmentRootHex": "676ebb276d4ae82f55d1083f210b0ec06eb23315493d9338c92d63e616eba98f",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a33313a3536343a6163653164653830366431346462313232343764666261643962316630663664323634666237313334653664393765336432393763626232613463323632366236343a6365633161366131623232323635373837623031386335633562326636393061316331376265666362626636323638633630386330303934363331373666326631333a31373836363131363035363030"
+    },
+    "forkSamePrev": {
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 4,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "701c741e614e3fd3d58da1ac1f26a7df1b47e3df7d7c3e30886b06d614882cc8",
+        "at": 1786611604600,
+        "sigAlg": "ed25519",
+        "sig": "0aYueP2FoJ7T26ybPJvNsdR9UpjdzVpzT66OcO9C7KyVJOAsukSj6Cr7GFJcAbOctaeMmKXVbAFH9-PafvlpDA"
+      },
+      "segmentRootHex": "fbeda54b4110e6ca0b90b39da85b4aba182c0d7668097cf0c15694b394d04b2c",
+      "payloadHex": "6d6d702d6174746573742d636865636b706f696e742d76310a33363a30313866343761302d376232312d376162632d386465662d613737653537303030303031393a7465616d2d726f6f6d313a32313a3436343a3636356633363161386539333434656535656433383338306461613435343538316262393239643538316637613466656437666237313331663337313937626136343a3730316337343165363134653366643364353864613161633166323661376466316234376533646637643763336533303838366230366436313438383263633831333a31373836363131363034363030"
+    }
+  },
+  "conflicts": [
+    {
+      "label": "the same uptoSeq with different roots (the fork cut at the same boundary)",
+      "a": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+        "at": 1786611606500,
+        "sigAlg": "ed25519",
+        "sig": "xV47BgwYlhtTL-4UzIhJb3GRlGtMJyDnScpiaKG-AyCymUUyTUHuWJrUjJVcXUZkglZALlpErekwnGsqwOQUAA"
+      },
+      "b": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "be1685d8baca9f33c2443802ca6ef5fc5f9dcda8bb2b21b1bb28db5515211fba",
+        "at": 1786611606600,
+        "sigAlg": "ed25519",
+        "sig": "EJC5HSB5rjSJyGNYMXvwgOy2cTO7KcmNSzeh46NnoEiYHUkBgEIwAWNqB9sUFhBHlPBTERpft7OhpCIsW8pJCQ"
+      },
+      "expected": {
+        "conflict": true,
+        "because": [
+          "overlapping ranges",
+          "same prev"
+        ]
+      }
+    },
+    {
+      "label": "overlapping ranges at different boundaries (2..3 against 3..5): no position or prev in common",
+      "a": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "b": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 3,
+        "uptoSeq": 5,
+        "prev": "ace1de806d14db12247dfbad9b1f0f6d264fb7134e6d97e3d297cbb2a4c2626b",
+        "root": "cec1a6a1b22265787b018c5c5b2f690a1c17befcbbf6268c608c009463176f2f",
+        "at": 1786611605600,
+        "sigAlg": "ed25519",
+        "sig": "37cSBTKyX2tm3UDknvfSZImmmBGWEEpU0v_5IQILns2xOyOty_hIQOlg0QubzXopcvd8Yrj_JgzuXLCY20udCA"
+      },
+      "expected": {
+        "conflict": true,
+        "because": [
+          "overlapping ranges"
+        ]
+      }
+    },
+    {
+      "label": "one prev with two children (2..3 and 2..4 after 1..1)",
+      "a": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "b": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 4,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "701c741e614e3fd3d58da1ac1f26a7df1b47e3df7d7c3e30886b06d614882cc8",
+        "at": 1786611604600,
+        "sigAlg": "ed25519",
+        "sig": "0aYueP2FoJ7T26ybPJvNsdR9UpjdzVpzT66OcO9C7KyVJOAsukSj6Cr7GFJcAbOctaeMmKXVbAFH9-PafvlpDA"
+      },
+      "expected": {
+        "conflict": true,
+        "because": [
+          "overlapping ranges",
+          "same prev"
+        ]
+      }
+    }
+  ],
+  "notConflicts": [
+    {
+      "label": "consecutive checkpoints of one chain",
+      "a": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 1,
+        "prev": "genesis",
+        "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "at": 1786611601500,
+        "sigAlg": "ed25519",
+        "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+      },
+      "b": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "expected": {
+        "conflict": false,
+        "because": []
+      }
+    },
+    {
+      "label": "the same checkpoint signed again later: a duplicate, not a conflict",
+      "a": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+        "at": 1786611606500,
+        "sigAlg": "ed25519",
+        "sig": "xV47BgwYlhtTL-4UzIhJb3GRlGtMJyDnScpiaKG-AyCymUUyTUHuWJrUjJVcXUZkglZALlpErekwnGsqwOQUAA"
+      },
+      "b": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 4,
+        "uptoSeq": 6,
+        "prev": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "root": "325f034f4997191a61125f3d5eeaf5953d6a269faaa7f78c0b9b174d7d0b6a0a",
+        "at": 1786611609000,
+        "sigAlg": "ed25519",
+        "sig": "DylaTWwzn9Ga3glO6bJQ5wEDHvUdMDtTQEXaVUN35Uy2P0-vI43UtYkUCGBJH2rYjkBtfdw3tJbH6j-iQJPmBA"
+      },
+      "expected": {
+        "conflict": false,
+        "because": []
+      }
+    }
+  ],
+  "linkChecks": [
+    {
+      "label": "a checkpoint whose prev is held but which does not start right after it: malformed, not evidence",
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 3,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "a105d7794427d371313e8496f4a8c9db38aeeac5cc36277949e20365b327e37f",
+        "at": 1786611603700,
+        "sigAlg": "ed25519",
+        "sig": "Mny8Li_LJFZQ350GjYgSMC1MjJowxjjtyHfrdqWOFYcdVZjIIGHZUv8u8-LLK7pgNqKf2cfJVMuZC1NHQRHJDA"
+      },
+      "prev": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 1,
+        "prev": "genesis",
+        "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "at": 1786611601500,
+        "sigAlg": "ed25519",
+        "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "label": "a reversed range: refused",
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 3,
+        "uptoSeq": 2,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "prev": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 1,
+        "prev": "genesis",
+        "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "at": 1786611601500,
+        "sigAlg": "ed25519",
+        "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "label": "the honest second checkpoint: valid",
+      "checkpoint": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 2,
+        "uptoSeq": 3,
+        "prev": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "root": "4412f69bb56e5256fe612ff5fbc1e550b4cc773a3f44fcd589f2727ff2eae44f",
+        "at": 1786611603500,
+        "sigAlg": "ed25519",
+        "sig": "zEZkjFio9Tsndr597PVPosp3XF2GRTWZzohifCkjDT9C2Hm-8d0eGE2k5uYgqBPN62r6iMNWwuRow4E994dKAg"
+      },
+      "prev": {
+        "by": "018f47a0-7b21-7abc-8def-a77e57000001",
+        "room": "team-room",
+        "fromSeq": 1,
+        "uptoSeq": 1,
+        "prev": "genesis",
+        "root": "665f361a8e9344ee5ed38380daa454581bb929d581f7a4fed7fb7131f37197ba",
+        "at": 1786611601500,
+        "sigAlg": "ed25519",
+        "sig": "iUowNBs6Ht1_37-a_NkOZEUWuwvSv_Q3-dG6shKRDXivFOQORFALEETUYF-Clw2bUMnWe7-T1IyTRn8dlmuRBw"
+      },
+      "expected": {
+        "valid": true
+      }
+    }
+  ]
+}

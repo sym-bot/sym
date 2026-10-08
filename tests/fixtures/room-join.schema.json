@@ -21,8 +21,8 @@
         "grantee": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
         "granteeKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
         "grantedBy": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
-        "grantedAt": { "type": "integer", "minimum": 0 },
-        "expiresAt": { "type": "integer", "minimum": 0 },
+        "grantedAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "expiresAt": { "type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "At most 2^53 − 1, so every parser reads the integer the owner signed." },
         "sigAlg": { "const": "ed25519" },
         "sig": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
       }

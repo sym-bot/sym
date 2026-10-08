@@ -57,7 +57,8 @@ describe('record-projection-v2: the canonical signed projection (#34, D2)', () =
       if (!bySig.has(sig)) bySig.set(sig, new Set());
       bySig.get(sig).add(canonicalJSON(canonicalRecordV2_0(c.record)));
     }
-    assert.strictEqual(bySig.size, 2, 'two assertions among the accepted cases');
+    assert.ok(bySig.size >= 2, 'several assertions among the accepted cases');
+    assert.ok([...bySig.values()].some((forms) => forms.size === 1) && v.cases.filter((x) => x.expected.accepted).length > bySig.size, 'and some assertion comes in several variants');
     for (const forms of bySig.values()) assert.strictEqual(forms.size, 1);
   });
 
@@ -77,7 +78,8 @@ describe('record-projection-v2: the canonical signed projection (#34, D2)', () =
 
 describe('rooms, application.schema and the application member on receipt (MMP 2.0 update 1)', () => {
   const v = vendored('record-projection-v2.json');
-  const base = () => JSON.parse(JSON.stringify(v.cases[0].record));
+  // A published record with no application (record-projection-v2's own base case).
+  const base = () => JSON.parse(JSON.stringify(v.cases.find((c) => c.label.startsWith('valence, arousal and lineage.method')).record));
   it('a record whose room is not a §5.8 identifier is refused', () => {
     for (const room of ['Conformance-Room', 'cafe\u0301', 'caf\u00e9', 'x'.repeat(65), 'a b']) {
       const r = base(); r.metadata.room = room;
