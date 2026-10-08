@@ -320,3 +320,69 @@ describe('§6.6: the old faces of the time-replay rule are gone', () => {
     assert.deepStrictEqual(chain.map((c) => status(st2, c)), ['in-force', 'in-force', 'in-force', 'in-force', 'not held']);
   });
 });
+
+// ── Capacity (§6.6.6: removals first; one signer never displaces another) ─────
+
+describe('§6.6 capacity: a full store keeps what comes first in authority order', () => {
+  /** Two admins whose in-force subtrees fill a store of 600 (the release review's scene). */
+  function flood() {
+    const all = []; const admins = [];
+    for (let c = 0; c < 2; c++) {
+      const gA = grant('anchor', party(), 'admin'); all.push(gA); admins.push(gA);
+      const subs = Array.from({ length: 16 }, () => grant(gA, party(), 'admin'));
+      all.push(...subs);
+      for (let i = 0; i < 240; i++) all.push(grant(gA, party(), 'participant'));
+      for (const g of subs) for (let i = 0; i < 4; i++) all.push(grant(g, party(), 'participant'));
+    }
+    return { all, admins };
+  }
+
+  it('the anchor\'s revoke of the flooding admins is taken, and the store resolves as an unbounded one does', () => {
+    const { all, admins } = flood();
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 600 });
+    for (const x of all) st.ingest(x);
+    assert.ok(st.size() <= 600);
+    const r = revoke('anchor', admins);
+    assert.strictEqual(st.ingest(r).result, 'held', 'a revoke is never refused for capacity');
+    for (const g of admins) assert.strictEqual(st.statusOf(id(g)), 'removed');
+    const unbounded = store([...all, r]);
+    assert.deepStrictEqual([...st.resolve().inForce].sort(), [...unbounded.resolve().inForce].sort());
+  });
+
+  it('a deep grant that comes last in a full store is refused, as over capacity; an anchor-level grant or a revoke never is', () => {
+    const gA = grant('anchor', party(), 'admin');
+    const sub = grant(gA, party(), 'admin');
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 100 });
+    st.ingest(gA); st.ingest(sub);
+    for (let i = 0; i < 98; i++) st.ingest(grant(gA, party(), 'participant'));
+    assert.strictEqual(st.size(), 100);
+    const deep = grant(sub, party(), 'participant'); // depth 3: the last in authority order
+    assert.strictEqual(st.ingest(deep).result, 'over-capacity');
+    assert.strictEqual(st.has(id(deep)), false);
+    while (st.size() < 100) st.ingest(grant(gA, party(), 'participant'));
+    assert.strictEqual(st.ingest(grant('anchor', party(), 'validator')).result, 'held');
+    while (st.size() < 100) st.ingest(grant(gA, party(), 'participant'));
+    const r = revoke(sub, [sub]); // a revoke at depth 3: also last in order, never refused
+    assert.strictEqual(st.ingest(r).result, 'held');
+  });
+
+  it('what is not live goes first, then the last in authority order; one sort frees a batch', () => {
+    const gA = grant('anchor', party(), 'admin');
+    const gB = grant('anchor', party(), 'admin');
+    const dead = [];
+    const rB = revoke('anchor', [gB]);
+    const live = [gA, rB];
+    for (let i = 0; i < 40; i++) live.push(grant(gA, party(), 'participant'));
+    for (let i = 0; i < 40; i++) dead.push(grant(gB, party(), 'participant')); // under a removed grant
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 70 });
+    for (const x of [gA, gB, rB, ...dead, ...live.slice(2)]) st.ingest(x);
+    assert.ok(st.size() <= 70);
+    for (const x of live) assert.strictEqual(st.has(id(x)), true, 'every live statement kept');
+    const evicted = st.capacityReport().evicted;
+    assert.ok(evicted >= 11, `the dead ones went (${evicted})`);
+    // The batch: room was freed below the bound, so the next arrival needs no sort.
+    const before = st.capacityReport().evicted;
+    st.ingest(grant(gA, party(), 'participant'));
+    assert.strictEqual(st.capacityReport().evicted, before);
+  });
+});

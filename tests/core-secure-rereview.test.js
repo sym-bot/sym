@@ -94,7 +94,7 @@ describe('N1: the forgery penalty is charged only to a session that signed in it
       assert.strictEqual(sG2.closed, false, 'rate-limited, not closed');
       assert.ok(!metrics.some((m) => m.type === 'forged-signature'));
       for (let i = 0; i < 20; i++) b._ingestAuthority({ ...bad, nonce: Auth.freshNonce() }, sG2);
-      assert.strictEqual(b._relayMuted(G2.nodeId, `authority:${G2.publicKey}`), true, 'past a few failures that signer is dropped unread from this session');
+      assert.strictEqual(b._relayMuted(G2.nodeId, 'authority-statements'), true, 'past a few failures that peer\'s authority statements are dropped unread (the mute is the session\'s, never a key the sender chose)');
       // Signed with K1, the key the chain names: valid, whichever session delivers it.
       const good = Auth.signStatement({ kind: 'grant', authorisedBy: Auth.statementId(gG), subject: { nodeId: W.nodeId, key: W.publicKey }, role: 'validator', nonce: Auth.freshNonce(), sigs: [] }, G1.privateKey, G1.publicKey);
       assert.strictEqual(b._ingestAuthority(good, admitAs(b, identity('anyone'))).result, 'held');

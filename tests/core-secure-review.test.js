@@ -187,12 +187,13 @@ describe('D. no shared budget before verification; bounds (cs-review-B, cs-revie
       const M1 = identity('signer-1');
       for (let i = 0; i < 64; i++) deliver(b, s, { type: 'authority-statement', statement: { ...stmt(M1), pad: big } });
       assert.ok(!s._authPending || s._authPending.size === 0, 'a member the schema does not define: never held');
-      assert.strictEqual(b._relayMuted(s.nodeId, `authority:${M1.publicKey}`), true, 'and past a few, that signer\'s statements from this peer are dropped unread');
+      assert.strictEqual(b._relayMuted(s.nodeId, 'authority-statements'), true, 'and past a few, that peer\'s authority statements are dropped unread');
+      const s2 = admitAs(b, identity('m2'));
       const M2 = identity('signer-2');
-      for (let i = 0; i < 100; i++) deliver(b, s, { type: 'authority-statement', statement: stmt(M2) });
-      assert.strictEqual(s._authPending.size, 64);
+      for (let i = 0; i < 100; i++) deliver(b, s2, { type: 'authority-statement', statement: stmt(M2) });
+      assert.strictEqual(s2._authPending.size, 64, 'at most 64 pending per session; past that, refused before verifying');
       let bytes = 0;
-      for (const e of s._authPending.values()) bytes += JSON.stringify(e.statement).length;
+      for (const e of s2._authPending.values()) bytes += JSON.stringify(e.statement).length;
       assert.ok(bytes <= 64 * 4096, `held ${bytes} bytes`);
     } finally { await stopAll(b); }
   });

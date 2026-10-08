@@ -36,6 +36,8 @@ const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
 const { RelayConnection } = require('../lib/relay');
 const Auth = require('../lib/core/authority');
+// A pin whose key signs nothing here: authority statements are judged (an unpinned node ignores them).
+const SOME_PIN = (() => { const k = crypto.generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'); return { threshold: 1, keys: [{ key: k }] }; })();
 const { signAttestation, signCheckpoint, signWitness } = require('../lib/core');
 const { admitAs } = require('./_core-secure');
 
@@ -93,7 +95,7 @@ describe('authority statements are gossip under the budget (F1, MMP §6.6.8)', (
       for (let i = 0; i < 1000; i++) reasons.add(node._ingestAuthority({ ...g }, q).result);
       assert.deepStrictEqual([...reasons].sort(), ['duplicate', 'invalid'], 'a spelling is not of the shape; the id is a repeat');
       assert.strictEqual(node._authority.size(), 1, 'one statement held');
-      const file = path.join(node._dir, 'authority', `statements-${Auth.pinDigest(node._pin)}.jsonl`);
+      const file = path.join(node._dir, 'authority', 'statements.jsonl');
       assert.strictEqual(fs.readFileSync(file, 'utf8').trim().split('\n').length, 1, 'one line written');
       node._authoritySettle();
       assert.strictEqual(sent.filter((f) => f.type === 'authority-statement').length, 1, 'and nothing relayed again');
@@ -127,7 +129,7 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
   });
 
   it('a peer\'s frames over any of its sessions spend one budget; checkpoints, witnesses and authority statements too', () => {
-    withNode({}, ({ node }) => {
+    withNode({ anchor: SOME_PIN }, ({ node }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
       const lan = admitAs(node, { nodeId: 'peer-two-paths' });
@@ -264,7 +266,7 @@ describe('drop reporting cannot break gossip or shutdown (F4)', () => {
 
 describe('an over-long signature (F5)', () => {
   it('is malformed, refused before anything decodes or looks it up; a re-spelling is refused before the lookup too', () => {
-    withNode({}, ({ node }) => {
+    withNode({ anchor: SOME_PIN }, ({ node }) => {
       const A = kp('att-A');
       const W = kp('wit-W');
       node._roster.bind(A.id, A.pub, 'proven');
