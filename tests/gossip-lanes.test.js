@@ -44,8 +44,10 @@ const { admitAs } = require('./_core-secure');
 const ROOM = 'g';
 const kp = (id) => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'der' }, privateKeyEncoding: { type: 'pkcs8', format: 'der' } });
-  // nodeIds are canonical lowercase at every door, a grant's included (security review B).
-  return { id: id.toLowerCase(), pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
+  // nodeIds are canonical lowercase UUIDs at every door (security review B; sym-attest-v1's signers,
+  // MMP 2.0 update 1): a readable label stands for a fixed UUID.
+  const h = crypto.createHash('sha256').update(String(id)).digest('hex');
+  return { id: `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`, pub: publicKey.slice(-32).toString('base64url'), priv: privateKey.slice(-32).toString('base64url') };
 };
 const signed = (fields, priv, sign) => { const o = { ...fields }; sign(o, priv); return o; };
 const forgedSig = () => crypto.randomBytes(64).toString('base64url');
@@ -202,7 +204,7 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
       node._log = (m) => logs.push(m);
       const p = admitAs(node, { nodeId: 'peer-flooding' });
       for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'sym-attest-attestation', attestation: wireForged(A) });
-      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'sym-attest-attestation', attestation: wireForged(A, { by: `nobody-${i}` }) });
+      for (let i = 0; i < 50; i++) node._frameHandler.handle(p, { type: 'sym-attest-attestation', attestation: wireForged(A, { by: crypto.randomUUID() }) }); // signers nobody bound
       assert.strictEqual(logs.filter((l) => /Attestation from .* dropped \(bad-signature\)/.test(l)).length, 1);
       assert.strictEqual(logs.filter((l) => /dropped \(unknown-attester-key\)/.test(l)).length, 1);
     });
@@ -309,6 +311,7 @@ describe('equivocation at one position (F6)', () => {
       assert.deepStrictEqual([ingest(cp(8, 'r8')).ok, ingest(cp(16, 'r16')).ok, ingest(cp(24, 'r24')).reason], [true, true, 'over-rate'], "the attester's rate is spent");
       const relayed = sent.length;
       assert.strictEqual(ingest(cp(8, 'forked')).reason, 'conflict', 'a second root at a held position: the evidence');
+      assert.strictEqual(sent.length, relayed + 1, 'relayed once, as evidence (#27)');
       assert.strictEqual(node._attestations.conflictAt(A.id, 8).root, 'forked', 'kept although the rate is spent');
       assert.strictEqual(metrics.filter((m) => m.type === 'attestation-conflict').length, 1);
       const tokens = node._gossipBuckets.get('p').tokens;
@@ -318,7 +321,7 @@ describe('equivocation at one position (F6)', () => {
       }
       assert.strictEqual(node._gossipBuckets.get('p').tokens, tokens, 'a third root spends nothing: no signature is checked');
       assert.strictEqual(node._attestations.conflictAt(A.id, 8).root, 'forked', 'and changes nothing');
-      assert.strictEqual(sent.length, relayed, 'nor is relayed');
+      assert.strictEqual(sent.length, relayed + 1, 'a third root is not relayed');
     });
   });
 });

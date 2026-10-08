@@ -502,7 +502,7 @@ describe('the witness storm', () => {
     });
   });
 
-  it('a signed second root is a conflict: surfaced once, reported by reconcile, never relayed', () => {
+  it('a signed second root is a conflict: surfaced once, reported by reconcile, relayed once as evidence (#27)', () => {
     const ATT = kp();
     withNode('att-conflict', { lifecycleRole: 'participant', room: 'g' }, (node) => {
       node._roster.bind('node-att', ATT.pub, 'proven');
@@ -514,8 +514,9 @@ describe('the witness storm', () => {
       node._ingestCheckpoint(cp('r8', 1), 'peer-x');
       const n = relayed.length;
       assert.strictEqual(node._ingestCheckpoint(cp('r-after-reset', 2), 'peer-x').reason, 'conflict');
+      assert.strictEqual(relayed.length, n + 1, 'the conflicting copy is relayed once, as evidence');
       node._ingestCheckpoint(cp('r-after-reset', 3), 'peer-x');
-      assert.strictEqual(relayed.length, n, 'a conflict is not relayed');
+      assert.strictEqual(relayed.length, n + 1, 'and no more');
       const conflicts = metrics.filter((x) => x.type === 'attestation-conflict');
       assert.strictEqual(conflicts.length, 1, 'said once per position');
       assert.deepStrictEqual([conflicts[0].keptRoot, conflicts[0].otherRoot], ['r8', 'r-after-reset']);
