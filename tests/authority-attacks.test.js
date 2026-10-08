@@ -426,6 +426,21 @@ describe('§6.6 capacity: a full store keeps what comes first in authority order
     assert.ok(lines <= 2 * (1 + 256 + SLACK) + 2 * SLACK + 2, `the file holds ${lines} lines`);
   });
 
+  it('a removed anchor-level grant kept alive only as a rescued statement\'s chain is not protected: it goes once what hangs from it has', () => {
+    const gA = grant('anchor', party(), 'admin');
+    const gC = grant(gA, party(), 'participant');
+    const rA = revoke('anchor', [gA]);
+    const eC = endorse('anchor', [gC]); // the anchor keeps gC: gA stays live (on gC's chain), not in force
+    const st = new AuthorityStore({ pin: PIN, maxHeld: 10 });
+    for (const x of [gA, gC, rA, eC]) st.ingest(x);
+    assert.strictEqual(st.statusOf(id(gC)), 'in-force');
+    assert.strictEqual(st.statusOf(id(gA)), 'removed');
+    for (let i = 0; i < 7; i++) st.ingest(grant('anchor', party(), 'validator')); // in force, protected
+    assert.strictEqual(st.has(id(gC)), false, 'the deepest live statement went first');
+    assert.strictEqual(st.has(id(gA)), false, 'and the removed grant with it: anchor-level, but not in force');
+    for (const x of [rA, eC]) assert.strictEqual(st.has(id(x)), true, 'the in-force anchor-level statements stay');
+  });
+
   it('dead revokes never displace an honest tree in force (one signer never displaces another)', () => {
     const st = new AuthorityStore({ pin: PIN, maxHeld: 300 });
     const honest = [];
