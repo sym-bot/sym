@@ -116,9 +116,11 @@ if (args.includes('--status')) {
 // Resolve which room this node joins, in precedence order:
 //   1. SYM_ROOM env   2. persisted ~/.sym/room (written by `sym join`)   3. default
 // The persisted file is the source of truth across launchd/spawn restarts;
-// env overrides it for one run. room -> service type matches the MCP node +
-// sym-swift, so CLI peers discover app/Claude peers in the same room.
-const { roomServiceType, isValidRoom } = require('../lib/rooms');
+// env overrides it for one run. Every room is advertised on _sym._tcp with its name in the TXT
+// `room` key (MMP §5.1, update 1); the per-room type earlier releases advertised is browsed too,
+// where it is a valid service name, so a 2.0 node still advertising only that type is found.
+const { isValidRoom } = require('../lib/rooms');
+const { legacyServiceType } = require('../lib/core/room-id');
 const ROOM_FILE = path.join(SYM_DIR, 'room');
 // The room used to persist under a different filename. That file is NOT read — one name, no
 // fallback — but its presence is ANNOUNCED, because the alternative is the worst outcome
@@ -145,10 +147,11 @@ if (ROOM === 'default' && !process.env.SYM_ROOM) {
 }
 
 if (!isValidRoom(ROOM)) {
-  log(`Invalid room "${ROOM}" — must be kebab-case or "default". Falling back to default.`);
+  log(`Invalid room "${ROOM}" — a room is [a-z0-9._-], 1 to 64 characters (MMP §5.8), and not "sym". Falling back to default.`);
   ROOM = 'default';
 }
-log(`Mesh room: ${ROOM} (${roomServiceType(ROOM)})`);
+const LEGACY_BROWSE = legacyServiceType(ROOM);
+log(`Mesh room: ${ROOM} (_sym._tcp, TXT room=${ROOM}${LEGACY_BROWSE ? `; also browsing ${LEGACY_BROWSE}` : ''})`);
 
 // ── SYM Node ───────────────────────────────────────────────────
 
@@ -169,7 +172,8 @@ const node = new SymNode({
   cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
   relayOnly: RELAY_ONLY,
   room: ROOM,
-  discoveryServiceType: roomServiceType(ROOM),
+  discoveryServiceType: '_sym._tcp',
+  discoveryBrowseTypes: LEGACY_BROWSE ? [LEGACY_BROWSE] : [],
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,

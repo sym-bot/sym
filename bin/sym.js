@@ -47,7 +47,7 @@ const path = require('path');
 const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
-const { isValidRoom, roomServiceType } = require('../lib/rooms');
+const { isValidRoom } = require('../lib/rooms');
 // The CLI's state lives where its daemon's does (SYM_STATE_DIR, default ~/.sym): rooted in the
 // home, two SYM_STATE_DIR deployments shared one pid file (`sym stop` for one stopped the other),
 // and a room or relay set for a rooted daemon went to a file it never reads.
@@ -248,7 +248,7 @@ function applyStartFlags() {
   const g = flagValue('--room');
   if (g !== null) {
     if (!isValidRoom(g)) {
-      console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+      console.error(`Invalid room "${g}" — a room is [a-z0-9._-], 1 to 64 characters (e.g. backend-team, acme.prod), or "default"; not "sym".`);
       process.exit(1);
     }
     persistRoom(g);
@@ -322,9 +322,9 @@ function restartIntoRoom(room, doneMsg) {
 
 function cmdJoin() {
   const g = args[1];
-  if (!g) { console.error('Usage: sym join <room>   (kebab-case, or "default")'); process.exit(1); }
+  if (!g) { console.error('Usage: sym join <room>   ([a-z0-9._-], 1 to 64 characters, or "default")'); process.exit(1); }
   if (!isValidRoom(g)) {
-    console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+    console.error(`Invalid room "${g}" — a room is [a-z0-9._-], 1 to 64 characters (e.g. backend-team, acme.prod), or "default"; not "sym".`);
     process.exit(1);
   }
   restartIntoRoom(g, `joined room "${g}".`);
@@ -336,7 +336,7 @@ function cmdLeave() {
 
 function cmdRoom() {
   const g = readRoom();
-  console.log(`current room: ${g}   (${roomServiceType(g)})`);
+  console.log(`current room: ${g}   (advertised on _sym._tcp, TXT room=${g})`);
 }
 
 // Discover SYM-mesh rooms with at least one node online on this LAN.
@@ -1269,7 +1269,7 @@ ${bold('Usage:')}
   sym peers                          List connected peers
   sym room                          Show the current room
   sym rooms                         Discover SYM-mesh rooms live on the LAN
-  sym join <name>                    Switch into a room (kebab-case, or "default")
+  sym join <name>                    Switch into a room ([a-z0-9._-], or "default")
   sym leave                          Return to the default global mesh
   sym metrics                        Show protocol metrics and LLM cost
   sym publish [flags] <json>         Publish a projection (CAT7 categories as JSON)
