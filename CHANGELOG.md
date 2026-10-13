@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.14.1 — unreleased
+## 0.14.1 — 2026-10-13
 
 **A public surface.** 0.14.1 declares what an embedding host may import and rely on, so that a host (XMesh is
 the first) can stop reaching into `lib/`. It is additive for everything that was supported; the one thing it takes
