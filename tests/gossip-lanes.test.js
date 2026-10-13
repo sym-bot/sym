@@ -63,6 +63,12 @@ const respell = (s) => [`${s}=`, `${s}==`, ` ${s}`, `${s.slice(0, 40)}\n${s.slic
 function withNode(opts, fn) {
   const name = `lanes-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const node = new SymNode({ name, silent: true, discovery: new NullDiscovery(), room: ROOM, ...opts });
+  const cleanup = () => {
+    for (const r of node._dropReports.values()) clearTimeout(r.timer);
+    node._releaseIdentityLock?.();
+    fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  };
+  let out;
   try {
     const sent = [];
     node._gossipToRoster = (f) => sent.push(f);
@@ -70,12 +76,12 @@ function withNode(opts, fn) {
     node._gossipClock = () => clock.t;
     const metrics = [];
     node.on('metric', (m) => metrics.push(m));
-    return fn({ node, sent, clock, metrics });
-  } finally {
-    for (const r of node._dropReports.values()) clearTimeout(r.timer);
-    node._releaseIdentityLock?.();
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
-  }
+    out = fn({ node, sent, clock, metrics });
+  } catch (e) { cleanup(); throw e; }
+  // An async callback (remix() settles later, 0.14.0 §15.8) is cleaned up after it settles.
+  if (out && typeof out.then === 'function') return out.finally(cleanup);
+  cleanup();
+  return out;
 }
 
 describe('authority statements are gossip under the budget (F1, MMP §6.6.8)', () => {
@@ -355,14 +361,16 @@ describe('part A2 review suggestions', () => {
     } finally { Date.now = realNow; }
   });
 
-  it('an ESIGN from the synthesis loop is said as the node failing to sign, not as a delegate error', () => {
-    withNode({}, ({ node }) => {
+  it('an ESIGN from the synthesis loop is said as the node failing to sign, not as a delegate error', async () => {
+    const settle = () => new Promise((r) => setImmediate(r));
+    await withNode({}, async ({ node }) => {
       const logs = [];
       node._log = (m) => logs.push(m);
       node._synthesisDelegate = () => ({ focus: 'a synthesis' });
       node._hasNewDomainData = true; // the synthesis is the remix path (§15.7): it needs new domain data
       node.remember = () => { const e = new Error('CMB signing failed: no key'); e.code = 'ESIGN'; throw e; };
       node._frameHandler._handleXMeshInsight('p', 'p', { anomaly: 0.1 });
+      await settle(); // remix() is asynchronous (§15.8): its failure is said when it settles
       assert.ok(logs.includes('Synthesis not shared: this node cannot sign its records'), logs.join('\n'));
       assert.ok(!logs.some((l) => l.startsWith('Synthesis delegate error')));
       node._synthesisDelegate = () => { throw new Error('the delegate broke'); };
