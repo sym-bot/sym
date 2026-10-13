@@ -6,7 +6,8 @@
  * were what made the full suite report "semantic encoder did not become ready".
  *
  * Run in a child process with the model library replaced by a counting stand-in, so no model is
- * downloaded and the module's load-time call is part of what is counted.
+ * downloaded. Requiring the encoder starts no load (0.14.1: tests/semantic-encoder-switch.test.js); the
+ * first caller does, and the callers after it share that load.
  */
 
 const { test } = require('node:test');
@@ -28,7 +29,7 @@ test('one model load however many callers ask while it is loading', () => {
       process.stdout.write(JSON.stringify({ loads, settled: r, ready: enc.isSemanticReady() }));
     });`], { encoding: 'utf8' });
   const r = JSON.parse(out.trim().split('\n').pop());
-  assert.equal(r.loads, 1, 'the module load and three callers share one model load');
+  assert.equal(r.loads, 1, 'three callers share one model load');
   assert.deepEqual(r.settled, [true, true, true]);
   assert.equal(r.ready, true);
 });
