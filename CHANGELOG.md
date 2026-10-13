@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.14.0 (unreleased)
+## 0.14.0 — 2026-10-13
 
 **Core Secure.** 0.14.0 makes every sym node an MMP v2.0 Core Secure participant (design
 "Core Secure identity: a peer is a proven session, never a hint", v2, 2026-10-02). It breaks the

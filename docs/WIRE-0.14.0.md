@@ -53,9 +53,9 @@ decided before the session's next frame; the session closed when the grant expir
 
 ## 3. `role-chain-fetch`, `role-chain`, `role-digest`: retired
 
-sym 0.14.0 carried role grants and revokes with three frames of its own (`role-chain-fetch`,
-`role-chain` and `role-digest`) and resolved them by replaying signed times (the earlier sections 3,
-5 and 6 of this file). MMP §6.6 as merged (meshcognition-website main at 8c3381d, PR #40) replaces
+sym 0.14.0's development builds carried role grants and revokes with three frames of its own
+(`role-chain-fetch`, `role-chain` and `role-digest`) and resolved them by replaying signed times (the
+earlier sections 3, 5 and 6 of this file); none of that shipped. MMP §6.6 as merged (meshcognition-website main at 8c3381d, PR #40) replaces
 that rule and its frames: authority is a function of a set of hash-linked statements with no time in
 it, carried by `authority-statement`, `authority-digest`, `authority-fetch` and `authority-set`
 (§6.6.8, authority-frame.schema.json). sym implements §6.6 as written (lib/core/authority.js,
