@@ -100,4 +100,25 @@ describe('the 0.13.17 relay scenes under Core Secure sessions', () => {
       assert.strictEqual(got[0].session.transport, 'lan', 'and it arrived over the LAN');
     } finally { await stopAll(a, b); }
   });
+
+  it('stop() closes every session and survives a peer without a transport; a room send reaches the others past it', async () => {
+    const a = new SymNode({ name: uniq('rg-a'), silent: true, discovery: new NullDiscovery(), room: 'lan-room' });
+    const b = new SymNode({ name: uniq('rg-b'), silent: true, discovery: new NullDiscovery(), room: 'lan-room' });
+    try {
+      await a.start(); await b.start();
+      await connectNodes(a, b);
+      const got = heard(b);
+      // A peer table entry with no transport (what 0.13.17's main-line test drove): never thrown on, never counted as reached.
+      a._peers.set('ghost', { peerId: 'ghost', name: 'ghost', transport: null, transports: new Map() });
+      assert.doesNotThrow(() => a.remember(CATS('past a peer with no transport')));
+      assert.doesNotThrow(() => a._broadcastToPeers({ type: 'ping' }));
+      await until(() => got.length >= 1, 5000);
+      assert.strictEqual(focusOf(got[0]), 'past a peer with no transport');
+      const sessions = [...a._sessions];
+      assert.ok(sessions.length >= 1);
+      await assert.doesNotReject(() => a.stop());
+      assert.ok(sessions.every((s) => s.closed), 'every session ended with the node');
+      assert.strictEqual(a._peers.size, 0);
+    } finally { await stopAll(a, b); }
+  });
 });

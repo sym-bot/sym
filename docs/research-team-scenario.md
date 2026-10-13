@@ -39,7 +39,7 @@ This is not configuration. It's cognition. The validator doesn't see the data-ag
 
 **5. Emergent idea** — synthesis agent produces: *"emergence is evaluation-dependent — a property of the measurement apparatus, not the model."*
 
-> **What the mesh does:** This is where mesh cognition happens. The synthesis agent's xMesh LNN has been processing CMBs from all agents. It detects **convergence in the intent and motivation fields across agents with different perspectives:**
+> **What the mesh does:** This is where mesh cognition happens. The synthesis agent's XMesh LNN has been processing CMBs from all agents. It detects **convergence in the intent and motivation fields across agents with different perspectives:**
 > - explorer-a's motivation: "scaling law research needs reframing"
 > - explorer-b's motivation: "fix the lens before interpreting"
 > - validator's intent: "reject until correct method"

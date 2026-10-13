@@ -1080,18 +1080,24 @@ spend it under the asking rule, as "Authority: MMP §6.6" says.)
 
 ## 0.13.17 (2026-10-07)
 
-A relay fix, released on the 0.13 line (the 0.13 line otherwise stays closed).
+A relay fix. The 0.13 line otherwise stays closed: further work goes into 0.14.0.
 
-- **One peer re-announced by the relay no longer breaks every send in the room.** A replaced relay
-  transport is detached before it is closed, and a peer with no transport is skipped and logged,
-  never thrown on.
-- **A LAN transport added to a peer first met over the relay is used** (MMP §4.6: bonjour before
-  relay).
+### Fixed
+
+- **One peer re-announced by the relay no longer breaks every send in the room.** When a peer this node already held over
+  the relay reconnected (a cloud node, for example), its old relay transport was closed while still registered. Its close
+  handler then removed the peer and left it with no transport, and every `sym_send` and `sym_publish` to the room failed
+  with "Cannot read properties of null (reading 'send')". `sym_join_room` failed the same way, on `close`. A replaced
+  transport is now detached before it is closed, and a peer with no transport is skipped and logged, never thrown on.
+- **A LAN transport added to a peer first met over the relay is used** (MMP §4.6: bonjour before relay). Two LAN
+  neighbours that also sat on the relay could stop hearing each other, because a CMB in the clear is refused over the
+  relay.
 - `stop()` closes every transport a peer holds, and tolerates a peer with none.
 
-0.14.0 does not carry this code: a 0.14 peer is a set of proven sessions, a repeated announcement
-reuses a live relay session (probing it with a ping), and LAN is preferred over relay
-(tests/relay-reannounce-scenes.test.js).
+0.14.0 does not carry this code, because the defect cannot arise there: a 0.14 peer is a set of proven sessions, a
+session's close removes only itself, the active transport is recomputed before the old session is superseded, a peer
+with no transport is not sent to (counted as not reached, never thrown on), and `stop()` closes every session. The
+same scenes run against Core Secure in `tests/relay-reannounce-scenes.test.js`.
 
 ## The 0.13.17 security candidate (not released as such; its fixes ship in 0.14.0)
 
@@ -1909,7 +1915,7 @@ disconnected.
 ### Changed
 
 - **Tenant-suffixed room names are legal.** The room grammar accepts a double hyphen as a
-  segment separator (`x-review--team-02779b…`) — the shape xMesh scopes recipe rooms with.
+  segment separator (`x-review--team-02779b…`) — the shape XMesh scopes recipe rooms with.
   Before this, `sym join`, the daemon, and `sym_invite_create` all refused the very rooms
   the product creates, and only a direct service-type bypass made them work. Triple hyphens,
   leading/trailing hyphens and bare suffixes stay invalid.

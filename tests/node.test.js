@@ -463,6 +463,11 @@ describe('SymNode', () => {
     }
   });
 
+  // The three 0.13.17 relay tests (a re-announced relay peer keeps a live transport, a LAN transport added to
+  // a relay-first peer becomes active, stop() survives a peer without a transport) drove the 0.13 peer table
+  // (_createPeer, _addPeer). 0.14.0 has none: the same scenes run under Core Secure sessions in
+  // tests/relay-reannounce-scenes.test.js.
+
   after(() => {
     fs.rmSync(nodeDir(nodeName), { recursive: true, force: true });
   });
