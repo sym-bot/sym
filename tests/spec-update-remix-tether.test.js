@@ -17,6 +17,7 @@ const { NullDiscovery } = require('../lib/discovery');
 const { nodeDirById } = require('../lib/config');
 const { createCMB, verifyTetherAttestation, evaluateLineageTetherFromText } = require('../lib/core');
 const { MemoryStore } = require('../lib/memory-store');
+const contextEncoder = require('../lib/core/context-encoder');
 const { awaitSemantic } = require('./_semantic');
 
 const cat7 = (t) => ({ focus: t, issue: t, intent: t, motivation: t, commitment: t, perspective: 'peerA', mood: { text: 'neutral' } });
@@ -36,6 +37,17 @@ function peerRoot(node, text) {
   return cmb;
 }
 
+/**
+ * Run `fn` with the calibrated (semantic) kernel made unavailable, or slow: `settled` is what the encoder's
+ * semanticSettled() resolves to (a promise, never settled, for "too slow"). The lexical n-gram kernel is what
+ * is left. The encoder module's state is put back after.
+ */
+async function withKernel({ ready = false, settled }, fn) {
+  const real = { isSemanticReady: contextEncoder.isSemanticReady, semanticSettled: contextEncoder.semanticSettled };
+  contextEncoder.isSemanticReady = () => ready;
+  contextEncoder.semanticSettled = () => settled;
+  try { return await fn(); } finally { Object.assign(contextEncoder, real); }
+}
 /** A verified peer record about `text` that cites `parentKey`, held as an admitted peer record. */
 function peerChild(node, text, parentKey) {
   const cmb = createCMB({ categories: cat7(text), createdBy: 'peerC', lineage: { parents: [parentKey], method: 'SVAF-v2' } });
@@ -210,6 +222,100 @@ describe('remix() evaluates the §15.8 tether on what it produces', () => {
       node.remember = () => { throw Object.assign(new Error('cannot sign'), { code: 'ESIGN' }); };
       await assert.rejects(node.remix(cat7(TOPIC_B), { parents: [{ key: `cmb-${'e'.repeat(64)}` }] }), (e) => e.code === 'ESIGN');
       assert.strictEqual(node.canRemix(), true, 'nothing was minted, so the flag is given back');
+    });
+  });
+
+  // ── The calibrated kernel (final review F1): thresholds are meaningful only in a pinned kernel ──
+
+  it('lexical kernel: the accounting-root example keeps its lineage, unverified and unsigned, and a line is said once', async () => {
+    await awaitSemantic();
+    await withNode(async (node) => {
+      const lines = [];
+      node._log = (m) => lines.push(m);
+      const metrics = [];
+      node.on('metric', (m) => { if (m.type === 'tether-kernel-unavailable') metrics.push(m); });
+      await withKernel({ settled: Promise.resolve(false) }, async () => {
+        const root = peerRoot(node, TOPIC_A);
+        node.remember(cat7('new domain data of this node'));
+        const e = await node.remix(cat7(TOPIC_B), { parents: [root] }); // drifted: in the calibrated kernel it is severed
+        const stored = node._store.get(e.key);
+        assert.deepStrictEqual(stored.cmb.metadata.lineage.parents, [root.metadata.key], 'not severed from a measurement in the wrong kernel');
+        assert.strictEqual(stored.tether, undefined, 'nothing is signed');
+        assert.strictEqual(stored.provenance?.tether, undefined, 'unverified');
+        node.remember(cat7('more domain data of this node'));
+        const e2 = await node.remix(cat7(TOPIC_A_REMIX), { parents: [root] }); // faithful: never signed `tethered` either
+        assert.strictEqual(node._store.get(e2.key).tether, undefined);
+      });
+      assert.strictEqual(lines.filter((l) => /calibrated kernel/.test(l)).length, 1, 'said once');
+      assert.strictEqual(metrics.length, 1);
+    });
+  });
+
+  it('a calibrated kernel too slow to load: remix() waits at most tetherKernelWaitMs, then mints unverified', { timeout: 20000 }, async () => {
+    await awaitSemantic();
+    await withNode(async (node) => {
+      await withKernel({ settled: new Promise(() => {}) }, async () => {
+        const root = peerRoot(node, TOPIC_A);
+        node.remember(cat7('new domain data of this node'));
+        const t0 = Date.now();
+        const e = await node.remix(cat7(TOPIC_B), { parents: [root] });
+        assert.ok(Date.now() - t0 < 3000, 'bounded');
+        assert.ok(Date.now() - t0 >= 100, 'it did wait for the bound');
+        const stored = node._store.get(e.key);
+        assert.deepStrictEqual(stored.cmb.metadata.lineage.parents, [root.metadata.key]);
+        assert.strictEqual(stored.tether, undefined);
+      });
+    }, { tetherKernelWaitMs: 120 });
+  });
+
+  it('a calibrated kernel that settles within the bound is used: the verdict is made and signed in it', async () => {
+    await awaitSemantic();
+    await withNode(async (node) => {
+      const root = peerRoot(node, TOPIC_A);
+      node.remember(cat7('new domain data of this node'));
+      // Not ready at the call, ready 80 ms later (the real encoder is loaded in this process).
+      await withKernel({ settled: new Promise((r) => setTimeout(() => r(true), 80)) }, async () => {
+        const e = await node.remix(cat7(TOPIC_B), { parents: [root] });
+        const stored = node._store.get(e.key);
+        assert.strictEqual(stored.tether.verdict, 'severed');
+        assert.match(stored.tether.kernelId, /^minilm-/, 'the calibrated kernel');
+        assert.strictEqual(stored.cmb.metadata.lineage, null);
+      });
+    });
+  });
+
+  it('the retroactive audit signs and severs nothing in the lexical kernel either', async () => {
+    await awaitSemantic();
+    await withNode(async (node) => {
+      const root = peerRoot(node, TOPIC_A);
+      const own = node.remember(cat7(TOPIC_B), { parents: [root] });
+      await withKernel({ settled: Promise.resolve(false) }, async () => {
+        const r = await node.auditLineageTethers({ sever: true });
+        assert.strictEqual(r.audited, 1);
+        assert.strictEqual(r.severed, 0);
+        assert.strictEqual(r.unchecked, 1);
+      });
+      assert.strictEqual(node._store.get(own.key).tether, undefined);
+      assert.notStrictEqual(node._store.get(own.key).lineage?.severed, true);
+    });
+  });
+
+  // ── A remix that began before stop() mints nothing after it ──
+
+  it('stop() while the tether is being evaluated: the remix mints nothing and gives the flag back', async () => {
+    await awaitSemantic();
+    await withNode(async (node) => {
+      const root = peerRoot(node, TOPIC_A);
+      node.remember(cat7('new domain data of this node'));
+      const before = node._store.allEntries().length;
+      await withKernel({ settled: new Promise((r) => setTimeout(() => r(true), 150)) }, async () => {
+        const p = node.remix(cat7(TOPIC_B), { parents: [root] });
+        await node.stop(); // while the remix waits for the kernel
+        const r = await p;
+        assert.deepStrictEqual(r, { refused: 'node-stopped' });
+      });
+      assert.strictEqual(node._store.allEntries().length, before, 'nothing was minted into the closed store');
+      assert.strictEqual(node.canRemix(), true);
     });
   });
 });

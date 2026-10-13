@@ -251,6 +251,21 @@ test('relay-auth and relay-pong are paced inside the bucket (MMP 2.0 update 1, Â
   } finally { c.stop(); await relay.close(); }
 });
 
+test('the relay\'s own frames waiting for a token are bounded: a pong already waiting answers the next, and the queue holds at most 8', () => {
+  const c = client('ws://127.0.0.1:1', { rate: { perSecond: 1, burst: 1 } });
+  try {
+    const sent = [];
+    const ws = { readyState: 1, send: (d) => sent.push(d) };
+    c.rc._relayWs = ws;
+    c.rc._bucket.tokens = -1e6; // the bucket stays empty
+    for (let i = 0; i < 100; i++) c.rc._sendControl(ws, { type: 'relay-pong' });
+    assert.equal(c.rc._control.length, 1, 'one pong waits, however many are asked for');
+    for (let i = 0; i < 50; i++) c.rc._sendControl(ws, { type: 'relay-auth', nodeId: String(i) });
+    assert.ok(c.rc._control.length <= 8, `held ${c.rc._control.length}`);
+    assert.equal(sent.length, 0, 'nothing is sent past the bucket');
+  } finally { c.rc._relayWs = null; c.stop(); }
+});
+
 test('a socket destroy() let go never schedules a reconnect when its close arrives', async () => {
   const relay = fakeRelay((ws) => ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })));
   const c = client(relay.url);

@@ -834,9 +834,11 @@ function log(msg) {
 // ── Room discovery beacon (MMP §5.8) ──────────────────────────
 // Advertise this node's room on one shared service type so `sym rooms` can
 // list live rooms cross-platform — bonjour-service browse works where Apple
-// dns-sd is absent (e.g. Windows). Discovery-only: comms stay isolated on the
-// room's own `_<room>._tcp`. The room name is whatever the user chose and
-// can be an anonymous/opaque code, so the broadcast need not reveal its purpose.
+// dns-sd is absent (e.g. Windows). Discovery-only: comms stay separated by the
+// TXT `room` on `_sym._tcp` (a node dials only its own room's advertisements,
+// MMP §5.1) and by the handshake, which binds the room. The room name is
+// whatever the user chose and can be an anonymous/opaque code, so the
+// broadcast need not reveal its purpose.
 let roomBeacon = null;
 function startRoomBeacon() {
   try {

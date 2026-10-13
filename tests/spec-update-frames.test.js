@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * The session frames as MMP 2.0 update 1 (meshcognition-website PR #43, 2660ab9) defines them: the
+ * The session frames as MMP 2.0 update 1 (meshcognition-website main at c07ff20) defines them: the
  * mood frame by the founder's ruling, cmb-fetch and cmb-fetch-result as their schemas close them,
  * fetched records verified by the whole of §8.8.5 (D4), cmb-anchors as §9.4 sends it, a clear 1011
  * acted on only when it names this node's session or answers its probe, sealed ping and pong, and the
@@ -178,6 +178,34 @@ describe('D4: a fetched record is attributed only after the whole of §8.8.5 (#2
   });
 });
 
+describe('D4: every step of §8.8.5 a fetched record must pass (_verifyFetched), one record at a time', () => {
+  it('a good record verifies; a doctored assertionId under a valid signature, another room, another recipient, an unknown author and a forged signature are each refused', async () => {
+    try {
+      const A = node('d4-each-a'); const B = node('d4-each-b');
+      await A.start(); await B.start();
+      await connectNodes(B, A);
+      const fh = B._frameHandler;
+      const room = B._room;
+      const good = signedRecord(signerOf(A), { categories: { focus: 'fetched and verified' }, room });
+      assert.strictEqual(fh._verifyFetched(JSON.parse(JSON.stringify(good))).ok, true);
+      // The signature covers the preimage, not the derived assertionId: only the identity check catches this one.
+      const wrongAsrt = JSON.parse(JSON.stringify(good)); wrongAsrt.metadata.assertionId = `asrt-${'0'.repeat(64)}`;
+      assert.deepStrictEqual(fh._verifyFetched(wrongAsrt), { ok: false, reason: 'assertion-id-mismatch' });
+      const otherRoom = signedRecord(signerOf(A), { categories: { focus: 'another room' }, room: 'elsewhere' });
+      assert.strictEqual(fh._verifyFetched(otherRoom).ok, false, 'a record signed for another room');
+      const toOther = signedRecord(signerOf(A), { categories: { focus: 'signed to someone else' }, room, to: identity('third').nodeId });
+      assert.strictEqual(fh._verifyFetched(toOther).ok, false, 'a record signed to another node');
+      const unknown = signedRecord(identity('stranger'), { categories: { focus: 'unknown author' }, room });
+      assert.strictEqual(fh._verifyFetched(unknown).reason, 'unresolvable-author');
+      const forged = JSON.parse(JSON.stringify(good)); forged.metadata.sig = Buffer.alloc(64, 7).toString('base64url');
+      assert.strictEqual(fh._verifyFetched(forged).ok, false);
+      // Signed to this node: the one directed audience that passes.
+      const toMe = signedRecord(signerOf(A), { categories: { focus: 'signed to the fetcher' }, room, to: B.nodeId });
+      assert.strictEqual(fh._verifyFetched(toMe).ok, true);
+    } finally { await stopAll(); }
+  });
+});
+
 describe('cmb-anchors (§9.4, #30)', () => {
   it('an admission with nothing to replay does not hold back the next one\'s context', async () => {
     try {
@@ -236,6 +264,20 @@ describe('a clear 1011 over a relay (§5.2.2, #23)', () => {
     A._startRelayClient = (id) => started.push(id);
     return { A, from, held, started };
   }
+  it('the server-role side never prompts a handshake (the client will re-handshake), whatever the 1011 names', async () => {
+    try {
+      const A = node('u-srv');
+      const from = '00000000-0000-7000-8000-000000000000'; // smaller than any nodeId: A is the server for this peer
+      const held = { confirmed: true, closed: false, sessionId: crypto.randomBytes(16).toString('hex'), probeSince: Date.now() };
+      A._relay = { present: new Set([from]), sendTo() {} };
+      A._relaySessions = new Map([[from, { client: null, server: null, confirmed: new Set([held]) }]]);
+      const started = [];
+      A._startRelayClient = (id) => started.push(id);
+      A._relayEnvelope(from, 'peer', { type: 'error', code: 1011, message: 'unknown session', detail: `session:${held.sessionId}` });
+      A._relayEnvelope(from, 'peer', { type: 'error', code: 1011, message: 'unknown session' });
+      assert.deepStrictEqual(started, []);
+    } finally { await stopAll(); }
+  });
   it('prompts a handshake only when its detail names this node\'s session or its probe is outstanding', async () => {
     try {
       const { A, from, held, started } = relayClient();
@@ -289,7 +331,7 @@ describe('ping and pong sealed, and the control envelope\'s bounds (§7.1, #26)'
       assert.strictEqual(sA.probeSince, 0);
     } finally { await stopAll(); }
   });
-  it('a cmb-encrypted envelope is bounded as encrypted-cmb-frame.schema.json bounds it (5417176)', () => {
+  it('a cmb-encrypted envelope is bounded as encrypted-cmb-frame.schema.json bounds it (c07ff20)', () => {
     const { openEncryptedSealed } = require('../lib/core/cmb-encrypted-frame');
     const base = { type: 'cmb-encrypted', protocolVersion: '2.0', suite: 'X25519-HKDF-SHA256-ChaCha20-Poly1305', sessionId: 'a'.repeat(32), sequence: '1', direction: 'client-to-server', metadata: {}, sealed: 'A'.repeat(22) };
     const key = crypto.randomBytes(32);
@@ -304,5 +346,24 @@ describe('ping and pong sealed, and the control envelope\'s bounds (§7.1, #26)'
     assert.strictEqual(isControlFrame({ ...ok, sealed: 'A'.repeat(21) }), false);
     assert.strictEqual(isControlFrame({ ...ok, note: 'x' }), false);
     assert.strictEqual(isControlFrame({ ...ok, sessionId: 'not-hex' }), false);
+  });
+});
+
+describe('Legacy Import never sends a record signed for another room (the seal point\'s rule)', () => {
+  it('a record signed for another room, or to another node, is not sent; one for this room is', () => {
+    const { LegacySession } = require('../lib/legacy-import');
+    const { e2eGenerateKeyPair } = require('../lib/core');
+    const sent = [];
+    const transport = { trySend: (f) => { sent.push(f); return { ok: true }; }, send: () => true, close() {}, on() {} };
+    const s = new LegacySession({ route: { nodeId: crypto.randomUUID() }, kind: 'bonjour', transport, local: {}, room: 'legacy-room' });
+    s.state = 'confirmed'; s.nodeId = crypto.randomUUID(); s._secret = crypto.randomBytes(32);
+    try {
+      const mk = (room, to = null) => signedRecord(identity('author'), { room, to, categories: { focus: `for ${room}` } });
+      assert.deepStrictEqual(s.trySend({ type: 'cmb', cmb: mk('elsewhere') }), { ok: false, reason: 'not-addressed' });
+      assert.deepStrictEqual(s.trySend({ type: 'cmb', cmb: mk('legacy-room', crypto.randomUUID()) }), { ok: false, reason: 'not-addressed' });
+      assert.strictEqual(sent.filter((f) => f.type === 'cmb').length, 0);
+      assert.strictEqual(s.trySend({ type: 'cmb', cmb: mk('legacy-room') }).ok, true);
+      void e2eGenerateKeyPair;
+    } finally { clearTimeout(s._timer); }
   });
 });
