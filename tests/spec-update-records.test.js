@@ -3,8 +3,8 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * Records as MMP 2.0 update 1 states them (#34 and #37, folded into spec/mmp-2.0-update-1 at
- * 2660ab9): one signed projection per assertion (D2), so every node holds one assertion as the same
+ * Records as MMP 2.0 update 1 states them (#34 and #37, in meshcognition-website main at
+ * c07ff20): one signed projection per assertion (D2), so every node holds one assertion as the same
  * bytes, and the record size measure. Each case of the record-projection-v2 and record-size-v2
  * vectors runs against sym's own code; the D2 tests fail on 018206d.
  */

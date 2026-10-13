@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * Coupling as MMP 2.0 update 1 states it (PR #43 at 2660ab9): a record that cites the receiver's own
+ * Coupling as MMP 2.0 update 1 states it (meshcognition-website main at c07ff20): a record that cites the receiver's own
  * records is gated and delivered like any other, and kept out of the receiver's remix cycle at the
  * trigger (D3, #35); a collapsed integration gets no §15.8 tether (#17, §15.5); unsigned valence and
  * arousal never reach Layer 6; only gated remixes count as remixes (#35); and xmesh-insight-v1 is

@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * The MMP 2.0 update 1 artifacts sym vendors (tests/fixtures, from meshcognition-website PR #43,
- * branch spec/mmp-2.0-update-1 at 2660ab9; SOURCES.json records each digest), checked as copies, and
+ * The MMP 2.0 update 1 artifacts sym vendors (tests/fixtures, from meshcognition-website main at
+ * c07ff20, the merge of PR #43; SOURCES.json records each digest), checked as copies, and
  * the reference construction (scripts/mmp/lib.mjs, vendored as mmp-lib.mjs) run beside sym's own code
  * on the same inputs: what sym builds, the reference builds byte for byte.
  */

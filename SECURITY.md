@@ -336,10 +336,25 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   collapsed integration from the lineage tether, and sym's gates always collapse (they store the
   author's record as signed), so a peer's record that cites a root it has drifted from is kept with
   its author's lineage; the tether is that author's duty. sym does its own: `remix()` evaluates every
-  remix it mints against its root and severs a drifted lineage. The retroactive audit
-  (`auditLineageTethers`) judges only this node's own records, which it cannot tell apart from its
-  replies. Lineage confers retention here (a hot descendant keeps its ancestors hot), never authority
-  or lifecycle.
+  remix it mints against its nearest verified root and severs a drifted lineage. **It does so in the
+  calibrated kernel only.** The reject floor is calibrated on the semantic encoder (all-MiniLM-L6-v2,
+  an optional dependency, `@huggingface/transformers`); the lexical n-gram encoder that runs until it
+  loads, or in its place where it is not installed, measures drift on another scale (§9.2.1, §15.8). So
+  `remix()` waits up to 10 s (`tetherKernelWaitMs`) for the calibrated kernel, and if it is not there
+  the remix keeps its lineage, **unverified**: nothing is evaluated, severed or signed, a line is
+  logged once, and no `tethered` verdict is ever signed from the lexical kernel. The retroactive audit
+  (`auditLineageTethers`) follows the same rule and leaves a chain unchecked. Without the dependency,
+  then, §15.8 is not enforced on this node's remixes. The audit judges only this node's own records,
+  which it cannot tell apart from its replies. Lineage confers retention here (a hot descendant keeps
+  its ancestors hot), never authority or lifecycle.
+- **Losing the attestation log makes an honest attester look like an equivocator.** A node's
+  checkpoint chain lives in its attestation log (`<node>/attestations`). If that log is lost while
+  the identity is kept, the node starts a new chain at seq 1, and every peer that kept its earlier
+  checkpoints holds ones whose ranges overlap the new chain: under sym-attest-v1 §5.2 that is
+  equivocation, and those peers stop witnessing the node and drop its further checkpoints, with no way
+  to tell the wipe from a fork. After a wipe of the attestation log, give the node a new identity
+  rather than reusing the old one for `sym-attest-v1`. (Losing only the part since the last
+  checkpoint ends the chain visibly instead: the node signs no further checkpoint.)
 - **LAN meshing with sym 0.13.17 stops** except through configured Legacy Import routes, by design:
   a 0.13.17 node advertises no `mmp` key, so a 0.14 node never dials it as Core Secure, and a 0.14
   listener closes its legacy hello at once.

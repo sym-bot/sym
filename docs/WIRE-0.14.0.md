@@ -2,8 +2,8 @@
 
 This file began as the wire elements sym 0.14.0 sends that MMP v2.0 did not define, written so that
 spec PRs could be drafted from them. Those drafts are now folded into **MMP 2.0 update 1**
-(sym-bot/meshcognition-website PR #43, branch spec/mmp-2.0-update-1 at 2660ab9, pending the
-founder's merge): `control-encrypted` (§7.1, §18.2.1), `cmb-anchors` (§9.4), `room-join` (§5.8.1),
+(sym-bot/meshcognition-website PR #43, merged to main at c07ff20):
+`control-encrypted` (§7.1, §18.2.1), `cmb-anchors` (§9.4), `room-join` (§5.8.1),
 the relay handshake and the error rules (§5.2.2, §7.2), the record size limits and the canonical
 projection (§8.8.5, §8.8.6), discovery's TXT `mmp` and `room` (§5.1), the relay fan-out envelope
 (§4.4.4) and `sym-attest-v1` (§16.4). What remains here is what sym chooses where the spec leaves a
@@ -128,7 +128,8 @@ sym follows §5.2.2 and §7.2 as the update states them: every error on a confir
 a clear error changes nothing, except that 1011 `UNKNOWN_SESSION` may prompt a new handshake; a
 sealed error whose action is Close ends the session (1001, 1003 to 1010: 1009 `IDENTITY_CONFLICT`
 and 1010 `SESSION_CLOSED` among them); a replay is discarded on every transport; a gap closes the
-session with a sealed 1010. What sym chooses:
+session. On a relay session it closes with a sealed 1010, since the peer has no other way to learn
+of it; on the LAN the transport itself closes and nothing is sent. What sym chooses:
 
 - **1011 replies.** At most once a second per relay `from` (the table of froms bounded at 1,024,
   least recently said first out), and at most 2 a second in all (burst 8), dropped past it, never

@@ -45,6 +45,9 @@
     "lib/",
     ".agents/",
     ".claude/",
+    "docs/AUTHORITY-OPERATOR.md",
+    "docs/WIRE-0.14.0.md",
+    "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "SECURITY.md"

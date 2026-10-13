@@ -123,9 +123,8 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
 ### MMP 2.0 update 1: the drafts this release implements, as the spec now states them
 
 The founder ruled that the drafts sym 0.14.0 implements land in the published spec before it ships.
-They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, branch
-spec/mmp-2.0-update-1, at 5417176 with its verification fixes: #24, #25, #17, #22, #26, #30, #23,
-#31, #37, #34, #35, #27 and #28 on the §6.6 errata), and sym is aligned with its text, its reference
+They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, merged to main at
+c07ff20: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28 on the §6.6 errata), and sym is aligned with its text, its reference
 construction (scripts/mmp/lib.mjs) and its schemas and vectors, vendored in tests/fixtures with their
 manifest digests (record-projection-v2, record-size-v2, control-encrypted-v2 and the draft
 sym-attest-v1 pass case by case, and every frame sym builds validates against the vendored schemas).
@@ -163,9 +162,9 @@ sym-attest-v1 pass case by case, and every frame sym builds validates against th
   The 256-character caps count code points. `MAX_RECORD_BYTES` measures the two-section record only
   (#37), not remember()'s decoded payload beside it.
 - **Rooms.** A room is a §5.8 identifier, `[a-z0-9._-]` of 1 to 64 characters, everywhere it is
-  named: the node's own (`SymNode` throws `EBADROOM`), the handshake, a record, an attestation, a
-  grant. `sym join` and the daemon took kebab-case only and refused §5.8-valid dotted and underscored
-  rooms (the spec's recommended `acme.prod` among them). `sym` stays refused.
+  named: the node's own, the handshake, a record, an attestation, a grant (breaking: see "Core
+  Secure — breaking"). `sym join` and the daemon took kebab-case only and refused §5.8-valid dotted
+  and underscored rooms (the spec's recommended `acme.prod` among them). `sym` stays refused.
 - **Discovery (#17, #22).** The daemon advertises every room on `_sym._tcp` with TXT `room`, as the
   library did (it used `_<room>._tcp`, so a daemon and a library node in one room never met), and
   browses the per-room type earlier releases used, where it is a valid RFC 6335 name. A node dials
@@ -230,6 +229,16 @@ if (entry.tether) console.log(entry.tether.verdict); // 'tethered' | 'severed'
 
 `remix()` takes categories and parents only (`opts.cmb` throws). MeshAgent's remix cycle and the XMesh
 synthesis loop await it.
+
+**The evaluation is made in the calibrated kernel only.** The §9.2.1 reject floor is calibrated on the
+semantic encoder (all-MiniLM-L6-v2, the optional `@huggingface/transformers` dependency); the lexical
+n-gram encoder that runs until it loads, or without the dependency, measures drift on another scale. So
+`remix()` waits up to `tetherKernelWaitMs` (default 10 s) for the calibrated kernel; if it is
+unavailable by then, the remix keeps its lineage, unverified (no evaluation, no severance, nothing
+signed), and a line is logged once (`tether-kernel-unavailable` metric). A `tethered` or `severed`
+verdict is never signed from the lexical kernel, and `auditLineageTethers` leaves a chain unchecked
+there too. A `remix()` that began before `stop()` mints nothing after it (`{ refused: 'node-stopped' }`,
+the flag given back).
 
 ### Interop with 0.13.17
 
@@ -450,6 +459,15 @@ Seven design assumptions, each changed where it was made, not patched where it s
   `recall`).
 
 ### Core Secure — breaking
+
+- **A room is a §5.8 identifier, and `SymNode` refuses any other.** `new SymNode({ room: 'My Team
+  Room' })` used to start (a room was any text, compared in NFC); it now throws `EBADROOM` before it
+  starts, and so does any room that is not `[a-z0-9._-]` of 1 to 64 characters, uppercase, spaces and
+  non-ASCII letters included (`'my-team-room'`, `'acme.prod'`). The room is signed into every record
+  and the handshake, so a host that kept a free-form room name must map it to an identifier of its
+  own once, and keep the mapping: a record signed for the old spelling is a record of another room.
+  `sym join` refuses an invalid room; the daemon's `SYM_ROOM` and a persisted room file are checked the
+  same way, and an invalid one falls back to `default`, said in the log.
 
 - **A peer is a proven session.** A sym peer used to exist before anything was proven about it: on
   TCP connect, on any first `handshake` frame (whose keys were pinned), on a relay's

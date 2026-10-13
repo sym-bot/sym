@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * sym-attest-v1's chained checkpoint (MMP 2.0 update 1, PR #43 at 5417176; D1): every case of the
+ * sym-attest-v1's chained checkpoint (MMP 2.0 update 1, meshcognition-website main at c07ff20; D1): every case of the
  * draft sym-attest-v1 vector against sym's own constructions and the reference lib.mjs, then the
  * store's and the node's rules — link checks, equivocation as overlapping ranges or a shared prev, no
  * witnessing an attester after a conflict, a chain that ends visibly when its segment is lost. Each

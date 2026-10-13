@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * LAN discovery as MMP 2.0 update 1 states it (#17, #22; PR #43 at 2660ab9): one service type for
+ * LAN discovery as MMP 2.0 update 1 states it (#17, #22; meshcognition-website main at c07ff20): one service type for
  * every room, with the room in TXT `room`; a node dials only advertisements whose TXT room is its own
  * and whose `mmp` (a comma-separated version list) lists 2.0; TXT keys read as RFC 6763 §6.4 says,
  * case-insensitive with the first occurrence winning; the per-room type earlier releases advertised

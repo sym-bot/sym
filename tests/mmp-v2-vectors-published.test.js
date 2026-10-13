@@ -11,6 +11,8 @@
 // public/spec/mmp/conformance/v2/; mirrored in mesh-memory-protocol/conformance/v2/), whose
 // artifact-manifest.json pins these same sha256 digests. To update: copy the published file
 // verbatim and replace its digest below from that manifest — never edit a vector by hand.
+// e2e-v2.json was re-vendored from meshcognition-website main at c07ff20 (the merge of PR #43, MMP 2.0
+// update 1), where it differs from the earlier published copy only by a `note`.
 
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -20,7 +22,7 @@ const path = require('path');
 
 const PUBLISHED = {
   'mmp-v2-application.vector.json': ['application-v2.json', '28ef0e7a7a7f2fb1e85a8a35b2f899962a648193e61717165540e5f4b842eb30'],
-  'mmp-v2-e2e.vector.json': ['e2e-v2.json', '3e5d4adec0137a01f85c98cacba5c8d65b5d603d02085149f950c3d5ea77dbdc'],
+  'mmp-v2-e2e.vector.json': ['e2e-v2.json', '80f6183e06aab32aa7106a7e866714a40495be9ce9c348a5b15401691d6eb90c'],
   'mmp-v2-handshake.vector.json': ['handshake-v2.json', 'c93a8440c29b07b08cccd9b0ec51008f98bfd3f631e9a654f631cb391dfe3125'],
   'mmp-v2-record-signature.vector.json': ['record-signature-v2.json', '3725744c2162e3d9f2a6fb9499253057cff018ff1148ea934861826d033018d7'],
 };
