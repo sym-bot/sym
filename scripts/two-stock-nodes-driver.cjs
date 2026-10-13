@@ -71,7 +71,11 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   const received = [];
   nodeB.on('memory-received', (evt) => received.push(evt));
 
-  // CREATE + SIGN — remember() mints the record and signs it with A's identity key.
+  // CREATE + SIGN — remember() mints the record and signs it with A's identity key. It is a room
+  // broadcast, not a record addressed to B: a directed record is sealed to its addressee and no
+  // Admission Attestation is signed about it (#27: the room would learn a sealed record's key and
+  // verdict), so a directed record could not satisfy the ADMIT clause below, which asserts the
+  // attestation.
   const sent = nodeA.remember({
     focus: FOCUS,
     issue: 'a released runtime can resolve, start, and still fail to exchange a single block',
@@ -80,7 +84,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
     commitment: 'this gate blocks the release when any clause fails',
     perspective: 'node A, the sender',
     mood: { text: 'procedural', valence: 0, arousal: 0 },
-  }, { to: nodeB.nodeId });
+  });
   assert.ok(sent && sent.key, 'CREATE: remember() must return a local entry with a CMB key');
   console.log(`  A created + signed ${sent.key}`);
 
