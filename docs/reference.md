@@ -331,6 +331,89 @@ The fields are universal; domain meaning lives in the field *text*, not the fiel
 
 > Field-weight profiles per domain, drift thresholds, and the full drift math (`totalDrift = content drift + time decay`) live in the spec so this README stays focused: [MMP Constants →](https://meshcognition.org/spec/mmp/constants) · [CMB Layer 3 →](https://meshcognition.org/spec/mmp/cmb).
 
+## Embedding sym: the public API
+
+README "Public API" lists what is supported and what it promises; this is how to use it. The entry points are
+`@sym-bot/sym`, `@sym-bot/sym/core`, `@sym-bot/sym/decision-log`, `@sym-bot/sym/store` and
+`@sym-bot/sym/package.json`, declared by the `exports` map in package.json (0.14.1). Nothing else is importable by
+package path.
+
+**Deep imports are refused.** `require('@sym-bot/sym/lib/node.js')`, `require.resolve(...)` of any path into
+`lib/` and `import()` of one all throw `ERR_PACKAGE_PATH_NOT_EXPORTED`. They never were supported (a file under
+`lib/` may move or change in any release); before 0.14.1 they merely worked until a file moved. What replaces the
+ones hosts used:
+
+| Used to import | Now |
+|---|---|
+| `lib/core/index.js` (`createCMB`, `renderContent`, `CAT7_CATEGORIES`, `FIELD_WEIGHT_PROFILES`, `encode`, `encodeCategory`, `encodeForSVAF`, `categoryKeyV1`, `kernelId`, `verifyCMB`) | `@sym-bot/sym/core`, those ten names |
+| `lib/decision-log.js` | `@sym-bot/sym/decision-log` |
+| `lib/memory-store.js` (to validate or dismiss in a stopped identity's store) | `@sym-bot/sym/store`'s `openStore`; for a running node, `node.validateCMB(key)` and `node.dismissCMB(key)` |
+| `lib/rooms.js` | the main entry's `rooms` |
+| `lib/core/context-encoder.js`, or wrapping `Module._load` to stop the model load | `semanticEncoder: 'off'` or `SYM_SEMANTIC_ENCODER=off` |
+| anything else under `lib/` | not available: ask for it to be made public, with the need |
+
+A test of your own that has to reach a private file can find it by its place on disk through the one path that
+is exported, `path.join(path.dirname(require.resolve('@sym-bot/sym/package.json')), 'lib', ...)`. That is your
+test's business and promises nothing.
+
+### Locating, validating and dismissing
+
+A node validates or dismisses a record it holds with `node.validateCMB(key)` and `node.dismissCMB(key)`, both
+`{ ok, reason? }` (`reason`: `'insufficient-authority'` or `'unknown-cmb'`). Dismissal (MMP §6.4) moves the
+record to the terminal `dismissed` and its anchor weight to 0.5, so it shapes later SVAF evaluations less; like
+validation (weight 2.0) it takes validator authority or above (§6.5), resolved from the node's in-force grants, or,
+with no anchor pinned, from its configured `lifecycleRole`. It changes this node's store and sends nothing.
+
+A person's verdict often arrives after the identity that authored the record has stopped. Its store is still on
+disk, and `openStore` (README "Public API") records the verdict there:
+
+```javascript
+const path = require('path');
+const { identity } = require('@sym-bot/sym');
+const { openStore } = require('@sym-bot/sym/store');
+
+const dir = path.join(identity.nodeDirById(identity.nodeIdForName('mission-7-doer')), 'cmbs');
+const store = openStore(dir, 'mission-7-doer');          // throws ENOSTORE if there is no such store
+store.dismissCMB(key, { lifecycle: 'validated' });        // { ok: true }, or { ok: false, reason }
+store.get(key).anchorWeight;                              // 0.5
+```
+
+`lifecycle` is the authority the caller exercises, and the handle cannot check it: a store is a directory of
+files. It refuses only a caller that states none. Open a store only while no node holds it. A running node
+keeps its own copy in memory and writes its own files, so a second writer is not coordinated with it.
+
+### Host options of `SymNode`
+
+| Option | Default | Notes |
+|---|---|---|
+| `svafEvaluator` | the open baseline | `{ evaluate(candidate, anchors, ageSeconds) }`. Called once for each record that reaches the gate, before the baseline. `candidate` is `{ text, source, tags, confidence }` (`text` is the record rendered as `category: text; ...`), `anchors` is the node's five most recent entries as `{ text, source, tags }`, `ageSeconds` the record's age. `null` leaves the decision to the baseline; a result `{ decision, total_drift, category_drifts, gate_values }` decides, a record whose `decision` is `'rejected'` is not stored and any other is admitted. A throw or rejection is logged and the baseline decides. Admission waits for `evaluate` to answer: an evaluator that returns `null` after a delay is a queue in front of the gate, and that is the supported way to build one. |
+| `cliHostMode` | `false` | Forward only: a record that verified is announced as `cmb-accepted` and nothing more. No SVAF evaluation, no admission attestation, nothing stored or remixed. For a host that is only the local door for other processes. |
+| `semanticEncoder` | `'eager'` | `'eager'` or `'off'`; see below. |
+
+### The semantic encoder
+
+SVAF encodes text for drift in a kernel. The default kernel is the n-gram encoder (`ngram-h32`). When the optional
+`@huggingface/transformers` is installed, a node loads the all-MiniLM-L6-v2 model in its own process when it is
+built, and SVAF and the §15.8 lineage tether use it once it is ready (`minilm-l6-v2-h192`). Requiring sym loads
+nothing: before 0.14.1 the load started as a side effect of `require`, which left no moment at which a host could
+say no.
+
+`semanticEncoder: 'off'`, or `SYM_SEMANTIC_ENCODER=off` in the environment, is how a host says no. Then nothing
+loads the model; SVAF measures in the n-gram kernel; and `remix()`, whose §15.8 verdict is made only in the
+calibrated (semantic) kernel, mints with its lineage and unverified (no verdict, nothing signed or severed), as it
+does whenever that kernel is unavailable, and says so once in the node's log (and as a `tether-kernel-unavailable`
+metric whose `reason` is `'off'`). `remix()` does not wait for a model that will never load.
+
+- The encoder is one per process. `'off'` is therefore a setting of the process: any node built with it, or the
+  environment variable, turns the encoder off for every node in the process, and a later `semanticEncoder: 'eager'`
+  does not turn it back on (the node says so). Set it before the first node is built; a model that has already
+  loaded stops being used from that point.
+- Any other `semanticEncoder` value throws a `TypeError` with `code: 'EBADENCODER'` before the node touches the
+  disk; `undefined` and `null` mean unset. Any other `SYM_SEMANTIC_ENCODER` value is said once on stderr and
+  ignored.
+- Off is a different admission behaviour, not a quieter one: drift is measured in the n-gram kernel, so verdicts
+  are not comparable with those of a node that runs the semantic one (`kernelId()` differs).
+
 ## Where this sits — one engine, two surfaces
 
 `sym` (this package) is the universal layer — a CLI + library any agent or language joins, where you pull collective intelligence with `sym ask`. [`sym-mesh-channel`](https://github.com/sym-bot/sym-mesh-channel) is the Claude-Code-native surface built on top of it: peers' thoughts push into Claude's context in real-time, no tool call.

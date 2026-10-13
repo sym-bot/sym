@@ -107,7 +107,7 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   issuers in one bucket leave 16 in force. What one depth-1 grant can hold in force below it is at
   most 69,888 statements, 4,368 of them delegating.
 - **Authority is judged when it is used.** The origin weight of a received record, this node's
-  lifecycle transitions on a CMB (`validateCMB`, `canonizeCMB`: judged on that CMB's own signed
+  lifecycle transitions on a CMB (`validateCMB`, `dismissCMB`, `canonizeCMB`: judged on that CMB's own signed
   fields, a scoped grant only inside its scope) and the weight of an attestation are each judged
   against the in-force set at the moment they are applied. There is no role "at a time": once a
   signer's grant is not in force, nothing it signs carries authority, whatever time it claims.
@@ -314,6 +314,12 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   meshcognition-website#20) is deferred past 0.14.0, and its review found that never reconnecting
   after 4007 makes a lockout.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.
+- **A stopped identity's store is files.** `openStore` (`@sym-bot/sym/store`, 0.14.1) records a verdict in
+  the store of an identity whose process has stopped, on the lifecycle authority its caller states
+  (`{ lifecycle: 'validated' }`). It refuses a caller that states none, and it cannot check the claim: the
+  store is a directory, and any process running as that user can write its files directly. The authority gate
+  is the node's (`validateCMB`, `dismissCMB`), which resolves it from its own in-force grants. A host that
+  opens a store takes that authority upon itself.
 - **The local machine.** Identity files are readable by any process running as the same user.
   Operating-system isolation is out of scope. The daemon's IPC socket trusts the same user the same
   way: any process running as that user can connect to it and act as the daemon's node (remember,
