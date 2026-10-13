@@ -3,20 +3,18 @@
 require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/config loads
 
 /**
- * MMP §15.8 Lineage Tether — end-to-end severance through the heuristic gate.
+ * MMP §15.8 Lineage Tether through the heuristic gate, as MMP 2.0 update 1 states it.
  *
- * The drift-laundering scenario the tether exists to close: a chain's root is
- * about topic A; the receiver's RECENT anchors are about topic B (so the
- * §9.2 gate, which reads the five most recent anchors, admits topic-B
- * traffic); an incoming topic-B CMB carrying lineage back to the topic-A root
- * would — without the tether — store a remix whose content has nothing to do
- * with the root it cites. With the tether, the remix is stored as a fresh
- * root (lineage severed, departed source in provenance). A faithful chain
- * (remix genuinely about its root's topic) keeps its lineage intact.
+ * The drift-laundering scenario the tether exists to close: a chain's root is about topic A; an
+ * incoming topic-B record cites it. The tether is the REMIXING node's duty (§15.8: "at integration
+ * time, the remixing node MUST evaluate its remix"), and it does not apply to a collapsed integration
+ * (§15.5): the receiver produced no remix and asserts no descent of its own. sym's gate keeps the
+ * incoming text, so every integration it makes collapses onto the author's record, kept exactly as
+ * signed. Until update 1 this suite pinned the opposite: the receiver severed and attested the
+ * author's chain. It now pins that the receiver does neither, whatever the drift, and that disabling
+ * the tether changes nothing here.
  *
- * Uses the real store + real encoder (semantic when available, n-gram
- * otherwise — both sides of the tether comparison share one kernel by
- * construction, §15.8 in-gate evaluation).
+ * Uses the real store + real encoder (semantic when available, n-gram otherwise).
  */
 
 const { describe, it } = require('node:test');
@@ -25,19 +23,12 @@ const fs = require('fs');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDir } = require('../lib/config');
-const { createCMB, isSemanticReady, verifyTetherAttestation, kernelId } = require('../lib/core');
+const { createCMB } = require('../lib/core');
 
 // The tether's reject-floor calibration assumes the semantic kernel (the
 // production default — §9.2.1: thresholds are meaningful only within a pinned
 // encoder). The encoder loads async at module require; wait for it so the
-// test exercises the deployed configuration, not the n-gram warmup fallback.
-async function awaitSemantic(timeoutMs = 30000) {
-  const t0 = Date.now();
-  while (!isSemanticReady()) {
-    if (Date.now() - t0 > timeoutMs) throw new Error('semantic encoder did not become ready');
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+const { awaitSemantic } = require('./_semantic');
 
 async function withNode(baseName, fn) {
   const name = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -76,7 +67,7 @@ const TOPIC_B_NEW = 'fresh snowfall reported on the upper mountain trail section
 // admit against the recents — near-duplicating one would be redundant-banned).
 const TOPIC_B_ROOT = 'overall report on snowy mountain hiking trail conditions this weekend';
 
-// The store normalizes a severed (null) lineage to root shape.
+// A record's lineage with no parents: a root.
 function isRootShaped(lineage) {
   return lineage == null
     || ((lineage.parents ?? []).length === 0 && (lineage.ancestors ?? []).length === 0);
@@ -101,43 +92,22 @@ async function seedAndReceive(node, rootTopic, incomingTopic) {
   return { root, accepted };
 }
 
-describe('MMP §15.8 lineage tether — severance through the gate', () => {
-  it('drift laundering severs: topic-B remix citing a topic-A root is stored as a fresh root', async () => {
-    await withNode('tether-sever', async (node) => {
-      const { accepted } = await seedAndReceive(node, TOPIC_A, TOPIC_B_NEW);
-      assert.strictEqual(accepted.length, 1, 'incoming admits (aligned with recent topic-B anchors)');
-      const cmb = accepted[0].cmb;
-      assert.ok(isRootShaped(cmb.metadata.lineage), 'lineage severed — stored as a fresh root');
-      assert.ok(cmb.provenance.tether, 'tether recorded in provenance');
-      assert.strictEqual(cmb.provenance.tether.severed, true);
-      assert.ok(cmb.provenance.tether.drift > 0.5, `drift ${cmb.provenance.tether.drift} exceeds the reject floor`);
-      assert.ok(cmb.provenance.tether.departedFrom, 'departed source recorded informally');
-
-      // §15.8 tether attestation: the integrator's signed record of this exact
-      // evaluation rides the remix, verifiable against the node's identity key,
-      // and names the kernel the verdict was made in.
-      const att = cmb.tether;
-      assert.ok(att, 'tether attestation attached');
-      assert.strictEqual(att.verdict, 'severed');
-      assert.strictEqual(att.of, cmb.metadata.key);
-      assert.strictEqual(att.kernelId, kernelId(), 'attestation names the evaluating kernel');
-      const v = verifyTetherAttestation(att, node._identity.publicKey);
-      assert.deepStrictEqual({ signed: v.signed, valid: v.valid }, { signed: true, valid: true });
+describe('MMP §15.8 lineage tether — not the receiver\'s on a collapsed integration', () => {
+  for (const [label, rootTopic] of [['a laundered chain (topic-B record citing a topic-A root)', TOPIC_A], ['a faithful chain (topic-B record citing a topic-B root)', TOPIC_B_ROOT]]) {
+    it(`${label}: admitted, kept as signed, never severed, no tether attestation`, async () => {
+      await withNode('tether-collapsed', async (node) => {
+        const { root, accepted } = await seedAndReceive(node, rootTopic, TOPIC_B_NEW);
+        assert.strictEqual(accepted.length, 1, 'incoming admits (aligned with recent topic-B anchors)');
+        const entry = accepted[0];
+        assert.strictEqual(entry.collapsed, true, 'the gate kept the author\'s record');
+        assert.ok(!isRootShaped(entry.cmb.metadata.lineage), 'the record\'s own lineage is untouched');
+        assert.notStrictEqual(entry.lineage?.severed, true, 'not severed');
+        assert.deepStrictEqual(node._store.parents(entry.key), [root.key], 'the store walks its signed lineage');
+        assert.strictEqual(entry.provenance?.tether, undefined, 'no tether evaluated');
+        assert.strictEqual(entry.tether, undefined, 'no tether attestation');
+      });
     });
-  });
-
-  it('faithful chain keeps lineage: topic-B remix citing a topic-B root stays tethered', async () => {
-    await withNode('tether-keep', async (node) => {
-      const { root, accepted } = await seedAndReceive(node, TOPIC_B_ROOT, TOPIC_B_NEW);
-      assert.strictEqual(accepted.length, 1, 'incoming admits');
-      const cmb = accepted[0].cmb;
-      assert.ok(!isRootShaped(cmb.metadata.lineage), 'lineage intact');
-      assert.ok(cmb.metadata.lineage.ancestors.includes(root.key), 'chain still reaches its root');
-      assert.strictEqual(cmb.provenance.tether.severed, false);
-      assert.ok(cmb.provenance.tether.drift <= 0.5);
-      assert.strictEqual(cmb.tether?.verdict, 'tethered', 'kept chains carry a tethered attestation');
-    });
-  });
+  }
 
   it('tether disabled (SYM_LINEAGE_TETHER analogue: opts.lineageTether=false) → no severance', async () => {
     const name = `tether-off-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

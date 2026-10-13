@@ -53,7 +53,7 @@ When you notice something significant in your domain, decompose it into a Cognit
 | **motivation** | Why this matters — reasons, drivers |
 | **commitment** | What has been confirmed or established |
 | **perspective** | Whose viewpoint, situational context |
-| **mood** | Affective state: `{"text": "...", "valence": -1 to 1, "arousal": -1 to 1}` |
+| **mood** | Affective state: `{"text": "..."}` (a mood is its text: valence and arousal are unsigned, and peers drop them) |
 
 ```bash
 sym publish '{
@@ -63,7 +63,7 @@ sym publish '{
   "motivation": "prevent bugs from fatigue-driven errors",
   "commitment": "coding session with Claude",
   "perspective": "developer, afternoon, 3 hour session",
-  "mood": {"text": "frustrated, low energy", "valence": -0.6, "arousal": -0.4}
+  "mood": {"text": "frustrated, low energy"}
 }'
 ```
 
@@ -89,7 +89,7 @@ sym publish '{
   "motivation": "mesh showed energy declining across all agents",
   "commitment": "playing calm ambient for 30 minutes",
   "perspective": "music agent, responding to collective understanding",
-  "mood": {"text": "calm, supportive", "valence": 0.3, "arousal": -0.3}
+  "mood": {"text": "calm, supportive"}
 }'
 ```
 
@@ -120,7 +120,7 @@ A mesh holds many groups: the default global mesh, or named private rooms. You o
 ```bash
 sym groups            # which groups are live on the LAN right now
 sym group             # the group you're in
-sym join <name>       # switch into a group (kebab-case, e.g. backend-team)
+sym join <name>       # switch into a group ([a-z0-9._-], e.g. backend-team or acme.prod)
 sym leave             # back to the default mesh
 ```
 

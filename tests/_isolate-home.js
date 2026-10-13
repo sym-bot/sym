@@ -11,6 +11,10 @@
  *
  * Without this, every `npm test` leaked `test-*`/fixture node dirs into the
  * real mesh store, which then surfaced as phantom "agents" in mesh-edge.
+ * It is no longer only a convention: under the test runner SymNode and the
+ * daemon refuse a home or state root outside the temp dir (ETESTHOME, see
+ * assertTestSandbox in lib/core/state-root.js), so a file that forgets this
+ * fails loudly instead of leaking.
  *
  * The sandbox is removed on process exit (node:test runs each file in its
  * own process, so one temp HOME per test file, cleaned when that file's

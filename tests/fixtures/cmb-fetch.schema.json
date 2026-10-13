@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/cmb-fetch.schema.json",
+  "title": "MMP cmb-fetch frame (\u00a77, \u00a715.8)",
+  "type": "object",
+  "required": [
+    "type",
+    "reqId",
+    "key"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "cmb-fetch"
+    },
+    "reqId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "key": {
+      "type": "string",
+      "pattern": "^cmb-[0-9a-f]{64}$",
+      "description": "Content-address key requested (\u00a78.2.1)"
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

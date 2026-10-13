@@ -60,56 +60,56 @@ describe('BonjourDiscovery', () => {
     await d.stop();
   });
 
-  it('should emit inbound-connection on valid handshake', async () => {
+  it('should emit inbound-connection for a client-hello first frame (the Core Secure listener)', async () => {
     const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     const port = await d.start(identity, () => {});
 
     const connections = [];
-    d.on('inbound-connection', (transport, peerId, peerName) => {
-      connections.push({ peerId, peerName });
+    d.on('inbound-connection', (transport, firstFrame, remote) => {
+      connections.push({ type: firstFrame.type, nodeId: firstFrame.nodeId, remote });
     });
 
-    // Connect and send handshake
     const net = require('net');
     const { sendFrame } = require('../lib/frame-parser');
     const client = net.createConnection({ host: '127.0.0.1', port }, () => {
-      sendFrame(client, { type: 'handshake', nodeId: 'peer-abc', name: 'peer-node' });
+      sendFrame(client, { type: 'client-hello', nodeId: 'peer-abc', name: 'peer-node' });
     });
 
-    // Wait for the EVENT, not for a fixed time: a 100 ms sleep raced the loopback round trip on a
-    // loaded host and failed with 0 connections while the handshake was still in flight.
+    // Wait for the EVENT, not for a fixed time.
     const deadline = Date.now() + 5000;
     while (connections.length === 0 && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
 
     assert.strictEqual(connections.length, 1);
-    assert.strictEqual(connections[0].peerId, 'peer-abc');
-    assert.strictEqual(connections[0].peerName, 'peer-node');
+    assert.strictEqual(connections[0].type, 'client-hello', 'the hello is handed to the node, which runs the handshake');
+    assert.strictEqual(connections[0].nodeId, 'peer-abc');
+    assert.match(connections[0].remote, /^127\.0\.0\.1:\d+$/);
 
     client.destroy();
     await d.stop();
   });
 
-  it('should reject non-handshake first frames', async () => {
+  it('should refuse any other first frame, and report a legacy handshake (design D2)', async () => {
     const d = new BonjourDiscovery({ mdns: false });
     const identity = { nodeId: 'test-id', name: 'test', publicKey: 'pk', hostname: 'host' };
     const port = await d.start(identity, () => {});
 
     const connections = [];
+    const legacy = [];
     d.on('inbound-connection', () => connections.push(true));
+    d.on('legacy-hello-refused', (remote) => legacy.push(remote));
 
     const net = require('net');
     const { sendFrame } = require('../lib/frame-parser');
-    const client = net.createConnection({ host: '127.0.0.1', port }, () => {
-      sendFrame(client, { type: 'ping' }); // not a handshake
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.strictEqual(connections.length, 0, 'should not accept non-handshake');
-
-    client.destroy();
+    for (const first of [{ type: 'ping' }, { type: 'handshake', nodeId: 'peer-abc', name: 'old' }]) {
+      const client = net.createConnection({ host: '127.0.0.1', port }, () => sendFrame(client, first));
+      client.on('error', () => {});
+      await new Promise((resolve) => client.once('close', resolve));
+    }
+    assert.strictEqual(connections.length, 0, 'neither is accepted');
+    assert.strictEqual(legacy.length, 1, 'the legacy hello is reported for the node to count');
     await d.stop();
   });
 

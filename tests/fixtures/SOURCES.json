@@ -1,0 +1,87 @@
+{
+  "note": "MMP v2.0 conformance artifacts vendored for sym's tests, copied unchanged. Every file comes from sym-bot/meshcognition-website main at c07ff20 (the merge of PR #43, MMP 2.0 update 1: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28 on the §6.6 errata). authority-v2.json, authority-frame.schema.json and ed25519-strict-v2.json are unchanged since df79e04. The sha256 values equal c07ff20's public/spec/mmp/artifact-manifest.json; mmp-lib.mjs is scripts/mmp/lib.mjs at c07ff20, the reference construction, which the manifest does not list. The tests that read a file check its digest first. The four published vectors beside them (tests/mmp-v2-*.vector.json) are pinned in tests/mmp-v2-vectors-published.test.js.",
+  "source": "https://github.com/sym-bot/meshcognition-website/tree/c07ff20/public/spec/mmp",
+  "files": {
+    "authority-v2.json": {
+      "from": "conformance/v2/authority-v2.json",
+      "sha256": "0e17b3e52282968e02ea18cd7827a143d70887d7885e21618ea21bef173048f6"
+    },
+    "ed25519-strict-v2.json": {
+      "from": "conformance/v2/ed25519-strict-v2.json",
+      "sha256": "323d8d9f1a4ab985a53e3c7031e39c004e456df74a87a48550761160e3c1997b"
+    },
+    "authority-frame.schema.json": {
+      "from": "schema/authority-frame.schema.json",
+      "sha256": "f0717dea628b525b450892b979690bb97033f39159ee79ac023bb968d6d76c42"
+    },
+    "record-projection-v2.json": {
+      "from": "conformance/v2/record-projection-v2.json",
+      "sha256": "6317f856b9016f8811c0dce8235643802732a34c13b74f5790173170abf89dbe"
+    },
+    "record-size-v2.json": {
+      "from": "conformance/v2/record-size-v2.json",
+      "sha256": "62d70f45a132043a3af2e506b158537d65bba68d4d9ee95aa406f1a4518b3e97"
+    },
+    "control-encrypted-v2.json": {
+      "from": "conformance/v2/control-encrypted-v2.json",
+      "sha256": "d000f007256731518c083fc6ba7f5e0159197c1b7c461a2aa41239b9ec9ae4ee"
+    },
+    "cmb.schema.json": {
+      "from": "schema/cmb.schema.json",
+      "sha256": "a720fafd3f1a2b126048e26625743f804f91c00bff8d199ea9927dd6e104f60e"
+    },
+    "control-frame.schema.json": {
+      "from": "schema/control-frame.schema.json",
+      "sha256": "f49c1026bcf3658341830ea5b96a82a1f3b6d06bde91aa770589a9255b15f93a"
+    },
+    "control-encrypted.schema.json": {
+      "from": "schema/control-encrypted.schema.json",
+      "sha256": "9fc38674114184faea12ad9f68777b1928ce3c9f0a87d6a8306cb48698ff1efe"
+    },
+    "cmb-fetch.schema.json": {
+      "from": "schema/cmb-fetch.schema.json",
+      "sha256": "ee2bf81e9ecea47221162f260a77379bcdbf489b444b22a1a730e99969d64cb9"
+    },
+    "cmb-fetch-result.schema.json": {
+      "from": "schema/cmb-fetch-result.schema.json",
+      "sha256": "7fa14a3284e639e8b179f3d71ecde67785e14843893ea7ddc3e3e55096c6c4d6"
+    },
+    "room-join.schema.json": {
+      "from": "schema/room-join.schema.json",
+      "sha256": "a7406ea81f82a9b83002f03426b2dc6b0bfaf6e41812a96f4ad061cecc0401e1"
+    },
+    "relay-frame.schema.json": {
+      "from": "schema/relay-frame.schema.json",
+      "sha256": "510bc531d5add6375f5e1f55c75a465c56d43e0df9ea88153218ecebc2ca9518"
+    },
+    "sym-attest-frame.schema.json": {
+      "from": "schema/sym-attest-frame.schema.json",
+      "sha256": "7dd316be779e2384541968dd98d0153394b5ff7425f7fa30be21d5ba7a14fbd6"
+    },
+    "encrypted-cmb-frame.schema.json": {
+      "from": "schema/encrypted-cmb-frame.schema.json",
+      "sha256": "0f30df5fe8faf133770856cebaf9fb288ccc84b909730409513d26f56c7d42a4"
+    },
+    "frame-registry.json": {
+      "from": "frame-registry.json",
+      "sha256": "c0da960294bf4ed23a26d7281b6f88c9bcf7e2cdd5ffa7158ca6be6e63604474"
+    },
+    "mmp-lib.mjs": {
+      "from": "scripts/mmp/lib.mjs (repository root)",
+      "sha256": "3c0dcc02a7add945eaa3e4f65d20d130b8bd0012de5e0efa711dfcbae859873f",
+      "note": "the reference construction (scripts/mmp/lib.mjs at c07ff20); not a published artifact, so not in the manifest"
+    },
+    "application.schema.json": {
+      "from": "schema/application.schema.json",
+      "sha256": "b52d2a385cb7eb382a960dbdb4003f859edeb185c7d1ebd719dfe2eb71f8690e"
+    },
+    "sym-attest-v1.json": {
+      "from": "conformance/v2/sym-attest-v1.json",
+      "sha256": "3f5639e92f7f1bcb34bd88b16d35badfcef6c3f22ed6f170faa36f884b3fa369"
+    },
+    "handshake.schema.json": {
+      "from": "schema/handshake.schema.json",
+      "sha256": "69f257bdc5606c25e4a1ddef27a05b0f626a6302ded916f355b42f7e76f504cb"
+    }
+  }
+}

@@ -30,7 +30,7 @@ function bidirectionalPair() {
   const b = {};
   const mk = (self, peer) => ({
     on: (ev, fn) => { self[ev] = fn; },
-    send: (frame) => setImmediate(() => { if (peer.message) peer.message(frame); }),
+    send: (frame) => { const copy = JSON.parse(JSON.stringify(frame)); setImmediate(() => { if (peer.message) peer.message(copy); }); return true; },
     close: () => { if (self.close) self.close(); },
   });
   return [mk(a, b), mk(b, a)];
@@ -59,17 +59,23 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   await nodeA.start();
   await nodeB.start();
 
+  // Core Secure (0.14): the pair proves itself through the real §5.2 handshake over the pipe;
+  // neither is a peer of the other until both proofs validate.
   const [tA, tB] = bidirectionalPair();
-  tA.on('message', (frame) => nodeA._frameHandler.handle(nodeB.nodeId, bName, frame));
-  tB.on('message', (frame) => nodeB._frameHandler.handle(nodeA.nodeId, aName, frame));
-  nodeA._addPeer(nodeA._createPeer(tA, nodeB.nodeId, bName, true, 'bonjour'));
-  nodeB._addPeer(nodeB._createPeer(tB, nodeA.nodeId, aName, false, 'bonjour'));
-  await new Promise((r) => setTimeout(r, 400)); // let the handshake round-trip settle
+  nodeB.connectTransport(tB, { role: 'server' });
+  nodeA.connectTransport(tA, { role: 'client', expectNodeId: nodeB.nodeId });
+  if (!(await waitFor(() => nodeA._peers.has(nodeB.nodeId) && nodeB._peers.has(nodeA.nodeId), 10000))) {
+    throw new Error('the two nodes did not complete the Core Secure handshake');
+  }
 
   const received = [];
   nodeB.on('memory-received', (evt) => received.push(evt));
 
-  // CREATE + SIGN — remember() mints the record and signs it with A's identity key.
+  // CREATE + SIGN — remember() mints the record and signs it with A's identity key. It is a room
+  // broadcast, not a record addressed to B: a directed record is sealed to its addressee and no
+  // Admission Attestation is signed about it (#27: the room would learn a sealed record's key and
+  // verdict), so a directed record could not satisfy the ADMIT clause below, which asserts the
+  // attestation.
   const sent = nodeA.remember({
     focus: FOCUS,
     issue: 'a released runtime can resolve, start, and still fail to exchange a single block',
@@ -78,7 +84,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
     commitment: 'this gate blocks the release when any clause fails',
     perspective: 'node A, the sender',
     mood: { text: 'procedural', valence: 0, arousal: 0 },
-  }, { to: nodeB.nodeId });
+  });
   assert.ok(sent && sent.key, 'CREATE: remember() must return a local entry with a CMB key');
   console.log(`  A created + signed ${sent.key}`);
 
@@ -101,16 +107,17 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   const stored = evt.entry;
   assert.ok(stored, 'ADMIT: the admitted record must be handed back as a stored entry');
 
-  // The durable, signed record of the verdict is the Admission Attestation on the remix — the
-  // heuristic gate (the ratified production default) carries no `svaf` block on the entry, so
-  // asserting one here would have gated on the neural path nobody runs.
-  const admission = stored.cmb && stored.cmb.admission;
+  // The durable, signed record of the verdict is the Admission Attestation on the remix's store
+  // entry, beside the record (§8.8.1: the record is exactly its two sections) — the heuristic gate
+  // (the ratified production default) carries no `svaf` block on the entry, so asserting one here
+  // would have gated on the neural path nobody runs.
+  const admission = stored.admission;
   assert.ok(admission, 'ADMIT: an admitted remix must carry its signed Admission Attestation');
   assert.strictEqual(admission.of, sent.key,
     `ADMIT: the attestation must bind A's record ${sent.key}, got ${admission.of}`);
   assert.strictEqual(admission.verdict, evt.decision,
     'ADMIT: the persisted verdict must be the verdict that was reached');
-  assert.ok(stored.cmb.provenance && typeof stored.cmb.provenance.totalDrift === 'number',
+  assert.ok(stored.provenance && typeof stored.provenance.totalDrift === 'number',
     'ADMIT: the remix must record the drift it was admitted at');
 
   // LINEAGE, AS v2 DEFINES IT. Heuristic fusion keeps the incoming category text verbatim and v2
@@ -120,7 +127,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   // are legitimate, so the gate asserts the property that must hold either way — the stored record
   // is reachable back to what A sent.
   const parents = (stored.cmb.metadata && stored.cmb.metadata.lineage && stored.cmb.metadata.lineage.parents) || [];
-  const collapsed = stored.key === sent.key && stored.cmb.collapsed === true;
+  const collapsed = stored.key === sent.key && stored.collapsed === true;
   assert.ok(collapsed || parents.includes(sent.key),
     `LINEAGE: stored remix must either collapse onto A's block ${sent.key} or parent it — ` +
     `got key ${stored.key}, parents [${parents.join(', ')}]`);
@@ -141,7 +148,7 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
   assert.ok(survivor,
     `RESTART: after restarting B, the admitted record descending from ${sent.key} was not recallable ` +
     `(recall returned ${recalled.length} entr${recalled.length === 1 ? 'y' : 'ies'})`);
-  assert.ok(survivor.cmb && survivor.cmb.admission && survivor.cmb.admission.of === sent.key,
+  assert.ok(survivor.admission && survivor.admission.of === sent.key,
     'RESTART: the survivor must still carry the signed attestation of its admission — a record that ' +
     'survives without its verdict cannot be audited later');
   console.log(`  after restart B recalled it, lineage intact`);

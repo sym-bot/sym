@@ -1,0 +1,24 @@
+{
+  "protocolVersion": "2.0",
+  "construction": "mmp-app-v1",
+  "cases": [
+    {
+      "label": "application absent",
+      "application": null,
+      "expectedCommitment": "28cd4e3d828cf5d009c50c6958a92df1abc8e4011e27c97f995f5776cd2e33ba"
+    },
+    {
+      "label": "application present",
+      "decodedDataUtf8": "{\"action\":\"deploy\",\"environment\":\"staging\"}",
+      "application": {
+        "mediaType": "application/json",
+        "schema": "https://meshcognition.org/schema/action-v1.json",
+        "encoding": "base64url",
+        "byteLength": 43,
+        "digest": "sha256-089f613acdc06074b6a9c4a3e1814b0440352c0a9a33a142d70a8964a88822ff",
+        "data": "eyJhY3Rpb24iOiJkZXBsb3kiLCJlbnZpcm9ubWVudCI6InN0YWdpbmcifQ"
+      },
+      "expectedCommitment": "dd920b2cb64ac0e45cdada75fc08b207467eae64c86b3a44ed2f7d09b62dc370"
+    }
+  ]
+}

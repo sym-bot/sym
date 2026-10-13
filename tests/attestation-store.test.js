@@ -369,3 +369,99 @@ describe('AttestationStore — 0.13.15 review follow-ups', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+// 0.14.0 review follow-up: a position was unlisted with findIndex over every witnessed position (up
+// to 32,768), once per position dropped.
+describe('AttestationStore — position eviction is O(1)', () => {
+  it('a dropped checkpoint unlists its position by key, and the global cap takes the oldest from the head, never scanning', () => {
+    const st = new AttestationStore({ maxCheckpointsPerAttester: 2, maxAttesters: 2000, maxWitnessesPerPosition: 1, maxWitnesses: 100000 });
+    for (let a = 0; a < 1000; a++) {
+      for (const n of [1, 2]) {
+        st.recordCheckpoint({ by: `A${a}`, upto_seq: n, root: 'r', sig: `c${a}-${n}` });
+        st.recordWitness({ attester: `A${a}`, upto_seq: n, root: 'r', by: 'W', sig: `w${a}-${n}` });
+      }
+    }
+    let iterations = 0;   // iterator steps taken over the position index
+    const counted = (it) => ({ next() { iterations++; return it.next(); }, [Symbol.iterator]() { return this; } });
+    class Counted extends Map {
+      entries() { return counted(super.entries()); }
+      keys() { return counted(super.keys()); }
+      values() { return counted(super.values()); }
+      forEach(fn, self) { for (const [k, v] of this) fn.call(self, v, k, this); }
+      [Symbol.iterator]() { return counted(super.entries()); }
+    }
+    st._positions = new Counted(st._positions);
+    iterations = 0;
+    // 500 attesters commit a third checkpoint: each drops its oldest position, with its witness.
+    for (let a = 0; a < 500; a++) st.recordCheckpoint({ by: `A${a}`, upto_seq: 3, root: 'r', sig: `c${a}-3` });
+    assert.strictEqual(iterations, 0, 'unlisting a dropped position looks at nothing else');
+    assert.strictEqual(st._positions.size, 1500);
+    assert.strictEqual(st.witnessesFor('A0', 1).length, 0);
+    // The global cap: 100 more positions than it allows, each drop one look at the head.
+    st._maxWitnesses = st._witnessCount;
+    for (let a = 500; a < 600; a++) {
+      st.recordCheckpoint({ by: `A${a}`, upto_seq: 3, root: 'r', sig: `c${a}-3x` });   // drops A${a}'s position 1
+      st.recordWitness({ attester: `A${a}`, upto_seq: 3, root: 'r', by: 'W', sig: `w${a}-3` });
+    }
+    st._maxWitnesses -= 100;
+    iterations = 0;
+    st.recordCheckpoint({ by: 'B', upto_seq: 1, root: 'r', sig: 'b1' });
+    st.recordWitness({ attester: 'B', upto_seq: 1, root: 'r', by: 'W', sig: 'wb1' });
+    assert.strictEqual(iterations, 101, 'one step at the head per position the cap drops');
+    assert.strictEqual(st._witnessCount, st._maxWitnesses);
+    assert.strictEqual(st.witnessesFor('A0', 2).length + st.witnessesFor('A100', 2).length, 0, 'the oldest positions went first');
+    assert.strictEqual(st.witnessesFor('A101', 2).length, 1, 'and no more');
+    assert.strictEqual(st.witnessesFor('B', 1).length, 1, 'the newest stayed');
+  });
+});
+
+// 0.14.0 review follow-up: the 50,000 cap was one FIFO across attesters, so one attester signing many
+// attestations flushed every other attester's chain (and with it the omission evidence).
+describe('AttestationStore — the cap is shared out by attester', () => {
+  it("one attester signing far beyond its share leaves every other attester's chain intact", () => {
+    const st = new AttestationStore({ max: 1000, maxAttesters: 16 });
+    const honest = Array.from({ length: 10 }, (_, k) => `H${k}`);
+    for (let s = 0; s < 50; s++) for (const by of honest) st.record(makeChain(by, 50)[s]);
+    for (const a of makeChain('F', 100000)) st.record(a);
+    for (const by of honest) {
+      assert.strictEqual(st.chainOf(by).length, 50, `${by} keeps its whole chain`);
+      assert.deepStrictEqual(st.verifyChain(by), { ok: true, gaps: [], breaks: [] });
+    }
+    assert.strictEqual(st.size(), 1000, 'the global bound holds');
+    assert.strictEqual(st.chainOf('F').length, 500, 'the flooder keeps what is left, its newest');
+    assert.strictEqual(st.chainOf('F')[0].seq, 99501);
+    assert.deepStrictEqual(st.verifyChain('F'), { ok: true, gaps: [], breaks: [] });
+  });
+
+  it('when full, attesters over their share lose their oldest until each holds its share', () => {
+    const st = new AttestationStore({ max: 1000, maxAttesters: 16 });
+    const chains = ['A', 'B', 'C', 'D'].map((by) => makeChain(by, 1000));
+    for (let s = 0; s < 1000; s++) for (const c of chains) st.record(c[s]);
+    for (const by of ['A', 'B', 'C', 'D']) {
+      assert.strictEqual(st.chainOf(by).length, 250, `${by} holds max / 4`);
+      assert.strictEqual(st.chainOf(by)[0].seq, 751, 'its newest');
+    }
+    // A fifth attester takes its share from the others, not from itself.
+    for (const a of makeChain('E', 300)) st.record(a);
+    for (const by of ['A', 'B', 'C', 'D', 'E']) assert.strictEqual(st.chainOf(by).length, 200, `${by} holds max / 5`);
+  });
+
+  it("holds at most maxAttesters chains, dropping the one updated least recently, never this node's own", () => {
+    const st = new AttestationStore({ max: 1000, maxAttesters: 4, selfId: 'me' });
+    st.record(makeChain('me', 1)[0]);
+    for (const by of ['A', 'B', 'C']) st.record(makeChain(by, 1)[0]);
+    st.record(makeChain('D', 1)[0]);   // 'me' is least recently updated, so A goes
+    assert.deepStrictEqual(['me', 'A', 'B', 'C', 'D'].map((by) => st.chainOf(by).length), [1, 0, 1, 1, 1]);
+    st.record(makeChain('E', 1)[0]);   // then B
+    assert.deepStrictEqual(['me', 'B', 'E'].map((by) => st.chainOf(by).length), [1, 0, 1]);
+    assert.strictEqual(st.size(), 4);
+  });
+
+  it('two attestations at one position: dropping the older leaves the newer in the chain', () => {
+    const st = new AttestationStore({ max: 2 });
+    st.record({ of: 'c1', by: 'A', seq: 1, prev: 'genesis', sig: 'old' });
+    st.record({ of: 'c2', by: 'A', seq: 1, prev: 'genesis', sig: 'restarted' });
+    st.record({ of: 'c3', by: 'A', seq: 2, prev: chainHash('restarted'), sig: 's2' });   // drops 'old'
+    assert.deepStrictEqual(st.chainOf('A').map((a) => a.sig), ['restarted', 's2']);
+  });
+});

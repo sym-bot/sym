@@ -76,10 +76,8 @@ describe('E2E payload receive — payload survives to receiver inbox (§4.4.4 + 
     nodeB._svafEvaluator.evaluate = async () => null;
 
     const [tA, tB] = bidirectionalPair();
-    tA.on('message', (frame) => nodeA._frameHandler.handle(nodeB.nodeId, bName, frame));
-    tB.on('message', (frame) => nodeB._frameHandler.handle(nodeA.nodeId, aName, frame));
-    nodeA._addPeer(nodeA._createPeer(tA, nodeB.nodeId, bName, true, 'bonjour'));
-    nodeB._addPeer(nodeB._createPeer(tB, nodeA.nodeId, aName, false, 'bonjour'));
+    nodeA.connectTransport(tA, { role: 'client', expectNodeId: nodeB.nodeId });
+    nodeB.connectTransport(tB, { role: 'server' });
 
     // Let the handshake round-trip settle so B knows A's identity key (so the
     // signed CMB verifies) and the E2E shared secret is derived (exercises the

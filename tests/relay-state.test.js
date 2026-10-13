@@ -166,3 +166,116 @@ test('destroy() returns the state to idle, never leaves a stale connected/refuse
     assert.equal(c.rc.state().nextRetryAt, null);
   } finally { c.stop(); await relay.close(); }
 });
+
+// MMP §4.4.7 / §4.4.9: 4006 (the existing holder is the legitimate one) is a hard stop like 4004: not
+// retried, said once and kept in state(). (4007, draft PR #20, is deferred and an ordinary close: see
+// the test below.)
+for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*legitimate one\. Not reconnecting/]]) {
+  test(`${code}: awaitOutcome resolves with phase ${phase}; no reconnect; said once; kept in state().stopped`, async () => {
+    const relay = fakeRelay((ws) => ws.close(code, 'Duplicate rejected'));
+    const told = [];
+    const c = client(relay.url, { onIdentityCollision: (info) => told.push(info) });
+    try {
+      c.rc.connect();
+      const s = await c.rc.awaitOutcome(5000);
+      assert.equal(s.phase, phase);
+      assert.equal(s.nextRetryAt, null, 'nothing scheduled');
+      assert.equal(s.stopped.code, code);
+      assert.match(c.rc.describe(), words);
+      await wait(1500); // past the first backoff (1 s)
+      assert.equal(relay.state.attempts, 1, 'no second knock');
+      assert.equal(told.length, 1, 'the host is told once');
+      assert.equal(told[0].code, code);
+      assert.equal(c.logs.filter((l) => l.startsWith('FATAL')).length, 1, 'said once, loudly');
+      c.rc.connect();
+      await wait(200);
+      assert.equal(relay.state.attempts, 1, 'a later connect() does not dial either');
+      c.rc.destroy();
+      assert.equal(c.rc.state().phase, phase, 'destroy() does not hide the stop');
+    } finally { c.stop(); await relay.close(); }
+  });
+}
+
+// MMP 2.0 update 1, §4.4.9: every close other than 4004 and 4006 reconnects with backoff — the RFC 6455
+// closes 1001, 1009, 1011 and 1013 by the table, and 4007, whose draft (#20) is deferred and not in MMP.
+for (const code of [4007, 1001, 1011, 1013, 4005, 4008]) {
+  test(`${code}: an ordinary close, reconnected with backoff`, async () => {
+    const relay = fakeRelay((ws, n) => { if (n === 1) ws.close(code, 'closing'); else ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })); });
+    const c = client(relay.url);
+    try {
+      c.rc.connect();
+      await wait(300);
+      assert.equal(c.rc.state().phase, 'reconnecting');
+      assert.equal(c.rc.state().stopped, null);
+      assert.ok(c.rc.state().nextRetryAt > Date.now(), 'a retry is scheduled');
+      await wait(1500);
+      assert.equal(relay.state.attempts >= 2, true, 'it knocked again');
+      assert.equal(c.rc.state().phase, 'connected');
+    } finally { c.stop(); await relay.close(); }
+  });
+}
+
+test('relay-auth names the nodeId in its lowercase form; a closed socket forgets the fan-out its relay listed', async () => {
+  const frames = [];
+  const relay = fakeRelay((ws, n) => {
+    if (n === 1) { ws.send(JSON.stringify({ type: 'relay-peers', peers: [], features: ['fanout'] })); closeFirst = () => ws.close(1001, 'going away'); }
+  });
+  let closeFirst = null;
+  relay.wss.on('connection', (ws) => ws.on('message', (d) => frames.push(JSON.parse(String(d)))));
+  const id = 'ABCDEF01-2345-7678-9ABC-DEF012345678';
+  const c = client(relay.url, { getIdentity: () => ({ nodeId: id }) });
+  try {
+    c.rc.connect();
+    for (let t = 0; t < 3000 && !(c.rc.state().fanout && closeFirst); t += 10) await wait(10);
+    assert.deepStrictEqual(c.rc.state().fanout, { max: 64 });
+    closeFirst();
+    for (let t = 0; t < 3000 && c.rc.state().phase !== 'reconnecting'; t += 10) await wait(10);
+    assert.equal(c.rc.state().fanout, null, 'forgotten when its socket closed');
+    const auth = frames.find((f) => f.type === 'relay-auth');
+    assert.equal(auth.nodeId, id.toLowerCase());
+  } finally { c.stop(); await relay.close(); }
+});
+
+test('relay-auth and relay-pong are paced inside the bucket (MMP 2.0 update 1, §19.1 headroom)', async () => {
+  const at = [];
+  const relay = fakeRelay((ws, n) => {
+    at.push(Date.now());
+    if (n === 1) { ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })); ws.send(JSON.stringify({ type: 'relay-ping' })); }
+  });
+  const c = client(relay.url, { rate: { perSecond: 4, burst: 1 } });
+  try {
+    c.rc.connect();
+    for (let t = 0; t < 3000 && at.length < 2; t += 10) await wait(10);
+    assert.strictEqual(at.length, 2, 'the auth, then the pong');
+    assert.ok(at[1] - at[0] >= 200, `the pong waited for a token (${at[1] - at[0]} ms after the auth, at 4 a second, burst 1)`);
+  } finally { c.stop(); await relay.close(); }
+});
+
+test('the relay\'s own frames waiting for a token are bounded: a pong already waiting answers the next, and the queue holds at most 8', () => {
+  const c = client('ws://127.0.0.1:1', { rate: { perSecond: 1, burst: 1 } });
+  try {
+    const sent = [];
+    const ws = { readyState: 1, send: (d) => sent.push(d) };
+    c.rc._relayWs = ws;
+    c.rc._bucket.tokens = -1e6; // the bucket stays empty
+    for (let i = 0; i < 100; i++) c.rc._sendControl(ws, { type: 'relay-pong' });
+    assert.equal(c.rc._control.length, 1, 'one pong waits, however many are asked for');
+    for (let i = 0; i < 50; i++) c.rc._sendControl(ws, { type: 'relay-auth', nodeId: String(i) });
+    assert.ok(c.rc._control.length <= 8, `held ${c.rc._control.length}`);
+    assert.equal(sent.length, 0, 'nothing is sent past the bucket');
+  } finally { c.rc._relayWs = null; c.stop(); }
+});
+
+test('a socket destroy() let go never schedules a reconnect when its close arrives', async () => {
+  const relay = fakeRelay((ws) => ws.send(JSON.stringify({ type: 'relay-peers', peers: [] })));
+  const c = client(relay.url);
+  try {
+    c.rc.connect();
+    await c.rc.awaitOutcome(5000);
+    c.rc.destroy();   // the node object may start again later, so isRunning() can still be true here
+    await wait(300);  // the close event arrives
+    assert.equal(c.rc.state().nextRetryAt, null);
+    assert.equal(c.rc._relayReconnectTimer, null, 'nothing scheduled');
+    assert.equal(c.rc.state().phase, 'idle');
+  } finally { c.stop(); await relay.close(); }
+});

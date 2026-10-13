@@ -54,8 +54,7 @@ describe('MMP v2.0 two-node sealed round-trip', () => {
     assert.ok(!JSON.stringify(frame.metadata).includes('seal me end to end'), 'category text is not in the clear frame');
     assert.ok(!frame.sealed.includes('seal me end to end'));
 
-    const r = server.acceptRecv(frame.sequence, frame.direction);
-    const out = openEncryptedFrame({ frame, trafficKey: r.trafficKey });
+    const out = server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey }));
     assert.strictEqual(out.applicationBytes, null, 'app-null record carries no applicationData');
     assert.deepStrictEqual(out.cmb.categories, cmb.categories);
     assert.deepStrictEqual(out.cmb.metadata, cmb.metadata);
@@ -70,15 +69,17 @@ describe('MMP v2.0 two-node sealed round-trip', () => {
     const cmb = signedRecord(priv);
     const { client, server } = establishedPair();
 
+    const frames = [];
     for (let i = 0; i < 3; i++) {
       const s = client.nextSend();
       assert.strictEqual(s.sequence, String(i));
       const frame = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey });
-      const r = server.acceptRecv(frame.sequence, frame.direction);
-      assert.ok(openEncryptedFrame({ frame, trafficKey: r.trafficKey }));
+      frames.push(frame);
+      assert.ok(server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey })));
     }
     // A relay replays frame 0; the server has already consumed through 2.
-    assert.throws(() => server.acceptRecv('0', client._sendDirection || 'client-to-server'), /replay|rollback/);
+    const f0 = frames[0];
+    assert.throws(() => server.receive(f0.sequence, f0.direction, (trafficKey) => openEncryptedFrame({ frame: f0, trafficKey })), /replay|rollback/);
   });
 
   it('a router that flips one sealed byte cannot pass the frame', () => {
@@ -88,8 +89,8 @@ describe('MMP v2.0 two-node sealed round-trip', () => {
     const s = client.nextSend();
     const frame = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey });
     const b = Buffer.from(frame.sealed, 'base64url'); b[10] ^= 0x02; frame.sealed = b.toString('base64url').replace(/=+$/, '');
-    const r = server.acceptRecv(frame.sequence, frame.direction);
-    assert.throws(() => openEncryptedFrame({ frame, trafficKey: r.trafficKey }));
+    assert.throws(() => server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey })));
+    assert.strictEqual(server.nextRecv, '0', 'and the refused frame moved nothing');
   });
 
   it('a router that rewrites the clear room cannot pass the frame (AAD binds it)', () => {
@@ -99,7 +100,7 @@ describe('MMP v2.0 two-node sealed round-trip', () => {
     const s = client.nextSend();
     const frame = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey });
     frame.metadata = { ...frame.metadata, room: 'attacker-room' };
-    const r = server.acceptRecv(frame.sequence, frame.direction);
-    assert.throws(() => openEncryptedFrame({ frame, trafficKey: r.trafficKey }));
+    assert.throws(() => server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey })));
+    assert.strictEqual(server.nextRecv, '0', 'and the refused frame moved nothing');
   });
 });

@@ -29,6 +29,12 @@ const { recordCreatedBy } = require('../lib/record');
  *   sym rooms                        # Discover rooms live on the LAN
  *   sym join <name>                   # Switch into a room ("room chat")
  *   sym leave                         # Return to the default global mesh
+ *   sym keys <name> [conflicts]       # Key registry: bindings and conflicts (Core Secure, 0.14)
+ *   sym keys <name> resolve <nodeId> <key>    # Operator: bind nodeId to key (pinned), clearing its conflicts
+ *   sym keys <name> reset-floor <nodeId>      # Operator: let a Legacy Import route be used again
+ *   sym node export <name> --out <file> (--to-host <x25519 pub> | --passphrase-env VAR --allow-copies)
+ *   sym node import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR]
+ *   sym node host-key                 # This host's X25519 key for receiving node bundles
  *   sym logs                          # Tail daemon logs
  *   sym version                       # Show version
  *
@@ -38,20 +44,27 @@ const { recordCreatedBy } = require('../lib/record');
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execSync, spawn } = require('child_process');
 
 const { getSocketPath, getLogDir } = require('../lib/platform');
-const { isValidRoom, roomServiceType } = require('../lib/rooms');
-const ROOM_FILE = path.join(os.homedir(), '.sym', 'room');
-const PID_FILE = path.join(os.homedir(), '.sym', 'daemon.pid');
+const { isValidRoom } = require('../lib/rooms');
+// The CLI's state lives where its daemon's does (SYM_STATE_DIR, default ~/.sym): rooted in the
+// home, two SYM_STATE_DIR deployments shared one pid file (`sym stop` for one stopped the other),
+// and a room or relay set for a rooted daemon went to a file it never reads.
+const { symPath } = require('../lib/core/state-root');
+const { NODES_DIR } = require('../lib/config');
+const ROOM_FILE = symPath('room');
+const PID_FILE = symPath('daemon.pid');
+const RELAY_ENV = symPath('relay.env');
 
 // Portable synchronous sleep — no shell dependency (`sleep` is POSIX-only and
 // absent on Windows). Used between daemon stop/start on a room switch.
 function sleepMs(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
 }
-const SOCKET_PATH = process.env.SYM_SOCKET || getSocketPath();
+// getSocketPath already honours SYM_SOCKET — through the same mapping the daemon uses (a
+// named pipe on Windows). Reading the variable here as well would dial the raw path instead.
+const SOCKET_PATH = getSocketPath();
 const LOG_DIR = getLogDir('sym-daemon');
 const VERSION = require('../package.json').version;
 
@@ -95,6 +108,8 @@ switch (command) {
   case 'catchup': cmdIPC({ type: 'catchup' }, (msg) => { console.log(`Catchup triggered for ${msg.agents || 0} hosted agent(s).`); }); break;
   case 'task':    cmdTask(); break;
   case 'logs':    cmdLogs(); break;
+  case 'keys':    cmdKeys(); break;
+  case 'node':    cmdNode(); break;
   default:
     console.error(`Unknown command: ${command}`);
     console.error('Run sym --help for usage.');
@@ -102,6 +117,80 @@ switch (command) {
 }
 
 // ── Command Implementations ───────────────────────────────────
+
+/**
+ * The key registry of a stopped node (design D3), offline: a running node holds its registry in
+ * memory, so the operator stops it first (or uses the node's own API).
+ */
+function cmdKeys() {
+  const config = require('../lib/config');
+  const { RosterKeyRegistry, keyFingerprint } = require('../lib/roster-keys');
+  const name = args[1];
+  if (!name) { console.error('usage: sym keys <name> [conflicts | resolve <nodeId> <key> | reset-floor <nodeId>]'); process.exit(1); }
+  const nodeId = config.nodeIdForName(name);
+  if (!nodeId) { console.error(`no node named "${name}" on this host`); process.exit(1); }
+  const dir = config.nodeDirById(nodeId);
+  const lock = config.readLockFile(path.join(dir, 'lock.pid'));
+  const sub = args[2] || 'list';
+  if ((sub === 'resolve' || sub === 'reset-floor') && lock && config.lockIsHeldByLiveProcess(lock)) {
+    console.error(`${name} is running (PID ${lock.pid}): stop it before changing its key registry`);
+    process.exit(1);
+  }
+  // Listing reads the file and changes nothing in it (the node may be running): read-only.
+  const reg = new RosterKeyRegistry({ dir: path.join(dir, 'roster-keys'), readOnly: sub !== 'resolve' && sub !== 'reset-floor' });
+  if (sub === 'resolve') {
+    const r = reg.resolveConflict(args[3], args[4]);
+    if (!r.resolved) { console.error(`not resolved: ${r.reason}`); process.exit(1); }
+    console.log(`${args[3]} is now bound to ${keyFingerprint(args[4])} (pinned, by the operator)`);
+    return;
+  }
+  if (sub === 'reset-floor') {
+    reg.resetFloor(args[3]);
+    console.log(`the sticky floor of ${args[3]} is reset: its Legacy Import route may be used again`);
+    return;
+  }
+  const conflicts = reg.conflicts();
+  if (jsonFlag) { console.log(JSON.stringify({ bindings: reg.entries(), conflicts }, null, 2)); return; }
+  if (sub !== 'conflicts') {
+    for (const e of reg.entries()) console.log(`${e.nodeId}  ${e.source.padEnd(12)}  ${keyFingerprint(e.key).slice(0, 23)}…`);
+  }
+  if (conflicts.length === 0) console.log('no key conflicts');
+  for (const c of conflicts) {
+    console.log(`CONFLICT ${c.nodeId}: bound ${keyFingerprint(c.had).slice(0, 23)}… (${c.hadSource}); refused ${keyFingerprint(c.got).slice(0, 23)}… (${c.gotSource}) — resolve: sym keys ${name} resolve ${c.nodeId} <key>`);
+  }
+}
+
+/** Move a node between hosts (design D9.2): export (tombstone first), import (independently pinned). */
+function cmdNode() {
+  const relocation = require('../lib/relocation');
+  const sub = args[1];
+  const passphrase = () => { const v = flagValue('--passphrase-env'); return v ? process.env[v] : undefined; };
+  try {
+    if (sub === 'host-key') {
+      const k = relocation.hostKey();
+      console.log(k.publicKey);
+      return;
+    }
+    if (sub === 'export') {
+      // Sealed to the target host by default; a passphrase bundle opens on any host with the passphrase,
+      // so it is a copy, and needs --allow-copies (final re-review, Finding 7b).
+      const r = relocation.exportNode({ name: args[2], out: flagValue('--out'), passphrase: passphrase(), toHostKey: flagValue('--to-host') || undefined, copyable: args.includes('--allow-copies') });
+      console.log(`exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.${flagValue('--to-host') ? '' : ' The bundle is a passphrase bundle: any host with the passphrase can import it.'}`);
+      return;
+    }
+    if (sub === 'import') {
+      const expect = { nodeId: flagValue('--expect-node') || undefined, key: flagValue('--expect-key') || undefined, fingerprint: flagValue('--expect-fingerprint') || undefined };
+      const r = relocation.importNode({ from: args[2], passphrase: passphrase(), expect, name: flagValue('--name') || undefined });
+      console.log(`imported ${r.name} (${r.nodeId}), verified against ${r.pinnedBy}: ${r.files} file(s)`);
+      return;
+    }
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  console.error('usage: sym node (export <name> --out <file> (--to-host <pub> | --passphrase-env VAR --allow-copies) | import <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…) [--passphrase-env VAR] | host-key)');
+  process.exit(1);
+}
 
 function cmdStart() {
   applyStartFlags();                       // parse + persist --room / --relay-* first
@@ -137,9 +226,9 @@ function readRoom() {
 }
 
 function persistRelay(url, token, relayOnly) {
-  const dir = path.join(os.homedir(), '.sym');
+  const dir = path.dirname(RELAY_ENV);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const f = path.join(dir, 'relay.env');
+  const f = RELAY_ENV;
   const kv = {};
   try {
     for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
@@ -159,7 +248,7 @@ function applyStartFlags() {
   const g = flagValue('--room');
   if (g !== null) {
     if (!isValidRoom(g)) {
-      console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+      console.error(`Invalid room "${g}" — a room is [a-z0-9._-], 1 to 64 characters (e.g. backend-team, acme.prod), or "default"; not "sym".`);
       process.exit(1);
     }
     persistRoom(g);
@@ -190,7 +279,7 @@ function applyStartFlags() {
 function readRelayEnv() {
   const kv = {};
   try {
-    for (const line of fs.readFileSync(path.join(os.homedir(), '.sym', 'relay.env'), 'utf8').split('\n')) {
+    for (const line of fs.readFileSync(RELAY_ENV, 'utf8').split('\n')) {
       const m = line.match(/^([A-Z_]+)=(.*)$/);
       if (m) kv[m[1]] = m[2];
     }
@@ -233,9 +322,9 @@ function restartIntoRoom(room, doneMsg) {
 
 function cmdJoin() {
   const g = args[1];
-  if (!g) { console.error('Usage: sym join <room>   (kebab-case, or "default")'); process.exit(1); }
+  if (!g) { console.error('Usage: sym join <room>   ([a-z0-9._-], 1 to 64 characters, or "default")'); process.exit(1); }
   if (!isValidRoom(g)) {
-    console.error(`Invalid room "${g}" — use kebab-case (e.g. backend-team) or "default".`);
+    console.error(`Invalid room "${g}" — a room is [a-z0-9._-], 1 to 64 characters (e.g. backend-team, acme.prod), or "default"; not "sym".`);
     process.exit(1);
   }
   restartIntoRoom(g, `joined room "${g}".`);
@@ -247,7 +336,7 @@ function cmdLeave() {
 
 function cmdRoom() {
   const g = readRoom();
-  console.log(`current room: ${g}   (${roomServiceType(g)})`);
+  console.log(`current room: ${g}   (advertised on _sym._tcp, TXT room=${g})`);
 }
 
 // Discover SYM-mesh rooms with at least one node online on this LAN.
@@ -372,7 +461,7 @@ function parseObserveFlags(argv) {
  * `sym publish`, which speaks AS this machine's resident node via IPC.
  */
 async function cmdEmit() {
-  const flags = { server: null, room: 'default', name: 'emitter', to: null, parents: [] };
+  const flags = { server: null, room: 'default', name: 'emitter', to: null, parents: [], receiver: null, receiverKey: null };
   const positional = [];
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -380,12 +469,15 @@ async function cmdEmit() {
     else if (a === '--room') flags.room = args[++i];
     else if (a === '--name') flags.name = args[++i];
     else if (a === '--to') flags.to = args[++i];
+    else if (a === '--receiver') flags.receiver = args[++i];
+    else if (a === '--receiver-key') flags.receiverKey = args[++i];
     else if (a === '--parents') flags.parents = String(args[++i] || '').split(',').filter(Boolean);
     else positional.push(a);
   }
   const content = positional.join(' ');
-  if (!flags.server || !content) {
-    console.error('Usage: sym emit --server <host:port> [--room <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+  if (!flags.server || !content || !flags.receiver || !flags.receiverKey) {
+    console.error('Usage: sym emit --server <host:port> --receiver <nodeId> --receiver-key <key|sha256:fingerprint> [--room <g>] [--name <id>] [--to <node>] [--parents <k1,k2>] \'{"focus":"...",...}\'');
+    console.error('  The receiver is pinned: the endpoint must prove that nodeId under that key, or nothing is sent.');
     console.error('  Emits ONE signed v1 block to a remote mesh node and exits (MMP §17.1 Class 1).');
     console.error('  Grounding from CI: --parents <cmb-key> with categories {"intent":"ground","commitment":"verified: ..."}');
     process.exit(1);
@@ -396,8 +488,9 @@ async function cmdEmit() {
     process.exit(1);
   }
   const { emitOnce } = require('../lib/emit');
+  const receiver = /^sha256:/.test(flags.receiverKey) ? { nodeId: flags.receiver, fingerprint: flags.receiverKey } : { nodeId: flags.receiver, key: flags.receiverKey };
   const { key } = await emitOnce(
-    { server: flags.server, room: flags.room, name: flags.name },
+    { server: flags.server, receiver, room: flags.room, name: flags.name },
     categories,
     { to: flags.to || undefined, parents: flags.parents },
   );
@@ -410,7 +503,7 @@ function cmdPublish() {
   const content = parsed.positional.join(' ');
 
   if (!content) {
-    console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"...","valence":0,"arousal":0},...}\'');
+    console.error('Usage: sym publish [--standalone] [--name <id>] [--parents <key1,key2>] \'{"focus":"...","mood":{"text":"..."},...}\'');
     console.error('  The calling agent (LLM) extracts CAT7 categories. The protocol does not parse raw text.');
     console.error('  --standalone: emit without sym-daemon running (one-shot SymNode). Auto-enabled if daemon is down.');
     console.error('  --name:       mesh identity for standalone mode. REQUIRED (or set SYM_NODE_NAME).');
@@ -497,15 +590,15 @@ function cmdPublish() {
  * repeated calls with the same --name resolve to the same nodeId.
  *
  * Ships CAT7 category vectors via SymNode's internal encoder — the caller
- * only needs to supply text (and valence/arousal for mood).
+ * only needs to supply text.
  */
 async function standaloneObserve(categories, opts) {
   const { SymNode } = require('..');
 
-  // Load relay credentials from ~/.sym/relay.env if the env vars are
+  // Load relay credentials from the state root's relay.env if the env vars are
   // not already present. Same pattern as MeshAgent (sym/lib/mesh-agent.js:160).
   if (!process.env.SYM_RELAY_URL || !process.env.SYM_RELAY_TOKEN) {
-    const envFile = path.join(os.homedir(), '.sym', 'relay.env');
+    const envFile = RELAY_ENV;
     if (fs.existsSync(envFile)) {
       for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
         const m = line.match(/^(\w+)=(.*)$/);
@@ -587,7 +680,12 @@ async function standaloneObserve(categories, opts) {
 
   if (!entry) {
     await node.stop().catch(() => {});
-    throw new Error('node.remember() returned null — remix rejected or store write failed');
+    throw new Error('node.remember() returned null — the store write failed');
+  }
+  if (entry.duplicate) {
+    await node.stop().catch(() => {});
+    console.log(`Already stored: ${entry.key}`);
+    return;
   }
 
   // Give the relay a moment to broadcast the CMB to peers before we
@@ -634,7 +732,7 @@ function cmdRecall() {
   }
   const query = recallArgs.join(' ').toLowerCase();
 
-  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  const nodesDir = NODES_DIR;
   if (!fs.existsSync(nodesDir)) {
     console.log('No memories found.');
     return;
@@ -788,7 +886,7 @@ function broadcastQuestion(question) {
       resolve(v);
     };
     const socket = net.createConnection(SOCKET_PATH, () => {
-      socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
+      socket.write(JSON.stringify({ type: 'hello' }) + '\n');
     });
     let buffer = '';
     socket.on('data', (data) => {
@@ -799,7 +897,7 @@ function broadcastQuestion(question) {
         if (!line.trim()) continue;
         try {
           const res = JSON.parse(line);
-          if (res.type === 'registered') {
+          if (res.type === 'result' && res.action === 'hello') {
             socket.write(JSON.stringify({ type: 'send', message: question }) + '\n');
           } else if (res.type === 'result') {
             finish(true); return;
@@ -818,7 +916,7 @@ function broadcastQuestion(question) {
  * most recent memories when nothing matches, so `ask` always has context.
  */
 function gatherMeshMemory(question, limit) {
-  const nodesDir = path.join(os.homedir(), '.sym', 'nodes');
+  const nodesDir = NODES_DIR;
   if (!fs.existsSync(nodesDir)) return [];
   const words = question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 
@@ -1069,8 +1167,9 @@ function cmdIPC(msg, formatter) {
       return;
     }
 
-    // Register first, then send command
-    socket.write(JSON.stringify({ type: 'register', name: 'sym-cli' }) + '\n');
+    // Say hello first, then send the command (0.14: a CLI is a client of the daemon's node, not a
+    // virtual node — design D8).
+    socket.write(JSON.stringify({ type: 'hello' }) + '\n');
   });
 
   let buffer = '';
@@ -1099,8 +1198,8 @@ function cmdIPC(msg, formatter) {
           return;
         }
 
-        // Handle registration
-        if (res.type === 'registered' && !registered) {
+        // The daemon answered hello: send the command
+        if (res.type === 'result' && res.action === 'hello' && !registered) {
           registered = true;
           socket.write(JSON.stringify(msg) + '\n');
           return;
@@ -1170,7 +1269,7 @@ ${bold('Usage:')}
   sym peers                          List connected peers
   sym room                          Show the current room
   sym rooms                         Discover SYM-mesh rooms live on the LAN
-  sym join <name>                    Switch into a room (kebab-case, or "default")
+  sym join <name>                    Switch into a room ([a-z0-9._-], or "default")
   sym leave                          Return to the default global mesh
   sym metrics                        Show protocol metrics and LLM cost
   sym publish [flags] <json>         Publish a projection (CAT7 categories as JSON)
@@ -1190,11 +1289,11 @@ ${bold('CAT7 categories:')}
   motivation    Reasons, drivers, incentives
   commitment    Who will do what, by when
   perspective   Whose viewpoint, situational context
-  mood          { text, valence (-1..1), arousal (-1..1) }
+  mood          { text }  (valence and arousal are unsigned: peers drop them)
 
 ${bold('Examples:')}
   sym start
-  sym publish '{"focus":"debugging auth","mood":{"text":"tired","valence":-0.4,"arousal":-0.3}}'
+  sym publish '{"focus":"debugging auth","mood":{"text":"tired"}}'
   sym recall "energy patterns"
   sym ask "should we use UUID v7 or keep v4?"
   sym insight
@@ -1205,10 +1304,10 @@ ${bold('Daemon-less one-shot observations:')}
   # for relay credentials. Identity is stable across invocations via
   # the cached keypair in ~/.sym/nodes/<name>/.
   sym publish --standalone --name claude-code-mac \\
-    '{"focus":"resolved 3 review board tickets","mood":{"text":"focused","valence":0.3,"arousal":0.2}}'
+    '{"focus":"resolved 3 review board tickets","mood":{"text":"focused"}}'
 
   # Remix with lineage (resolve upstream tickets). --parents implies --standalone.
   sym publish --name claude-code-mac --parents cmb-876bbd483a,cmb-c0d4332a \\
-    '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved","valence":0.3,"arousal":0.1}}'
+    '{"focus":"ANX+CFN positioning memo","intent":"resolve tickets","mood":{"text":"resolved"}}'
 `);
 }

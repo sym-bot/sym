@@ -1,0 +1,284 @@
+{
+  "protocolVersion": "2.0",
+  "rule": "MMP §18.3.2: RFC 8032 §5.1.7 cofactorless verification, [S]B = R + [k]A, after four pre-checks: A and R are canonical encodings (y < p; x = 0 never with the sign bit set) of points of prime order ([L]P = O and P != O), and S < L. With A and R of prime order the cofactored equation gives the same answer.",
+  "source": "speccheck cases from Chalkias, Garillot and Nikolaenko, \"Taming the many EdDSAs\" (SSR 2020), https://github.com/novifinancial/ed25519-speccheck/blob/65519336fda78a3d016e947df6d82848aca0c9da/cases.json, Apache-2.0",
+  "usage": "Reproduce expected for every case. precheckFailure names the first pre-check that fails, in the order A encoding, A order, R encoding, R order, S range. equationsWithoutPrechecks is informative: it is what the two RFC 8032 equations give with lenient decoding and no pre-checks, so it shows which unchecked libraries would disagree.",
+  "cases": [
+    {
+      "label": "speccheck case 0",
+      "messageHex": "8c93255d71dcab10e8f379c26200f3c7bd5f09d9bc3068d3ef4edeb4853022b6",
+      "publicKeyHex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+      "signatureHex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a0000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 1",
+      "messageHex": "9bd9f44f4dcc75bd531b56b2cd280b0bb38fc1cd6d1230e14861d861de092e79",
+      "publicKeyHex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+      "signatureHex": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43a5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 2",
+      "messageHex": "aebf3f2601a0c8c5d39cc7d8911642f740b78168218da8471772b35f9d35b9ab",
+      "publicKeyHex": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+      "signatureHex": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa8c4bd45aecaca5b24fb97bc10ac27ac8751a7dfe1baff8b953ec9f5833ca260e",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 3",
+      "messageHex": "9bd9f44f4dcc75bd531b56b2cd280b0bb38fc1cd6d1230e14861d861de092e79",
+      "publicKeyHex": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+      "signatureHex": "9046a64750444938de19f227bb80485e92b83fdb4b6506c160484c016cc1852f87909e14428a7a1d62e9f22f3d3ad7802db02eb2e688b6c52fcd6648a98bd009",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 4",
+      "messageHex": "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
+      "publicKeyHex": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+      "signatureHex": "160a1cb0dc9c0258cd0a7d23e94d8fa878bcb1925f2c64246b2dee1796bed5125ec6bc982a269b723e0668e540911a9a6a58921d6925e434ab10aa7940551a09",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 5",
+      "messageHex": "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
+      "publicKeyHex": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+      "signatureHex": "21122a84e0b5fca4052f5b1235c80a537878b38f3142356b2c2384ebad4668b7e40bc836dac0f71076f9abe3a53f9c03c1ceeeddb658d0030494ace586687405",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 6",
+      "messageHex": "85e241a07d148b41e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec40",
+      "publicKeyHex": "442aad9f089ad9e14647b1ef9099a1ff4798d78589e66f28eca69c11f582a623",
+      "signatureHex": "e96f66be976d82e60150baecff9906684aebb1ef181f67a7189ac78ea23b6c0e547f7690a0e2ddcd04d87dbc3490dc19b3b3052f7ff0538cb68afb369ba3a514",
+      "expected": "reject",
+      "precheckFailure": "S is not less than L",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 7",
+      "messageHex": "85e241a07d148b41e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec40",
+      "publicKeyHex": "442aad9f089ad9e14647b1ef9099a1ff4798d78589e66f28eca69c11f582a623",
+      "signatureHex": "8ce5b96c8f26d0ab6c47958c9e68b937104cd36e13c33566acd2fe8d38aa19427e71f98a473474f2f13f06f97c20d58cc3f54b8bd0d272f42b695dd7e89a8c22",
+      "expected": "reject",
+      "precheckFailure": "S is not less than L",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 8",
+      "messageHex": "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
+      "publicKeyHex": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+      "signatureHex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff03be9678ac102edcd92b0210bb34d7428d12ffc5df5f37e359941266a4e35f0f",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": false
+      }
+    },
+    {
+      "label": "speccheck case 9",
+      "messageHex": "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
+      "publicKeyHex": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+      "signatureHex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffca8c5b64cd208982aa38d4936621a4775aa233aa0505711d8fdcfdaa943d4908",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 10",
+      "messageHex": "e96b7021eb39c1a163b6da4e3093dcd3f21387da4cc4572be588fafae23c155b",
+      "publicKeyHex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "signatureHex": "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
+      "expected": "reject",
+      "precheckFailure": "A is not a canonical encoding of a curve point",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "speccheck case 11",
+      "messageHex": "39a591f5321bbe07fd5a23dc2f39d025d74526615746727ceefd6e82ae65c06f",
+      "publicKeyHex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "signatureHex": "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04",
+      "expected": "reject",
+      "precheckFailure": "A is not a canonical encoding of a curve point",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "honest key and signature",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a20686f6e657374",
+      "publicKeyHex": "39305025f5300571bf01ef1e1f82b306ce1ceb1a898749af8da02a35a663217a",
+      "signatureHex": "fb5fff1bf197a8f43f6f7012ae2b9051c8c3632e37112ace77e9e4ac5e600f4155b541342558a08b6b1cc8810cd32a4eb0af2728237b0c343f6a91ac18350801",
+      "expected": "accept",
+      "precheckFailure": null,
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "honest signature with S + L (unreduced S)",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a20686f6e657374",
+      "publicKeyHex": "39305025f5300571bf01ef1e1f82b306ce1ceb1a898749af8da02a35a663217a",
+      "signatureHex": "fb5fff1bf197a8f43f6f7012ae2b9051c8c3632e37112ace77e9e4ac5e600f41428937913fbbb2e341b9bf24ebcc0963b0af2728237b0c343f6a91ac18350811",
+      "expected": "reject",
+      "precheckFailure": "S is not less than L",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "identity key, R = identity, S = 0, message one",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206964656e74697479206b65792c2052203d206964656e746974792c2053203d20302c206d657373616765206f6e65",
+      "publicKeyHex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "signatureHex": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "identity key, R = identity, S = 0, message two",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206964656e74697479206b65792c2052203d206964656e746974792c2053203d20302c206d6573736167652074776f",
+      "publicKeyHex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "signatureHex": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "mixed-order key, S = r + k*a, k mod 8 != 0",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206d697865642d6f72646572206b65792030",
+      "publicKeyHex": "ce8650aca323dd09808c7a71f9eaee3538eb83342ef1e44897d4a8976d21e724",
+      "signatureHex": "8acdf8d01267ac86d83540a3ee9999b51bad21615124a2ec0e55ebfda398c8c9335c9fcd00587c96e699190cb45640ac8826a7557e12256a01f383ebc5df2e0b",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "mixed-order key, S = r + k*a, k mod 8 = 0",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206d697865642d6f72646572206b65792034",
+      "publicKeyHex": "ce8650aca323dd09808c7a71f9eaee3538eb83342ef1e44897d4a8976d21e724",
+      "signatureHex": "541ee1eed99741763a446f89f969aaa15980ab7819f2c719a97037ff179476595e8e1ed50e37395af8065d2bbff273504ab0cc5a99972821bd177d995711500c",
+      "expected": "reject",
+      "precheckFailure": "A is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "prime-order key, R = identity, S = k*a",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206964656e746974792052",
+      "publicKeyHex": "692630394f8c151646f36e4def73c6b1c812c1bde62fda7c5beaa2e46fec56e1",
+      "signatureHex": "0100000000000000000000000000000000000000000000000000000000000000b7cf9b5893a5fb2d2c0a863727e24eb7cd1abc4906acc26b939ca06172f29d03",
+      "expected": "reject",
+      "precheckFailure": "R is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "prime-order key, mixed-order R = rB + T8, S = r + k*a",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206d697865642d6f726465722052",
+      "publicKeyHex": "b1049f7cb34b2d7a28e2fba88284db07e24fd71ea1dace6fcf96f3da19bc93aa",
+      "signatureHex": "1940832117d8ec5a7201a6ef8462382d4da1b13d63c7a44b6cc4940f099d50c47125c9eea4d7de98993c5b5bebad0fce1265eedd5a16b37629d8082ca32bd901",
+      "expected": "reject",
+      "precheckFailure": "R is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "prime-order key, R = a point of order 8, S = k*a",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a20736d616c6c2d6f726465722052206120706f696e74206f66206f726465722038",
+      "publicKeyHex": "050a93edbd8c32d63189fd12b9bce473bfe0a30701ba34ac6b8b2240ce92a54d",
+      "signatureHex": "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc0547ab5fad260346572fa0e2b538edc3ed113d6a6244740eac59010d9fec361607",
+      "expected": "reject",
+      "precheckFailure": "R is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "prime-order key, R = the point of order 2, S = k*a",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a20736d616c6c2d6f7264657220522074686520706f696e74206f66206f726465722032",
+      "publicKeyHex": "70b08af3f4a2c4020b9c6d6488b0881bbd8fad6ef05c8a7993db6f3d9031d514",
+      "signatureHex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f6ce2a919dc759dd46616ef4bf07fc1e5dd953ef2447676b1cf73d2bb7b08690a",
+      "expected": "reject",
+      "precheckFailure": "R is not of prime order",
+      "equationsWithoutPrechecks": {
+        "cofactorless": false,
+        "cofactored": true
+      }
+    },
+    {
+      "label": "prime-order key, R = non-canonical identity (y = p + 1), S = k*a",
+      "messageHex": "6d6d7020617574686f72697479206564676520636173653a206e6f6e2d63616e6f6e6963616c2052",
+      "publicKeyHex": "cab46852477f8b48e410cd62912d0f86b97c601667dd9dbeaaff3c42f59355e7",
+      "signatureHex": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f68878e6b49d39614970a9b6a13de1849bf9a86c8b24d77670063551cd902c109",
+      "expected": "reject",
+      "precheckFailure": "R is not a canonical encoding of a curve point",
+      "equationsWithoutPrechecks": {
+        "cofactorless": true,
+        "cofactored": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/application.schema.json",
+  "title": "MMP v2.0 authenticated application bytes",
+  "type": "object",
+  "required": ["mediaType", "schema", "encoding", "byteLength", "digest", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "mediaType": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9!#$&^_.+\\/-]*$",
+      "description": "Canonical lowercase media type without parameters."
+    },
+    "schema": {
+      "type": "string",
+      "description": "Absolute schema URI or the empty string; NFC-normalized in the commitment."
+    },
+    "encoding": { "const": "base64url" },
+    "byteLength": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 524288,
+      "description": "Decoded byte count."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256-[0-9a-f]{64}$"
+    },
+    "data": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "Unpadded canonical base64url."
+    }
+  }
+}

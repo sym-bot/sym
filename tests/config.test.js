@@ -13,6 +13,7 @@ const {
   uuidv7, validateName, generateSigningKeyPair, loadOrCreateIdentity,
   normalizeMdnsHostname, pidIsAlive, lockHolderPid, log,
   acquireIdentityLock, readLockFile, processStartTime, _clearProcessStartTimeCache,
+  primeProcessStartTimes, _windowsStartTimes,
 } = require('../lib/config');
 
 describe('uuidv7', () => {
@@ -348,6 +349,21 @@ describe('acquireIdentityLock', () => {
     assert.notStrictEqual(processStartTime(liveChild.pid), a, 'a different process differs');
   });
 
+  it('on Windows, one PowerShell call reads several pids and agrees with single reads', { skip: process.platform !== 'win32' }, () => {
+    // A pid that is gone must not cost the others their answer: PowerShell exits 1 when any id
+    // in the list is missing, and the lookup must still return the ones it read.
+    const both = _windowsStartTimes([process.pid, liveChild.pid, DEAD_PID]);
+    assert.strictEqual(both.has(DEAD_PID), false);
+    _clearProcessStartTimeCache();
+    primeProcessStartTimes([process.pid, liveChild.pid]);
+    const batched = [processStartTime(process.pid), processStartTime(liveChild.pid)];
+    assert.deepStrictEqual(batched, [both.get(process.pid), both.get(liveChild.pid)]);
+    assert.deepStrictEqual(batched, [
+      processStartTime(process.pid, { fresh: true }), processStartTime(liveChild.pid, { fresh: true }),
+    ], 'a single-pid read gives the same strings');
+    assert.match(String(batched[1]), /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
+  });
+
   it('on Windows, a lock recorded with a recycled PID\'s old start time is reclaimed', { skip: process.platform !== 'win32' }, () => {
     const name = mkName();
     writeLock(name, `${liveChild.pid}\n{"start":"2004-01-01T00:00:00.0000000Z","createdAt":1}\n`);
@@ -390,7 +406,12 @@ describe('acquireIdentityLock', () => {
     assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
   });
 
-  it('releases the lock on SIGTERM when the host has no handler', async () => {
+  // Windows has no POSIX signals: child.kill('SIGTERM') there is TerminateProcess, a hard kill
+  // that runs no handler and no 'exit' hook, so there is nothing for this test to observe. The
+  // Windows case is covered by the hard-kill reclaim test below, which runs on every platform.
+  it('releases the lock on SIGTERM when the host has no handler', {
+    skip: process.platform === 'win32' && 'win32: kill(\'SIGTERM\') is TerminateProcess, which runs no exit hook — see the hard-kill reclaim test',
+  }, async () => {
     const name = mkName();
     const script = `
       require(${JSON.stringify(require.resolve('../lib/config'))}).acquireIdentityLock(${JSON.stringify(name)});
@@ -408,6 +429,33 @@ describe('acquireIdentityLock', () => {
       c.on('close', () => resolve());
     });
     assert.strictEqual(fs.existsSync(lockPathOf(name)), false);
+  });
+
+  // A holder killed so hard that no code of its own runs — SIGKILL on POSIX, TerminateProcess on
+  // Windows (which is what any child.kill() is there) — leaves its lockfile behind. Nothing can
+  // release that lock at the time; the next acquire must recognise the dead holder and reclaim
+  // it, or the agent stays locked out until someone deletes the file by hand.
+  it('reclaims the lock a hard-killed holder left behind (SIGKILL / TerminateProcess)', async () => {
+    const name = mkName();
+    const script = `
+      require(${JSON.stringify(require.resolve('../lib/config'))}).acquireIdentityLock(${JSON.stringify(name)});
+      console.log('locked');
+      setInterval(() => {}, 1000);`;
+    let holderPid;
+    await new Promise((resolve, reject) => {
+      const c = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'ignore'], env: process.env });
+      holderPid = c.pid;
+      c.on('error', reject);
+      c.stdout.on('data', (d) => { if (String(d).includes('locked')) c.kill('SIGKILL'); });
+      c.on('close', () => resolve());
+    });
+    const left = readLockFile(lockPathOf(name));
+    assert.ok(left, 'precondition: a hard kill runs no exit hook, so the lockfile is left behind');
+    assert.strictEqual(left.pid, holderPid);
+    assert.ok(left.start, 'precondition: the holder recorded its start time');
+    const release = acquireIdentityLock(name); // must NOT throw EIDENTITYLOCK
+    assert.strictEqual(readLockFile(lockPathOf(name)).pid, process.pid, 'the next acquire reclaimed it');
+    release();
   });
 });
 

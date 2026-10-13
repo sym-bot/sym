@@ -40,15 +40,14 @@ describe('E2E checkpoint + witness (D3)', () => {
     B._svafEvaluator.evaluate = async () => null;
 
     const [tA, tB] = pair();
-    tA.on('message', f => A._frameHandler.handle(B.nodeId, bName, f));
-    tB.on('message', f => B._frameHandler.handle(A.nodeId, aName, f));
-    A._addPeer(A._createPeer(tA, B.nodeId, bName, true, 'bonjour'));
-    B._addPeer(B._createPeer(tB, A.nodeId, aName, false, 'bonjour'));
+    A.connectTransport(tA, { role: 'client', expectNodeId: B.nodeId });
+    B.connectTransport(tB, { role: 'server' });
     await sleep(400);
 
     // B sends two distinct CMBs to A; A admits both, reaching seq 2 → A checkpoints.
     for (const n of [1, 2]) {
-      B.remember({ focus: `checkpoint e2e ${n}`, issue: 'x', intent: 'D3', motivation: 'm', commitment: 'c', perspective: 'B', mood: { text: 'procedural', valence: 0, arousal: 0 } }, { to: A.nodeId });
+      // Room-bound: a directed record is attested by nobody (sym-attest-v1 §5.1, MMP 2.0 update 1).
+      B.remember({ focus: `checkpoint e2e ${n}`, issue: 'x', intent: 'D3', motivation: 'm', commitment: 'c', perspective: 'B', mood: { text: 'procedural', valence: 0, arousal: 0 } });
       await sleep(150);
     }
 
@@ -57,6 +56,7 @@ describe('E2E checkpoint + witness (D3)', () => {
 
     const cp = A._attestations.latestCheckpoint(A.nodeId);
     assert.strictEqual(cp.upto_seq, 2, 'checkpoint committed at the interval');
+    assert.deepStrictEqual([cp.from_seq, cp.prev], [1, 'genesis'], 'the first chained checkpoint (MMP 2.0 update 1)');
     assert.ok(B._attestations.latestCheckpoint(A.nodeId), 'B received A\'s checkpoint');
 
     const recon = A.reconcileChain(A.nodeId);

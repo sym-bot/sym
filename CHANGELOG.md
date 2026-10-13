@@ -1,5 +1,1083 @@
 # Changelog
 
+## 0.14.0 — 2026-10-13
+
+**Core Secure.** 0.14.0 makes every sym node an MMP v2.0 Core Secure participant (design
+"Core Secure identity: a peer is a proven session, never a hint", v2, 2026-10-02). It breaks the
+wire with 0.13 and older: a 0.13 node is reached only through an explicit Legacy Import route
+(below, and "Interop with 0.13.17"). It also breaks readers outside sym: the store's annotations moved from the stored record
+to the entry (see Changed). It includes 0.13.15 and 0.13.16 (the witness-storm fix and its
+follow-ups). **The 0.13.17 security candidate was never released as such:** its fixes and their
+tests ship in 0.14.0, except two mechanisms 0.14's design replaces — the cap of 16,384 never-evicted
+key bindings (a lockout anyone on the LAN could fill) by the binding lifetime below, and the
+in-memory pending set for grants that arrive before their root (which could be flooded), now by
+§6.6's bounded pending statements (below). The 0.13.17 that was released (2026-10-07) is a relay
+fix on the 0.13 line; 0.14.0's relay sessions do not have the defect it fixes (see its entry).
+
+### Authority: MMP §6.6
+
+Authority is MMP §6.6 as merged (sym-bot/meshcognition-website main at 8c3381d, PR #40; published
+unchanged as MMP 2.0 at 218df24), with its errata 1 (branch spec/authority-errata-1 at df79e04,
+written from sym's release review): a function of a set of hash-linked signed statements, with no
+time in it. sym implements it as written. The time-replay grant rule that 0.14.0's development builds
+carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetch`, `role-chain`,
+`role-digest`) never shipped.
+
+- **Statements (§6.6.3).** `grant`, `revoke` and `endorse`, each identified by `auth-` + SHA-256 of
+  its canonical bytes (`mmp-authority-v1`), naming its authority in `authorisedBy` and its targets by
+  id, with a 16-byte nonce; `issuedAt` is signed and never read. Validity is static: well formed (a
+  subject key of prime order, and signature-entry keys unique within the statement, errata 1),
+  rooted within 4 links, signed, permitted.
+  (lib/core/authority.js)
+- **The anchor (§6.6.1)** is a pinned key set with a threshold:
+  `anchor: { threshold, keys: [{ key, nodeId? }] }`; `{ nodeId, publicKey }`, a `"nodeId:publicKey"`
+  string and `SYM_FOUNDER_ANCHOR` are the 1-of-1 set. An anchor-level statement needs t distinct
+  pinned keys that verify, each copy judged on its own entries. A pin that does not parse stops the
+  node; with none pinned nothing is in force, authority frames are ignored, and the configured
+  `lifecycleRole` stands (a closed development mode). See docs/AUTHORITY-OPERATOR.md.
+- **Roles (§6.6.2).** admin, validator, issuer and non-authority roles (participant, extension
+  roles), with the spec's table for who may grant, revoke and endorse; an optional scope that only
+  narrows, by whole segments, compared exactly.
+- **Resolution (§6.6.4 to §6.6.7).** Per depth, revokes and endorses, then grants; a bucket keeps its
+  own first, by ascending id, within 256 statements (the anchor's 4,096) and 16 delegating grants; a
+  statement a revoke cut off is rescued only by an in-force endorse from above, charged to the
+  endorser's bucket and falling through by id; a quota cut is never rescued. The live set and the
+  authority root. (lib/authority-store.js)
+- **Capacity (errata 1).** At most 200,000 statements held, and beyond that only in-force revokes and
+  in-force anchor-level statements, which the quotas bound; between eviction passes up to
+  EVICT_SLACK (3,125 at the default bound) more can be held, and the protected floor is judged
+  again at the next pass. Past the bound the store drops
+  everything outside the live set first, whatever its kind (a dead or over-quota revoke is an
+  ordinary candidate), then live statements in reverse authority order (deepest first, grants before
+  revokes and endorses, highest id first), skipping only in-force revokes and in-force anchor-level
+  statements. So the removal that would clean up a flooded store is always taken, and one signer's
+  dead statements never displace another's authority. A pass resolves once and frees a batch; the
+  statement file is compacted once it holds twice what the store keeps, and every rewrite of it is
+  crash-safe (written, flushed, renamed, the directory flushed; a crash's stale temp file is removed
+  when the store opens). A statement refused for
+  capacity (`over-capacity`) says nothing against its sender. Dropping live statements is said in
+  the log and counted (`authorityStatus().capacity`).
+- **Persistence.** One file, `authority/statements.jsonl`, whatever the pin. At load every statement
+  is judged again against the pin in force; what does not count under it (a mistyped pin, a re-pin,
+  a chain not yet held) stays in the file as the bytes it was, never deleted, so a corrected pin, or
+  a re-pin that keeps a threshold of the old keys, finds what still counts (§6.6.1). Each record is
+  appended on a line of its own and a failed write is cut back, so a torn write costs only itself.
+- **Frames (§6.6.8).** `authority-statement`, `authority-digest` (on confirm, and after a change at
+  most once a second per session), `authority-fetch` (by ids, or a page after a cursor; an answer by
+  ids is the closure: the in-force revokes and endorses naming what it carries, and theirs, within
+  64) and `authority-set` (at most 64, in authority order). A responder answers 4 fetches a second
+  per session (burst 16) by making the rest wait (at most 64), not by refusing.
+- **The asking rule (§6.6.8, §6.6.12).** Every statement a session delivers spends that peer's
+  gossip lane, asked for or not: one check, one per pinned-key entry of an anchor-level statement,
+  and 16 for each key this node has not checked before. A statement not of the shape, a repeat, and
+  one the session's pending holds (64) have no room for are dropped before any of that. This node
+  asks a session for anything (a pull page, a fetch by ids) only when that peer's lane can pay the
+  most an answer can cost (64 × 33 = 2,112 checks), reserves it until the answer comes, and keeps
+  one ask in flight per session: an answer is never dropped for budget and never spends more than
+  the lane holds. An answer is verified in slices, so the event loop is never held for a page. A
+  pull that ends with the roots apart is repeated, at once if a digest came during it, otherwise
+  after a backoff from 2 s doubling to 5 minutes, reset when either set changes; a pull that stopped
+  early (a page that never came, a session that closed) resumes from its cursor. A session whose
+  statements keep failing (8 in a
+  minute) has its authority statements dropped unread for the rest of the minute, a mute keyed on
+  the session's peer. The key cache keeps the pinned keys for good and the rest least recently
+  used first.
+- **Retired frames.** `role-grant`, `role-revoke`, `role-chain-fetch`, `role-chain` and
+  `role-digest` are ignored, counted and never sent (§6.6.11). `cmb-anchors` is sent on every
+  admitted session (`keys: []` when nothing is replayed), so a relay client still hears a sealed
+  frame before its new session supersedes the old. (lib/node-authority.js; docs/WIRE-0.14.0.md)
+- **Using authority (§6.6.9, §6.6.10).** Roles follow the key: a grant names a nodeId and a key and
+  confers its role on that pair. An in-force grant binds an unbound nodeId in the key registry, as a
+  view; a grant naming this node with a foreign key confers nothing and is reported
+  (`authority-foreign-self-key`). A received record's origin weight, `validateCMB` and `canonizeCMB`
+  (judged on that CMB's own fields; a scoped grant only inside its scope, through the host's
+  `authorityScopes`) and attestation weights are judged against the in-force set when applied. A
+  node resolves when it settles, at most once per twice the time its last resolution took; a pull's
+  end is decided at the next settle, and an eviction pass resolves once per batch of arrivals, so no
+  peer buys a resolve per frame.
+- **One Ed25519 rule (§18.3.2)** for every signature sym checks: records, handshake proofs,
+  attestations, checkpoints, witnesses, room-join grants, tether attestations, relocation bundles
+  and authority statements (lib/core/ed25519.js). Handshake keys are taken only in canonical
+  base64url.
+- **Migration (§6.6.11).** A flag day: role grants signed by 0.13 confer nothing, and every node
+  resolves as a participant until the anchor and each grantor re-issue what should stand.
+  `node.legacyRoleGrants()` lists the old store as plain data for that (docs/AUTHORITY-OPERATOR.md).
+  0.13 `grant` roster entries stay legacy claims.
+- **API.** `node.grant(subject, role, { scope })`, `revoke(ids)`, `endorse(ids)`,
+  `authorityStatement(fields, opts)`, `cosignAuthority(statement)`, `submitAuthority(statement)`,
+  `authorityRoles(nodeId, key?)`, `authorityRoot()`, `authorityStatus()`,
+  `lifecycleAuthority(nodeId, key, cmb)`, `resolveRole(nodeId, { key, cmb })`,
+  `grantRole(nodeId, role, opts)`, `revokeRole(nodeId)`, `legacyRoleGrants()`;
+  `status().coreSecure.authority`; the `authority-changed` event; the `authorityScopes` option.
+- **An attestation's own time is no part of its weight**: no authority is judged at a time, so an
+  attestation dated before the record it attests is not refused for that.
+- **Tests.** The vectors are vendored in tests/fixtures with their sha256 recorded (SOURCES.json,
+  checked before use; authority-v2.json from errata 1, with its xRepeatKey case): every authority case resolved as listed, reversed, shuffled
+  and with forged copies, and every Ed25519 case (authority-vectors). The review attacks at full
+  scale, the old faces (arrival order, backdating, floods, cycles) and capacity in
+  authority-attacks; two nodes reaching one root over TCP, the frames, the asking rule against a
+  peer that answers every ask with fresh keys, re-pulls, persistence and re-pins in authority-node;
+  the one rule at every verification site in ed25519-strict; threshold co-signing and migration in
+  authority-migration; roles and weights in earned-authority-node.
+
+### MMP 2.0 update 1: the drafts this release implements, as the spec now states them
+
+The founder ruled that the drafts sym 0.14.0 implements land in the published spec before it ships.
+They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, merged to main at
+c07ff20: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28 on the §6.6 errata), and sym is aligned with its text, its reference
+construction (scripts/mmp/lib.mjs) and its schemas and vectors, vendored in tests/fixtures with their
+manifest digests (record-projection-v2, record-size-v2, control-encrypted-v2 and the draft
+sym-attest-v1 pass case by case, and every frame sym builds validates against the vendored schemas).
+
+- **The seal point (#26, S1).** A record is never sealed into a session of another room than its
+  signed one, whatever path offered it: a fetch answer, an anchor replay, a broadcast.
+- **room-join (#31, S2).** A grant is checked against its schema (closed, integer times, lowercase
+  ids) before any signature work: the same owner signature over string times verified, and the
+  expiry timer never armed for it. The expiry timer arms from the verified number; the node sends
+  only the schema's members of the grant it holds, and mints only those.
+- **Sequencing (#26, S4).** A sealed frame that opens advances the receive sequence, whatever it
+  carries; its record or inner frame is parsed after, and refusing it changes nothing else (it left
+  the counter behind, so the next frame closed the session as a gap).
+- **Errors (#23).** Every sealed error whose §7.2 action is Close ends the session (1008 from a peer
+  did not). `sendError` sends only 1002 and 2xxx. A clear 1011 prompts a re-handshake only when its
+  `detail` names this node's session or a probe ping is outstanding, while no newer session is
+  waiting to supersede, and no faster than the retry backoff (fifty forged 1011s with no detail
+  bought three re-handshakes in five seconds; now none). A sealed ping is answered with a pong.
+- **The mood frame (founder ruling).** `{ type, mood, context, timestamp }`: mood 1 to 1,024
+  characters, context at most 4,096 or null; no `from` or `fromName` (the receiver labelled the event
+  with the payload's name); a frame carrying them is refused. `broadcastMood` throws `EMOODFRAME`
+  rather than send one out of bounds.
+- **Fetch (#26).** `cmb-fetch` carries no `from` and names one `key` (a `keys` array is refused);
+  `cmb-fetch-result` carries no `timestamp` (it was schema-invalid). A fetched record is verified by
+  the whole of §8.8.5 before it is attributed: `fetchCMB()` returns `{ verified: true, cmb,
+  authorNodeId }`, or `{ verified: false, reason, categories }` with no metadata (D4; it returned
+  unverified metadata as if attributed).
+- **cmb-anchors (#30).** Only a non-empty list starts the once-a-minute limit (an admission with
+  nothing to replay held back the next one's context); only this node's own records of the
+  session's room are replayed; a frame that is not the schema's is refused whole.
+- **The canonical projection (#34, D2).** One assertion is held as the same bytes at every node: a
+  non-NFC category text, `createdBy` or `application.schema` is refused (and minted NFC), parents are
+  held and minted as a sorted set, a lineage with no parents is null, and an absent application is
+  null (so sealed records carry `metadata.application`, as encrypted-cmb-frame.schema.json requires).
+  The 256-character caps count code points. `MAX_RECORD_BYTES` measures the two-section record only
+  (#37), not remember()'s decoded payload beside it.
+- **Rooms.** A room is a §5.8 identifier, `[a-z0-9._-]` of 1 to 64 characters, everywhere it is
+  named: the node's own, the handshake, a record, an attestation, a grant (breaking: see "Core
+  Secure — breaking"). `sym join` and the daemon took kebab-case only and refused §5.8-valid dotted
+  and underscored rooms (the spec's recommended `acme.prod` among them). `sym` stays refused.
+- **Discovery (#17, #22).** The daemon advertises every room on `_sym._tcp` with TXT `room`, as the
+  library did (it used `_<room>._tcp`, so a daemon and a library node in one room never met), and
+  browses the per-room type earlier releases used, where it is a valid RFC 6335 name. A node dials
+  only an advertisement whose TXT room is its own and whose `mmp` (a comma-separated version list)
+  lists 2.0. TXT keys are read case-insensitively, the first occurrence winning. A discovery a host
+  builds advertises its node's room.
+- **The relay client (#25).** 4007 is an ordinary close with backoff (#20, relay-auth key proof, is
+  deferred, and its review found that never reconnecting after 4007 makes a lockout); what a relay
+  listed in `relay-peers.features` is forgotten with its socket; relay-auth carries the nodeId in its
+  lowercase form. The pace stays 20 frames a second, burst 200, under the update's floors of 25/300,
+  and relay-auth and relay-pong now go inside that bucket (they went out at once whatever it held).
+- **The sealed envelopes** are checked as their schemas bound them: a sequence of at most 29 digits,
+  a sealed value at least the tag's length (and a record's at most 983,062 characters), a 32-hex
+  sessionId, and for `control-encrypted` its members exactly.
+- **sym-attest-v1 (#27, S3).** No attestation is signed about a Legacy Import record, and none about a
+  directed record is sent or relayed (one received is kept). The attestation is a closed object with
+  exactly seven verdicts, lowercase UUID attesters, a §5.8 room, a role of up to 64 characters and a
+  method of up to 32. An attester's scoped role is judged on the record its assertion names.
+- **Chained checkpoints (#27, D1).** A checkpoint covers the attestations since the previous one,
+  seq fromSeq..uptoSeq, and is chained to its root (`genesis` first), so a node holds only its last
+  segment; it signs fromSeq and prev, and a witness signs fromSeq. sym signed a root over whatever
+  attestations it still held, and once it had evicted one, over a suffix. A node that loses its
+  segment signs nothing over fewer: its chain ends, visibly (`checkpoint-chain-ended`). Two
+  checkpoints that are not the same one conflict when their ranges overlap or they share a prev (the
+  old rule, one position with two roots, missed a fork cut at other boundaries); the conflicting copy
+  is relayed once, as evidence, and the attester is witnessed no more, its further checkpoints dropped
+  unverified. The link checks (a reversed range, a checkpoint that does not follow the one its prev
+  names) refuse a checkpoint as malformed before any signature work: the range at the schema step, the
+  prev link after the duplicate drop. Only attester-signed checkpoints are evidence: a witness that
+  names a held checkpoint's range with another root counts against the witness, which is refused and
+  muted for 10 minutes; one that overlaps a held checkpoint without matching it is a lead, refused.
+  Logs written before this hold unchained checkpoints, which are kept and read as before.
+- **Echoes (#35, D3).** A record citing this node's own records is verified, gated, stored and
+  delivered like any other: the ingest echo skip is gone, and the anti-echo rule sits at the remix
+  trigger. `remixProduced` counts only remixes minted through `remix()`, and the decision log says
+  whether a refused record cites parents (`cites`), never that it was a remix.
+- **No tether on a collapsed integration (#17, §15.5).** sym's gates keep the incoming text, so every
+  integration collapses onto the author's record as signed; it is no longer tethered, severed or
+  attested, and the retroactive audit judges only this node's own records. §15.8 runs on the
+  remixing side instead: `remix()` (below, breaking).
+- **Layer 6** is given no valence or arousal (unsigned), a Legacy Import record's included.
+- **xmesh-insight-v1** is not offered by default; a host adds it with `extraExtensions`.
+
+### Breaking: `remix()` is asynchronous, and §15.8 runs on what it produces
+
+By the founder's ruling, §15.8 is enforced where the spec puts it, on the remixing node, in 0.14.0.
+`node.remix(categories, opts)` now evaluates the remix against its nearest verified lineage root
+(content-only, one kernel, α-weighted drift against Tguarded) before it is minted: a faithful remix
+keeps its lineage; one drifted past the floor is minted as a fresh root, with no parent from the
+severed chain and the departed source on the entry (`provenance.tether.departedFrom`); one with no
+verified root in reach keeps its lineage, unverified. A verdict is signed as an mmp-tether-v1
+attestation on the entry (`entry.tether`). The §15.7 flag is consumed when the call begins and given
+back if nothing is minted. The receive path's collapsed integrations stay exempt (§15.5).
+
+```js
+// before (0.13, 0.14 development builds)
+const entry = node.remix(categories, { parents });
+// after (0.14.0)
+const entry = await node.remix(categories, { parents });
+if (entry.tether) console.log(entry.tether.verdict); // 'tethered' | 'severed'
+```
+
+`remix()` takes categories and parents only (`opts.cmb` throws). MeshAgent's remix cycle and the XMesh
+synthesis loop await it.
+
+**The evaluation is made in the calibrated kernel only.** The §9.2.1 reject floor is calibrated on the
+semantic encoder (all-MiniLM-L6-v2, the optional `@huggingface/transformers` dependency); the lexical
+n-gram encoder that runs until it loads, or without the dependency, measures drift on another scale. So
+`remix()` waits up to `tetherKernelWaitMs` (default 10 s) for the calibrated kernel; if it is
+unavailable by then, the remix keeps its lineage, unverified (no evaluation, no severance, nothing
+signed), and a line is logged once (`tether-kernel-unavailable` metric). A `tethered` or `severed`
+verdict is never signed from the lexical kernel, and `auditLineageTethers` leaves a chain unchecked
+there too. A `remix()` that began before `stop()` mints nothing after it (`{ refused: 'node-stopped' }`,
+the flag given back).
+
+### Interop with 0.13.17
+
+LAN meshing with 0.13.17 stops except through Legacy Import routes, by design. A 0.13.17 node
+advertises no `mmp` key, so a 0.14 node never dials it as Core Secure; a 0.14 listener closes the
+legacy one-frame hello a 0.13.17 node sends at once (logged once a minute per address). Over the
+relay they never share a session either: 0.14 attempts the Core Secure handshake with a 0.13.17
+relay peer, which never completes, and answers its pings with clear 1011s at the bounded rate. A
+0.13.17 node is reached only through a configured Legacy Import route naming its nodeId and pinned
+key (below), whose records are quarantined. Upgrade every node of a room together.
+
+### `message` and `mood-delivered` carry their provenance
+
+- **The `message` event's meta and the `mood-delivered` event carry `verified`, `profile`,
+  `verification` and `session`**, the same frozen facts, by the same field names, as an inbox entry,
+  so a host decides from the event alone (mesh-channel 0.11.0 resolved the signer's key through
+  `node.keyBindings()`, a separate and later view). A message and a mood from a record that verified
+  carry both; a mood frame (no record, nothing signed) carries `verification: null` and the facts of
+  the session it travelled sealed on; a record that did not verify, or a Legacy Import one, carries
+  neither, as its inbox entry does.
+- **`session` without `verification` means less than both.** An inbox entry never has one without
+  the other. A mood frame's `session` with `verification: null` says only that this session's proven
+  peer sent it, under the key that session proved (the frame is sealed on the session); it is not a
+  signed record. Nothing about it can be verified again later, relayed with its author's signature,
+  or attributed to anyone but that peer. A host shows it as the peer's word, not as a verified record.
+  The mood frame is `{ type, mood, context, timestamp }` (MMP 2.0 update 1, by the founder's
+  ruling): it names no sender, and `mood-delivered.from` is the session's proven name.
+
+### The loaded version, and hot-swap
+
+- **`node.version`** (and `status().version`, and `require('@sym-bot/sym').version`) is the
+  `version` of the package.json loaded with the node: the string its hello announces as its
+  implementation, for a host's status line (mesh-channel's `sym_status`).
+- **Hot-swap is tested end to end** (`tests/hot-swap.test.js`): a host stops its node and builds the
+  next for the same identity in the same room, four times, over TCP on the loopback and over a relay.
+  Every round delivers and fetches the peer's new records by the ids announced, sends this node's
+  own, redelivers nothing the peer re-pushes, keeps every earlier id fetching its record, and logs no
+  null dereference (on 0.13 this broke as "Cannot read properties of null (reading 'close')").
+
+### Redelivery and inbox ids (founder's bug report, 2026-10)
+
+- **A delivery is surfaced once for the life of the store.** After a hot-swap (a new SymNode for the
+  same identity, as mesh-channel's `sym_join_room` builds) or a reconnect, records already received
+  and read came back as new deliveries with new inbox ids: the receive dedup was a TTL cache written
+  to disk at most every 5 s, so it did not outlive the instance. A delivery ledger
+  (`cmbs/.delivered-marks`, append-only, written before the delivery is announced) now keys every
+  surfaced record by its author and incoming key (the CMB key; for a directed record also its
+  assertion, so a new assertion of the same words is still a new delivery), and nothing in it is
+  surfaced again, by any instance or transport.
+- **An inbox id is assigned only once the item is durably in the inbox, and is never reused.** The
+  inbox was a snapshot written at most once a second, so a process that ended after announcing an id
+  lost the item ("not found") and the next instance announced the same id for another record. Every
+  inbox change (a delivery, a drain, an ack) is now appended to `inbox.log` before it takes effect,
+  and folded into `inbox.json` on start and on each snapshot.
+- **An unread item is never evicted.** The ring dropped its oldest item whatever it was; it now drops
+  only read ones, and past 4 x the ring of unread items a new delivery gets no id (counted,
+  `inbox-full-refused`, and said).
+- **One owner per inbox in a process.** A node built for an identity while another instance of it is
+  alive owns the inbox; the older assigns no ids and writes nothing, so a fetch reads the inbox the
+  announcement came from.
+
+### The final re-review of f0d936a (BLOCK) — what changed
+
+The founder ruled three design changes. Rulings A and B (what grants are kept, and what a revoked
+key may still sign) are met by MMP §6.6 itself (above): authority is a function of the statements
+held, and no statement carries a time that could place it inside a period of trust.
+
+- **The interior read side is scoped to the mind's mission (ruling C; Finding 6).** A mind for
+  mission B read mission A's deliveries and notes through `deliveries` and `recall`, and its drain
+  moved the host's inbox cursor. Each mind now has its own view (deliveries that arrived while it
+  runs: directed ones only from its mission's `allowTo`, and room broadcasts), its own cursor and
+  acks; `recall` returns only that view, its own submissions and the mission's `context`; a
+  `parents` key outside it is refused as if absent; reads are rate-limited (10 a second, burst 20);
+  `node.inbox()` is never moved by a mind.
+- **Relayed forgeries cost bounded work (Finding 3).** Each session's records spend a verification
+  lane (32 a second, burst 128) before any work; a peer whose statements for one signer fail 8 times
+  in a minute has its statements for that signer dropped unverified for the rest of the minute
+  (`relayed-signer-muted`), without blame; a refusal is logged and written to the decision log at
+  most once a minute per peer and reason.
+- **First contact is said as it is (Finding 5).** SECURITY.md and the README state that a nodeId is
+  not derived from its key, so first contact is trust on first use, and one accepted directed record
+  makes it permanent; key-derived nodeIds are a future MMP change.
+- **Relocation (Finding 7).** A same-process re-acquire of an identity lock returns a release that
+  does nothing while the first holder holds it, a never-started node's `stop()` releases its lock,
+  and export refuses while a node in this process holds the identity. A bundle is sealed to the
+  target host by default; a passphrase bundle opens on any host with the passphrase, so it is a copy
+  and needs `copyable: true` (`--allow-copies`). Import checks the clear header (now carrying the
+  node's key and its own signature) against the pin before it uses the header's scrypt parameters
+  (also bounded), refuses a bundle this host imported before (`consumed-bundles.jsonl`) and one
+  exported at or before this host's own tombstone of the node, stages everything and renames it
+  into place last (a refused import installs nothing), and keeps file modes.
+- **Lows.** `send()` throws `EBADTO` for a `to` that is not a lowercase UUID, as `remember()` does;
+  `sym emit` releases the identity's lock when it cannot connect; stale comments are corrected;
+  `valence` and `arousal` are gone from the README, the CLI and SKILL.md (they are unsigned, and
+  peers drop them); SECURITY.md says the daemon's IPC socket trusts every process of the same user.
+
+### The re-review at 72daeb6 — what changed
+
+Five findings and the open leads, each fixed where its assumption was made (the design is
+`docs/DESIGN-core-secure-identity.md` on branch `design/0.14.0-core-secure-identity`). N2, N4 and N5
+(revoke cutoffs, caps that refused revokes, the 0.13 grant store) went with the time-replay rule;
+MMP §6.6 (above) has no cutoff, a bucket keeps its revokes and endorses before its grants, a full
+store never refuses or drops a revoke that is in force, and the 0.13 store is read only as plain data,
+never rewritten.
+
+- **A failed signature is charged only to a session that signed in its own name (N1).** Bindings are
+  local views: a relayed statement is verified under this node's binding for its signer, which may
+  be a squatter's session-scoped binding or lack a vouch the relayer holds. The forgery penalty used
+  to close the relaying session and refuse it for 60 s, so an honest peer relaying the genuine
+  statements of a node whose nodeId a squatter held here was cut off on every one. Now a session is
+  closed (`forged-signature`) only when the statement names its own proven peer as signer and the
+  key that failed is the key it proved; any other failure is dropped and counted
+  (`relayed-signature-unverified`), never charged to the relayer.
+- **Directed exchange earns a durable binding (N3).** A peer that only exchanged directed records
+  never earned one, so once it left, a squatter claiming its nodeId was bound and received this
+  node's further directed records to it, while the genuine peer, refused with 1009, did not retry.
+  A verified record its author signed to this node, accepted for delivery (surfaced, stored or not),
+  now earns the binding, as an admitted record does.
+- **Record size limits fit one sealed frame (draft spec PR #37).** A sealed frame carries its
+  plaintext as base64url, so about 768 KiB is the most one 1 MiB frame can carry, and the previous
+  960 KiB text bound could not be met. Now a category's text is at most 256 KiB after NFC, the seven
+  at most 512 KiB, and the record's JSON encoding at most 720 KiB, both when minting (`ECMBSIZE`) and
+  at ingress, where a record over any limit is refused before anything validates or verifies it,
+  and a sealed frame longer than a 720 KiB record can produce is refused before it is opened.
+- **The open leads.** A record without `metadata.to` stays refused: the MMP v2.0 record schema
+  requires it (null for a room-bound record). Attestation, checkpoint and witness rooms are
+  compared in NFC, as they are signed. `remember()` and `send()` refuse an addressee that is not a
+  lowercase UUID (`EBADTO`) instead of minting a record no session can carry. A node whose own
+  nodeId is not a lowercase UUID says so at start (`node-id-not-canonical`): every Core Secure peer
+  refuses its records. The wake queue and `sym emit` were confirmed to send through the one seal
+  point.
+
+### The independent security review (BLOCK at 341dafb) — what changed
+
+Seven design assumptions, each changed where it was made, not patched where it showed:
+
+- **The signed audience governs every send (A).** The one seal point refuses a record whose signed
+  `metadata.to` names anyone but the session's proven peer (`not-addressed`), whichever path offered
+  it; anchors replay room-bound records only, and `cmb-fetch` serves a directed record only to its
+  addressee. A Legacy Import session applies the same rule.
+- **A record is its signed projection (B; draft spec PR #34).** One strict constructor at ingress
+  (`lib/core/record-canonical.js`): closed objects, no type coercion, `to` a lowercase UUID or null,
+  `createdByNodeId` a lowercase UUID, each category's `meta.key` recomputed and a mismatch refused,
+  an unrecognised category dropped, and the unsigned `valence`, `arousal` and `lineage.method`
+  dropped. The node stores, emits, delivers and serves only that projection. **Release note:**
+  `mood-delivered` no longer carries `valence`/`arousal` (they were unsigned). A record over the
+  size limits (256 KiB a category, 512 KiB of text, 720 KiB encoded, as the re-review above set
+  them) is refused before anything encodes it; this reverses the earlier acceptance of larger
+  categories (C-F4). nodeIds are taken only in
+  canonical lowercase at every door: the hello, a relay `from` or announcement, a grant, an invite.
+- **Authority cannot be backdated (C).** The review's rule (a statement counts only if its signer was
+  authorised when it signed and when it was received, draft spec PR #33) went, with every rule that
+  judged authority at a time: MMP §6.6 (above) is a function of the set. A grant binding is a view
+  over the in-force set, never stored; no grant binds this node's own nodeId (one naming a foreign
+  key for it is inert, and reported: `authority-foreign-self-key`); 0.13 `grant` roster entries
+  migrate as legacy claims.
+- **No shared budget is spent before verification, and a forgery ends its session (D).** Only the
+  peer's own lane is spent before a signature check; the shared ceiling is spent after it. A
+  signature in a session's own name that does not verify under the key it proved closes it
+  (`forged-signature`) and its nodeId is not admitted again for 60 s (a relayed one is only dropped,
+  since the re-review above). A key binding is never evicted
+  before it expires. **Every confirmed session runs with a session-scoped binding**, and a second
+  key for that nodeId while it lives is a 1009 IDENTITY_CONFLICT; the durable registry takes only
+  an EARNED binding (an admitted verified record, a verified directed record accepted (since the
+  re-review), a pin, an in-force grant, or the key a legacy claim expects) — a handshake, or a re-handshake, earns nothing, and neither does a record refused for
+  its room. Resource bounds: relay handshakes per relay `from` (one in flight, a hello rate) and
+  for unknown candidates (32 of the 256 slots, the oldest evicted, a wait list served known peers
+  first, failed ones backing off up to 10 min); the LAN listener (256 connections before their
+  first frame, 16 per address; 128 authenticating sessions, 8 per host; the oldest closed); a
+  5 s handshake timeout; a fair relay pacer (per destination, confirmed-session traffic first,
+  8 MiB per destination); 1011 replies from one budget of 2 a second; `cmb-fetch` served at 2 a
+  second per session, a record once a minute per session, and nothing while 2 MiB is unsent; a
+  record budget of 8 a second per session before SVAF. (Authority statements have their own
+  bounds: see the asking rule above.)
+- **Legacy Import pins the routed node's X25519 key (E).** A route needs `e2eKey` (the 0.13 node's
+  `e2e-keypair.json` public key) besides the identity key or fingerprint; a hello presenting another
+  X25519 key is refused (`e2e-key-mismatch`), so a relay squatter with the public keys reads nothing.
+  A Legacy Import peer never passes a gated room's door; a legacy session has a heartbeat (closed
+  after 45 s of silence); a record naming an author other than the routed node, or carrying the
+  v2.0 suite, is refused; no assertion id passes from a quarantined record; this node's
+  attestations of one say `legacy-import-*`. Legacy records raise `legacy-record` and legacy peers
+  `legacy-peer-joined` / `legacy-peer-left`, never `cmb-accepted` (or the inbox) and `peer-joined`.
+- **Errors are information, never commands (F; draft spec PRs #23, #31).** On a confirmed session an
+  `error` travels sealed. A clear error is ignored except 1011 UNKNOWN_SESSION, which prompts a new
+  handshake and never a teardown. Codes renumbered: 4404 → 1011, 4400 → 1010 SESSION_CLOSED. A
+  superseded session and a handshake that does not confirm send nothing. A replayed sealed frame is
+  discarded, not a close. `mesh-room-join` is now `room-join`. A peer that refused this node with
+  1009 is not re-handshaken or re-dialled (the LAN re-offer included) until a restart.
+- **The host hook fires once per assertion (G).** `verified-record` fires after de-duplication and
+  the in-flight check, once per assertion identity; a directed record older than 24 h by its
+  signed time is refused (its de-duplication marks are not kept longer).
+- **The rest of the review.** Relocation holds the identity lock through the export, fsyncs the
+  bundle, and then scrubs the source (identity.json without its private key; the `nodes/<name>`
+  link removed); a bundle is signed by its node, and an import needs an explicit pin (no fallback
+  to a key this host learned). The sticky floor is its own persisted fact. One mind per identity,
+  not per SymNode object. The interior socket lives in a 0700 directory this node made (the tmp
+  fallback is a fresh `mkdtemp`, never a predictable path that could be a planted symlink), and on
+  Windows `listen` refuses unless `{ allowDefaultPipeAcl: true }`. The interior capability is bound
+  to the first connection that presents it; `end` takes the capability, never the mindId; a
+  submission's kind is its signed intent. The client refuses a selection outside both offers.
+  A room is a §5.8 identifier (MMP 2.0 update 1, above). A relay frame type never rides inside a sealed control frame. Node names
+  are one path component. `sym keys <name>` lists without writing. `sym emit` pins its receiver
+  (`--receiver <nodeId> --receiver-key <key|sha256:…>`) and holds the identity lock while
+  connected. An anchor mark needs the record's author to be the session's node. `mood-delivered`
+  and `xmesh-insight` name the proven nodeId; the daemon no longer re-broadcasts peers' moods or
+  messages under its own name; an XMesh synthesis is the remix path and is paced (one per 10 s).
+  The wake queue holds no retired `message` frame, keeps each frame with the key it may go to, and
+  delivers only what the session takes. A room-join grant's expiry closes its session. Refused
+  frames are counted by known type only. A pinned key stays `pinned` when a session proves it.
+- **§15.7 is the remix path's (draft spec PR #35).** `remember(fields, parents)` is never refused as
+  a remix: a reply or a trail decision citing its parents mints, and sets the new-domain-data flag.
+  `node.remix(fields, { parents })` is the gated path (`{ refused: 'remix-without-new-domain-data' }`);
+  MeshAgent and the XMesh synthesis use it. A broadcast duplicate returns `{ key, duplicate: true }`.
+- **For hosts (mesh-channel 0.11.0).** Inbox entries carry `verified`, `profile`, `assertionId`,
+  `verification`, `session`, `author.key` and the signed `record`; `mood-delivered` carries `key`,
+  `assertionId`, `authorNodeId`, `deliveredBy`, `verified`; `node.publicKey`, `node.fingerprint`,
+  `node.keyBindings()`; the interior read side (`mission`, `deliveries`, `subscribe`, `ack`,
+  `recall`).
+
+### Core Secure — breaking
+
+- **A room is a §5.8 identifier, and `SymNode` refuses any other.** `new SymNode({ room: 'My Team
+  Room' })` used to start (a room was any text, compared in NFC); it now throws `EBADROOM` before it
+  starts, and so does any room that is not `[a-z0-9._-]` of 1 to 64 characters, uppercase, spaces and
+  non-ASCII letters included (`'my-team-room'`, `'acme.prod'`). The room is signed into every record
+  and the handshake, so a host that kept a free-form room name must map it to an identifier of its
+  own once, and keep the mapping: a record signed for the old spelling is a record of another room.
+  `sym join` refuses an invalid room; the daemon's `SYM_ROOM` and a persisted room file are checked the
+  same way, and an invalid one falls back to `default`, said in the log.
+
+- **A peer is a proven session.** A sym peer used to exist before anything was proven about it: on
+  TCP connect, on any first `handshake` frame (whose keys were pinned), on a relay's
+  `relay-peer-joined`. Now every transport — LAN TCP, loopback, relay — runs the MMP §5.2
+  handshake (client-hello → server-hello → client-finish, both proofs, key confirmation), and a
+  peer is the set of confirmed sessions that proved one nodeId with one identity key. Every
+  per-peer structure is keyed by the proven nodeId; a name is a label. The listener takes
+  `client-hello` first and nothing else; a legacy `handshake` is refused at once (counted,
+  said once a minute per address). Over the relay the node with the smaller nodeId sends
+  `client-hello` in an envelope; a relay session is bound to the relay `from` it was made on (a
+  hello naming another nodeId is refused),
+  torn down on `relay-peer-left`, superseded by a newer confirmed session for the same (nodeId,
+  key) (a restart under 4004), and never torn down by an unconfirmed hello. 5 s timeout.
+- **Discovery advertises the profile.** Every room on `_sym._tcp`, with TXT `mmp=2.0` and
+  `room=<room>` (and the same in the loopback registry). A record whose `mmp` list lacks 2.0 is not
+  dialled as Core Secure, nor one whose TXT room is another room (MMP 2.0 update 1, above). The
+  lexicographically smaller nodeId dials (§5.1).
+- **Ephemeral E2E, sealed frames.** The persistent X25519 key (`e2e-keypair.json`) and the
+  per-peer shared-secret map are gone: each handshake uses a fresh X25519 key pair and derives
+  directional keys (§5.2.1). Records travel only as `cmb-encrypted` (§18.2.1), one sealed frame
+  per peer session. Every other post-handshake frame except ping/pong travels sealed as
+  `control-encrypted` (`mood` included: it is cognitive content; `error` too). The receive counter
+  advances when the AEAD opens (it advanced first, so one forged frame with the right sequence
+  desynchronised a session), whatever the frame carries (MMP 2.0 update 1, above); a gap closes the
+  session and re-handshakes, a replay is discarded.
+- **Records are v2.0** (`MMP_EMIT_V2` on). Every record is signed `mmp-sig-v2.0` with the signed
+  author `createdByNodeId`; the receiver resolves the author key by `createdByNodeId` through
+  the key registry. An unsigned, legacy-suite or unresolvable record is refused (a legacy-suite
+  one on its own metric, `cmb-legacy-suite-refused`: old history is not counted as a forgery).
+  **Release
+  note (M12):** "X via Y" deliveries from authors this node has never proven, and no grant
+  vouches, no longer surface. That is §18.3.1's rule, not a regression.
+- **Binding from the signed `metadata.to`.** Directed versus room-bound (§9.2.2) is the record's
+  signed, AAD-bound `metadata.to`; the frame flags `to`/`directed` are no longer read. A
+  `remember({ payload })` payload now rides as the record's signed application section (§8.8.3)
+  and is given back to the receiver as `cmb.payload`.
+- **The frame table.** `cmb` (plaintext) is refused (Legacy Import sessions only);
+  `cmb-fetch` names one `key`; the record found goes out as its own sealed `cmb-encrypted` frame,
+  then one sealed `cmb-fetch-result` that carries only the correlation id and the key lists,
+  `{ reqId, returned: [...], missing: [...] }` (MMP 2.0 update 1; it carried the record in the
+  clear); `role-grant`/`role-revoke` are retired
+  (MMP §6.6.11, above); `peer-info` and `wake-channel` are learned only
+  for the session's own nodeId (gossip about other nodes and the relay's peer list are hints,
+  never stored); `message` is retired: `send()` sends a directed CMB whose signed application
+  section marks it a message, and the receiver raises its `message` event from it;
+  `xmesh-insight` goes only with `xmesh-insight-v1`, which is offered only when a host adds it;
+  `state-sync` is refused. Records replayed as context on connect are announced in a sealed
+  `cmb-anchors` frame (the `_anchor` frame flag could not ride a sealed record). MMP 2.0 update 1
+  now defines these frames; what sym chooses where the spec leaves a choice is in
+  `docs/WIRE-0.14.0.md`.
+- **Admission attestations are the `sym-attest-v1` extension** (draft spec PR
+  meshcognition-website#27). The frames are `sym-attest-attestation`, `sym-attest-checkpoint`,
+  `sym-attest-witness` and `sym-attest-node-stats`, sent only to sessions that selected the
+  extension; 0.13's bare `attestation` / `checkpoint` / `witness` / `node-stats` are refused on a
+  Core Secure session. The signed constructions are the extension's: each `lp`-encoded under its
+  own domain tag (`mmp-attest-v1`, `mmp-attest-checkpoint-v1`, `mmp-attest-witness-v1`), with
+  `method` and the record's `assertionId` signed; `room` and `uptoSeq` on the wire; `prev` the
+  SHA-256 of the previous signature's bytes; the checkpoint root a promote-odd Merkle tree with
+  leaf and node tags; node statistics carry no self-asserted name or nodeId and are attributed to
+  the session's peer. Every received frame is checked field by field before anything is spent.
+  **Breaking for readers of the `attestation-received` event:** `methodUnsigned` is now `method`
+  (signed), with `assertionId` and `room` added; a non-text field is shown as `null`. A chain kept
+  from 0.13 continues (its old links and checkpoints still reconcile).
+- **One key registry, an explicit conflict matrix.** No source ever overrides a different key
+  (the 0.13 "strictly stronger source overrides" rule is gone). A different key for a bound
+  nodeId, from any source, is a conflict: refused (a session that proves another key for a bound
+  nodeId is closed with error 1009 `IDENTITY_CONFLICT`, draft spec PR #21), recorded (`roster-conflicts.jsonl`), shown in
+  `status().coreSecure.keyConflicts` and `sym status`; the operator resolves it
+  (`sym keys <name> resolve <nodeId> <key>`). The configured anchor is read from configuration at
+  every start and never persisted, so re-pinning it out of band takes effect. Every 0.13
+  `handshake` entry becomes `legacy-claim` on first load: the expected key, never one that
+  verifies; a proven session presenting it binds `proven`, one presenting another key is a
+  conflict. `roster-keys.jsonl` gets a version marker line (a 0.13 rollback skips it).
+- **Authority follows the key.** A grant names a nodeId and a key and confers its role on that pair
+  only (MMP §6.6.9); a statement is verified under the key its own chain names, never the
+  registry's. `grantRole` refuses a grantee with no proven or pinned key (or pass `{ granteeKey }`).
+- **Room admission on proven keys.** A gated room admits its owner by its pinned key and a grantee
+  whose room-join grant binds the key its session proved (the grant is presented in a sealed
+  `room-join` frame, draft spec PR #31); `roomGate().admits` is now `grant-holders`. The `provenPublicKey`
+  strip and the "refuses everyone" fallback are gone.
+- **The Class 1 emitter speaks Core Secure.** `sym emit` / `lib/emit.js` run the v2 handshake
+  and send sealed records. The room is explicit: an emitter that names none is in `default`, and
+  a node in another room refuses it at the handshake.
+
+### Core Secure — new API (for hosts: XMesh, mesh-channel)
+
+(The authority API is listed under "Authority: MMP §6.6" above.)
+
+- `node.on('verified-record', ({ record, session, verification }) => …)`: every record that
+  passed §8.8.5, with the proven session facts (`nodeId`, `name`, `identityKey`, `sessionId`,
+  `transport`, `role`, `room`, `extensions`, `confirmedAt`, `implementation`, `profile`) and
+  `verification` (`suite`, `assertionId`, `authorNodeId`, `authorName`, `authorKey`,
+  `authorKeySource`, `audience`, `room`, `to`, `relayed`, `anchor`). Hosts no longer reach into
+  `_frameHandler`, `_peerSharedSecrets` or `_identityKey`; `frame-received` (raw, unverified
+  frames) is removed.
+- `loadIdentity({ nodeId | name, create })` and `new SymNode({ name, nodeId, create })`:
+  identities live at `nodes/by-id/<nodeId>/` with the name as an index; `create: false` throws
+  `EIDENTITYABSENT` instead of minting; a tombstoned identity throws `EIDENTITYTOMBSTONED`.
+  `renameIdentity(old, new)` moves the index, never the identity. A 0.13 `nodes/<name>/`
+  directory moves once, idempotently, and `nodes/<name>` stays as a symlink for one release so a
+  0.13 rollback reads the old path.
+- `sym node export <name> --out <file> (--passphrase-env VAR | --to-host <key>)` tombstones the
+  node, then writes its encrypted, node-signed bundle, then scrubs the source; `sym node import
+  <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…)` verifies it
+  against that explicit pin and the node's signature, and refuses a re-keyed or altered bundle;
+  `sym node host-key`.
+- `node.interior()`: the interior submission path for the node's mind — `startMind({ kinds,
+  allowTo, ratePerMinute })` issues a per-mission capability (`queueMind` waits its turn; one
+  mind per identity), `submit(capability, { kind, categories, to, parents, payload })` and the
+  interior socket (`listen()`, newline JSON; the capability bound to its first connection) check
+  audience, size (64 KiB text, 512 KiB application), rate, declared kinds (the kind is the signed
+  intent) and lineage before the node signs; the socket also serves `mission`, `deliveries`,
+  `subscribe`, `ack` and `recall`; `endMind` revokes.
+- `node.connectTransport(transport, { role, expectNodeId })` runs the handshake over a transport
+  the host provides; `node.inviteURL()` and `node.acceptInvite(url)` (invites carry the issuer's
+  `node` and `key`; accepting pins the issuer only where that nodeId is unbound); `lib/invite.js`.
+- `sym keys <name> [conflicts | resolve | reset-floor]`.
+
+### From the 0.13.17 re-review (0.14 requirements)
+
+- **Binding lifetime (design D3, as the security review changed it).** A confirmed session runs
+  with a session-scoped binding; the durable registry takes one only when it is earned (an
+  admitted verified record, a verified directed record accepted, a pin, an in-force grant). A `proven` binding that verified nothing and
+  was not seen for 30 days expires; nothing is evicted before it expires, and a full registry
+  (65,536) refuses a newcomer a durable binding — its live session still verifies what it signs.
+  The `seen` / `verified` facts are persisted with the binding.
+- **A peer with a live relay session reuses it** (A2): a repeated announcement probes the session
+  with a ping instead of re-handshaking; a restarted peer's new process answers a ping, or a sealed
+  frame, for a session it does not hold with an `error`, and the session re-handshakes. Close
+  handlers compare against the peer's own current session.
+- **Wake channels cannot be locked by many identities** (A4): learned only from a confirmed
+  session's own nodeId, and a full table makes room by staleness.
+- **Every peer-fed store is bounded, and SECURITY.md lists each bound** (A6). New in 0.14: at most
+  256 relay handshakes in flight; a relay `from` that never confirms leaves no state; an IPC line
+  is at most 8 MiB; the nesting bound also covers sealed control frames and interior requests.
+
+### Legacy Import (temporary: network Legacy Import is removed in 0.15.0)
+
+- Off by default. A route (`legacyRoutes: [{ nodeId, endpoint: 'host:port' | 'relay', key |
+  fingerprint, e2eKey }]`, or `legacy-routes.json` in the node dir) names a 0.13 peer; the identity
+  key fingerprint is mandatory and is pinned, and so is the peer's persistent X25519 key
+  (`e2eKey`). This node always dials a route itself and never accepts
+  a legacy hello. Over the relay it sends its legacy hello to the routed nodeId, and takes only
+  records whose signature verifies against the pinned key.
+- What it sends on a legacy session: its records as legacy `cmb` under the legacy E2E
+  construction, encrypted to the routed node's pinned X25519 key: a relay, or a squatter holding
+  only public keys, cannot read them; anyone who later obtains that node's X25519 private key can
+  read what was recorded (no forward secrecy). `sym status` says the session uses legacy
+  encryption, with no forward secrecy and no transcript proof. Everything received is stored
+  `verified: false`, `profile: 'legacy-import'`, never given authority, and raised as
+  `legacy-record`. Connection-level frames are hints.
+- The sticky floor is its own persisted fact: once a routed nodeId has proven itself over Core
+  Secure its route is refused until an operator reset (`sym keys <name> reset-floor`), whatever
+  becomes of its binding.
+
+### Removed
+
+- The daemon's `register` virtual nodes, `register-agent` hosted agents and `agent-cmb` path
+  (which broadcast a plain `cmb` with a client-supplied `from`): one agent, one node; a node's
+  mind uses its interior. Local clients send `hello` and subscribe with `listen`.
+- `_peerSharedSecrets`, `_pinPeerKey`, `_peerIdentityKeys`, `_deriveAndStoreSecret`,
+  `_buildHandshake` (outside Legacy Import), `_createPeer`/`_addPeer`, per-connection gossip
+  lanes (the gossip budget is kept per proven peer), the `frame-received` event, `state-sync`.
+
+### Relay
+
+- **4006 is a hard stop, like 4004.** The client did not handle 4006 (§4.4.7: the existing holder
+  is the legitimate one) and retried it at the normal backoff. Now 4006 is said once, loudly, kept in
+  `state().stopped` / `status().relayState.stopped` with phase `duplicate-rejected`, reported to the
+  host (`identity-collision` with `code` and `kind`, and a `relay-hard-stop` metric), and never
+  reconnected. 4007 (draft MMP spec PR meshcognition-website#20, deferred past 0.14.0) is an
+  ordinary close, reconnected with backoff (MMP 2.0 update 1, above).
+- A relay socket that `destroy()` let go no longer schedules a reconnect when its close arrives
+  (a stopped node object kept redialling when its host reported it still running).
+- The client paces everything it sends under sym-relay's limit (25 frames/s, burst 300, then
+  4008) at 20 frames/s, burst 200, and uses the fan-out envelope `{ fanout: [{ to, payload }] }`
+  (one message for many recipients, at most 64 entries, never a recipient twice) when the relay
+  lists `fanout` in `relay-peers.features` (MMP spec draft PR meshcognition-website#25) —
+  sym-relay 0.6.0.
+
+### Known limits (design §5, said in README and SECURITY.md)
+
+- First contact with no anchor, invite or grant is trust on first proven use.
+- Relay eviction: `relay-auth` is unproven and 4004 lets a token holder evict a node; an evicted
+  node re-handshakes and a squatter gets no session.
+- No key rotation (§3.4). A same-user process can read identity files.
+
+Fixes from the MMP 2.0 conformance audit's open findings, the 0.13.12 known limits, the Windows test
+debt, and the daemon's log flood. Every item has a test that fails without its fix.
+
+### Security
+
+- **A copied room-join grant admitted its holder to a gated room** (0.13.16, and the releases before
+  it that gate rooms). A grant is shown in its grantee's every handshake, so any node that saw one
+  could keep a copy. Writing the grant and the key printed in it into its own handshake (as
+  `provenPublicKey`) admitted that node to the gated room as the grantee, with no proof it held the
+  grantee's key. 0.14.0 drops a `provenPublicKey` that arrives in a handshake (see Fixed — security).
+  A room with no owner, the default, was never gated and is not affected.
+- **One captured role grant could be stored and relayed without end** (0.13.16, and the releases
+  before it that gossip role grants). A grant re-spelled (padding, whitespace, a `+`/`/` swap: each
+  spelling verifies) was taken as a new grant, so any admitted peer holding one, with no key of its
+  own, could make every node store, append and relay it again for every spelling. 0.14.0 retires
+  role grants altogether (MMP §6.6.11); an authority statement's signature is taken in its one
+  canonical spelling, and its id never covers the signature (see Authority: MMP §6.6).
+
+### Fixed — security
+
+- **A relay could replay a signed directed record.** The directed de-duplication mark was the raw
+  base64url signature or the carried `assertionId`. Base64url decoding ignores padding and the
+  unused bits of the last character, and no signature covers `assertionId`, so a relay could
+  re-spell either and make one signed directed record surface again and again. The mark is now
+  the hash of the decoded signature bytes.
+- **A peer could vouch for a v2.0 record by signing it under another node's id (B-R4).** A
+  published v2.0 record (mmp-sig-v2.0) signs its author's node id, but it was verified against the
+  key of whichever peer delivered it. It is now verified against the key held for its
+  `createdByNodeId`, so a genuine relay also verifies. A v2.0 record whose carried `assertionId`
+  is not the one its preimage yields is refused (B-R6). On other suites a carried `assertionId`,
+  which nothing signs, is dropped.
+- **A record signed for another room or another node was stored.** The audience check (§18.3.1)
+  ran only on the older suite's direct path: a verified v2.0 record returned before it, and so did an
+  older-suite record verified against its author on relay, so a record its author addressed to
+  another node, or signed for another room, was stored, remixed and gossiped by every node it
+  reached. Every signed record's `room` and `to` are now checked, on every path, whether or not its
+  signature could be verified here, and a record addressed elsewhere is refused before it is stored
+  or surfaced. Each refusal is counted (`cmb-audience-rejected`, with `verified`) and said once a
+  minute per peer and reason.
+- **Stripping the frame's `directed` flag turned a signed directed CMB into a broadcast (B-R8).**
+  A signed addressee could only veto directed treatment. When the author signed one, it now alone
+  decides.
+- **Unauthenticated gossip could repoint a phone's wake token.** Any room peer's `peer-info` could
+  overwrite a wake channel the phone had given this node itself. A channel now ranks by how the node
+  id it names was proven, and a weaker source never replaces a stronger one's token. At the top is the
+  peer's own `wake-channel` frame over a session that proved it holds that node id's key. Next comes
+  the relay's peer list, which is the peer's own registration over its relay-auth session, ranked with
+  a channel kept by an earlier release (which recorded no source). At the bottom are a `wake-channel`
+  frame over a session that proved nothing, which is just whoever claimed that node id at handshake,
+  and gossip. (In 0.13 no handshake proved a key, so a peer's own frame ranked with gossip; since
+  0.14 every session proves its key, and a channel is learned only from the confirmed session's own
+  nodeId.) Nothing unproven can repoint a channel the relay or a proven session gave.
+- **A peer can turn its wake channel off.** `platform: 'none'` removes the channel when it comes from
+  the peer's own frame, or from the relay's registration, ranked at least as high as the channel
+  held. Gossip cannot remove anyone's.
+- **The wake-channel store and everything it feeds are bounded, at load as at run time.**
+  - At most 1,024 channels are kept, including what is loaded from a file an earlier release wrote.
+    Gossip only ever displaces gossip, and room is made in O(1), dropping the channel of the weakest
+    rank set least recently, never by scanning the map.
+  - A `peer-info` frame carries and is read for at most 256 entries, the most recently seen. The
+    relay's peer list is read for 256 too. An over-long frame from an older sender is said once a
+    minute per peer.
+  - At most 64 frames wait for one sleeping peer, and they go with its channel.
+  - Building a `peer-info` frame on a connection drops expired channels without writing the file
+    there (a synchronous write); the next save writes it, and a load drops them again.
+  - A node id, platform, token and environment are short strings, and a token is one path segment
+    (it is put in the push provider's request path).
+- **A peer could claim to have proven its key.** `provenPublicKey`, which only this node's own
+  proving handshake may set, was read from the peer's own handshake frame. A gated room's admission
+  compares it with the key printed in the room grant presented, so anyone holding a copy of a grant
+  could enter as its grantee by writing that key into the frame. A handshake's `provenPublicKey` is
+  now dropped on arrival, on both the LAN and the relay path.
+- **A frame whose handling threw ended a relay-connected daemon.** The LAN path caught a throw from
+  frame handling, but the relay path had nothing above it, so the exception reached the process. A
+  frame that throws is now dropped with a log line and a `frame-handler-error` metric. A record that
+  declares the v2.0 suite but has no buildable preimage is rejected as a signature mismatch. A relay
+  connection built without a wake manager no longer throws in its WebSocket handler on a peer list
+  that carries a wake channel.
+- **A record with no room was admitted in every room it was replayed into (B-R10).** A record that
+  names no room is now in the literal room `default` (§7). `createCMB` names `default` instead of
+  null (which signed the string `"null"`), and the v2.0 preimage refuses a record without a room.
+- **A record that could not be signed was sent unsigned (B-R12).** `remember()` now throws `ESIGN`
+  before anything is stored or dispatched (§18.3.1). A `MeshAgent` whose node cannot sign says so
+  once and stops remixing and observing. The XMesh synthesis loop says a record it could not sign as
+  the node failing to sign, not as an error of its delegate.
+
+### Fixed — delivery and records
+
+- **An emitter that named no room was admitted and then not heard.** `connect()` and `sym emit`
+  without `--room` make no room claim, and a node in a named room admits them, but their records
+  named no room, which is the room `default` (B-R10), so that node refused every block. An emitter
+  that names no room now authors for the room the node's handshake reply states.
+- **Two copies of one record arriving together could both surface (K1).** A key is held in flight
+  from the de-duplication check until its SVAF pass settles.
+- **A broadcast flood could evict directed de-duplication marks (K3).** They have their own map and
+  cap now. A directed assertion is marked by the digest of the preimage its signature covers,
+  recomputed on receipt, not by the signature bytes: a hedged Ed25519 signer (WebKit) signs one
+  assertion differently each time, and its re-signed copy surfaced twice.
+- **`inbox()`'s limit counted acked items (K4).** It counts unread deliveries. Acked ones still come
+  back, marked, up to the same limit, and are passed over beyond it, so a reply holds at most `limit`
+  unread and `limit` acked items: 2 × `limit` in all.
+- **The inbox `from` was the author's label whether or not anything proved it (K5).** It is now the
+  author when the signature proved who that is, and otherwise the peer that delivered it. The claim
+  stays in `author.name`. A v2.0 record verified against its signed node id carries `author.nodeId`,
+  even when relayed. `from` is a display label (two node ids can sign the same `createdBy`):
+  authorize on `author.nodeId`.
+- **Record timestamps ran ahead of the clock after a backward step, and restarted every process
+  (K6).** The ratchet starts from the newest of this node's own stored records, read from the whole
+  store index once per process (a first reading took only the 20 most recently stored, so after 20
+  peer records it started from zero). After a step back of more than a minute, timestamps follow the
+  clock again, with a `clock-stepped-back` metric.
+- **Mood values were invented or lost (B-R11).** `valence` and `arousal` are kept only when measured,
+  must be numbers in [-1, 1], and a mood given only as numbers keeps them.
+- **Records had no size bound below the 1 MiB frame (B-R13).** (The limits are now those of the
+  re-review above: 256 KiB a category after NFC, 512 KiB of text, 720 KiB encoded, minted and
+  received alike. What follows is how 0.13.17 first bounded them.) A category is at most 256 KiB of
+  text and the seven at most 960 KiB, and a record is minted only if the frame it travels in fits the
+  1 MiB frame bound with its categories sealed for a peer. Text bytes are not frame bytes: JSON
+  writes a `"` as two bytes and a control character as six, and the end-to-end seal is base64, a 4/3
+  expansion, so a record within the text bounds could be one no transport would carry. In plain text
+  the frame bound allows about 766 KiB. An agent id is at most 64 bytes (§3.1.2). `createCMB` throws
+  `ECMBSIZE`, and so does `remember()`, before anything is stored or sent, for a record or payload
+  that would not fit. In 0.13.17 these were minting rules only; 0.14.0 applies the record limits on
+  receipt too (an agent id over 64 bytes is still accepted on receipt).
+- **A served v2.0 record no longer verified (B-R9, part).** `cmb-fetch` now serves a record's two
+  sections exactly as signed, as a copy: the metadata whole, and each category with its `meta`. Text
+  alone dropped the per-category parents the signature commits to, so a record that declared them
+  failed verification at the requester.
+- **A frame written to a destroyed socket counted as sent (B-D6, residual).**
+- **A send that failed for any reason was reported as "not connected".** `sendFrame` and the
+  transports returned one `false` for a frame over the bound, a closed socket and a failed write.
+  `writeFrame` and the transports' `trySend` now say which (`too-large`, `not-connected`,
+  `write-failed`); `sendFrame` and `send` still return a boolean. A directed `remember()` that was not
+  sent carries `delivery.reason`, its log line names the reason, and a frame over the bound is counted
+  (`cmb-frame-too-large`). `shareWithPeers` counts only the peers a frame reached.
+- **Unsigned records are now counted (B-R3, interim).** They are still accepted as unverified for
+  interop, but each is counted (`cmb-unsigned-received`) and the sending peer is named once in the
+  log, so the emitters a signed-only default would cut off can be found first.
+
+### Fixed — lineage
+
+- **The root walk trusted unverified records (B-L4).** It walks only through records whose address
+  recomputes and that this node wrote or admitted as verified. A remix with no verified ancestor in
+  reach resolves to no anchor, instead of being anchored to itself, and the result says whether the
+  walk was `complete`. The walk is bounded in work as well as in records: at most 64 hops, 4,096
+  stored records and 16,384 parent keys queued, and it stops at a bound instead of draining its
+  queue. A record can name about 14,700 parents within one frame, and before this the queue grew
+  with every long parent list the walk stepped onto.
+- **A tether could not be reproduced by another node (B-L5).** It is measured on the record's text,
+  encoded in one kernel, instead of on vectors blended with local memory. (Since MMP 2.0 update 1 a
+  collapsed integration, which is every one sym's gates make, has no tether at all: above.)
+- The tether audit's fetch fallback no longer returns a local record the walk had refused.
+
+### Changed — read these before upgrading
+
+- **A stored record is what its author sent, and nothing this node computed.** The store used to add
+  members to a two-section record: `admission`, `tether`, `provenance` and `collapsed`, plus an
+  expanded top-level `lineage`. The record now stays `{categories, metadata}` as signed (§8.8.1), and
+  those annotations live on the store **entry**. The one other member it can carry is the `payload`
+  its author sent beside the two sections (as the author's own stored record does): no signature or
+  address covers it, so a record that verifies says nothing about its payload, and `cmb-fetch`
+  serves the two sections without it. Stored files from earlier releases are read as before and
+  moved on first touch. **Code outside sym that reads `entry.cmb.admission`, `.tether`,
+  `.provenance` or `.collapsed`, from stored entries or from `cmb-accepted` / `memory-received`
+  events, must read them from the entry.** xmesh 0.10.11 reads both places.
+- **A record that names no room is in the room `default`, from any sender.** Earlier releases read
+  it as addressed to every room. A 0.13.x `connect()` or `sym emit` without `--room` mints exactly
+  such records, so a 0.14.0 node in any other room refuses what it sends (`cmb-audience-rejected`,
+  `wrong-audience`): a receiver cannot tell a room-less record its author just sent from one
+  replayed out of another room. Upgrade the emitter, or pass `--room` (`connect({ room })`) naming
+  the node's room.
+- **SVAF anchors decay with age (§9.2.1).** The gate treated every stored anchor as fresh at full
+  weight, because the anchor view carried neither the entry's age nor its weight. Anchors now carry
+  both: `storedAt`, and the store's §6.4 `anchorWeight` (2.0 once validated, 0.5 once dismissed, never
+  the sender's unsigned confidence). At the default freshness of 1800 s, an anchor older than about
+  nine hours carries no weight. **A node whose recent memory is all older than that admits the next
+  block under the empty-memory rule**, as §9.2.1 specifies. The spec discloses what that rule costs:
+  while it applies, the §16 influence bound does not cover the node. With decay that window recurs
+  after every quiet period of about 18.4 × `freshnessSeconds` (about nine hours at the default), not
+  only on a fresh node. `freshnessSeconds` is the dial: a larger value keeps older memory gating.
+- **The attestation logs are rotated, and older lines are deleted.** `attestations.jsonl`,
+  `checkpoints.jsonl` and `witnesses.jsonl` (in the node's `attestations/` directory) only ever grew.
+  Now a rotation replaces each live log with the records the store holds and moves the old log, whole,
+  into `attestations/archive/`. `archive/` keeps at most 128 MiB per log, **its newest archive
+  included**: the oldest go first, and an archive larger than 128 MiB on its own is deleted. **What
+  stays on disk is the records the store holds (50,000 attestations, 32 checkpoints for each of 1,024
+  attesters, 50,000 witnesses), the lines appended since the last rotation, and as many of the most
+  recent archived logs as fit in 128 MiB per log. Anything older is deleted.** On the first start, a
+  log already over its budget is rotated at once: the storm's 257 MB `witnesses.jsonl` is archived and,
+  being over 128 MiB, deleted.
+
+  **The bound is configurable**, and the trade-off is yours. Rotation keeps the live log bounded
+  either way. The archives hold the older history and are pruned oldest first past the bound, unless
+  it is 0, which keeps every archive. Anyone who needs the whole audit trail sets 0 and owns the disk
+  it takes. Set it with `SYM_ATTESTATION_ARCHIVE_MAX_BYTES` (bytes per log), or with
+  `attestationArchiveMaxBytes` on `SymNode` (`archiveMaxBytes` on the store). A value that is not a
+  number of bytes ≥ 0 falls back to 128 MiB, and that is said once.
+
+### Fixed — SVAF and the store
+
+- Anchor vectors are measured through a side map and are never written onto stored records, where a
+  later save persisted them.
+- A vector is cached under the kernel that produced it. When the semantic encoder finished loading
+  during a gate, lexical vectors were cached under the semantic key.
+- The neural admission path applies the §15.8 tether exactly as the heuristic path does, through the
+  same helpers. It stores a copy, never the caller's record. When a carried address did not match
+  the content, it now mints this node's own remix, as the heuristic path does; before, it rewrote the
+  author's record under the author's name with a signature that no longer covered it.
+- §15.8 severance no longer edits a signed record (that broke the author's signature). Severance is
+  recorded on the entry and in the lineage index, and every reader of stored lineage honours it:
+  the anchor walk, an index rebuild from disk, the tether audit, and mesh-agent's remix check.
+- The tether audit reads the store's lineage, not an `ancestors` list a sender chose, and never
+  fetches a local record the walk had refused.
+- A frame cannot supply `admission`, `tether`, `provenance`, `collapsed` or `svaf` that this node
+  would then store as its own.
+- The semantic encoder no longer starts a second model load while the first is loading.
+  `semanticSettled()` resolves when it is ready or has failed.
+- **A failure after the neural gate decided re-ran the frame through the heuristic gate.** A failure
+  in the tether encode or the store write landed in the evaluator's fallback. One frame was then
+  decided twice, and two attestations were signed and gossiped for it. Now only the evaluator's own
+  failure falls back. A later failure is logged and the frame is not gated again, and a tether the
+  encoder cannot evaluate leaves the record stored unverified.
+
+### Fixed — the attestation logs
+
+- **The logs are rotated (0.13.15's known limit).** A log is rotated once the bytes in it beyond the
+  records the store holds (appended since its last rotation, then evicted or superseded) exceed the
+  larger of 8 MiB and the bytes of the records it holds. So a rotation always reclaims more than it
+  writes. It is never followed by another until that much more has been appended and dropped: a held
+  set larger than 8 MiB does not make every append rotate. A start applies the same rule to the log as
+  it finds it, so a node does not rotate on every start. Rotating a full attestation log (50,000,
+  ~27 MB) took about 100 ms here.
+- **A rotation cannot lose the live log.** It writes the records held to a temp file, checks every
+  byte reached the file (a write may be short) and fsyncs it. It then hard-links the old log into
+  `archive/` as `<log>.<sequence>.<time>.<pid>.jsonl`, never over an existing name, or copies it where
+  the filesystem has no hard links. Only then does it rename the temp file over the live log, so the
+  live path holds a complete log at every instant. A failure at any step removes what the rotation
+  made (no archive name is left on the live log), leaves the live log as it was, is logged once per
+  distinct error, and is retried after another budget. A start removes what a rotation that crashed
+  left behind: its temp file, an archive name still on the live log, and a copy of the live log made
+  where there are no hard links (a marker names that copy until the live log is replaced). It leaves
+  alone a rotation another running process has in flight on the same directory. Archives are pruned
+  in sequence order, not by file time.
+- **A log that cannot be read at start is left as it is.** A start that could not read a log (too
+  large for memory, an I/O error, a read that ended early) counted none of it as held. The rotation
+  that followed then replaced the log with an empty one, and pruned the archive of it. Such a log is
+  now only appended to, and not rotated until a start reads it; that is said once. A read that
+  returns short is completed.
+- **A rotation keeps everything held:** every attestation, checkpoint and witness the store holds;
+  each conflicting checkpoint copy for a held position, so a restart still reports the conflict; and
+  this node's memory of the checkpoints it witnessed itself (one line per attester), so it still signs
+  a witness once across restarts. A witness read from the log that still waits for its checkpoint is
+  written back, so a restart finds it again, as when the log was never rewritten. One heard only on
+  the network waits in memory only, as before. This node's own witness for a position too full to
+  hold it is written once, not once per copy received.
+- **A start reads all of each log.** A record can stay held at the head of its log while newer ones
+  churn past it: a quiet attester's attestations or checkpoints, a quiet position's witnesses. So each
+  log is read whole, up to twice what its caps hold:
+  - 68.7 MiB for attestations (50,000 at 720 bytes; measured ~520);
+  - 56 MiB for checkpoints (32,768 at 448 bytes, and a conflicting copy beside each);
+  - 47.7 MiB for witnesses;
+  - 172 MiB in all.
+
+  0.13.16 read at most 112 MiB, but only the newest part of each log, which could miss a quiet
+  attester. On logs over every budget, reading them took 0.80–0.85 s here against 0.96 s for 0.13.16.
+  A first start that also rotates all three took about 1.0 s, once; the next start took 0.23 s.
+- **One attester cannot flush another's chain.** The 50,000-attestation cap was one queue across all
+  attesters, so one attester signing many attestations pushed every other attester's chain out, and
+  the omission evidence with it. Now, when the store is full, the attester holding the most loses its
+  oldest. Each attester keeps its newest up to its share (50,000 / attesters held), and never fewer
+  than 48: at most 1,024 chains are held, and a new attester takes the place of the one updated least
+  recently, never this node's own.
+- **A conflict on a held position is remembered as long as the position is held.** 0.13.16's
+  32,768-entry list also counted positions already dropped, so another attester's conflicts could push
+  out the mark of a position still held.
+- **A dropped position is unlisted in O(1).** Each checkpoint dropped searched every witnessed
+  position (up to 32,768) for its own; the positions are now indexed by key, and the witness cap takes
+  the oldest from the head.
+
+### Fixed — signed gossip is budgeted, per connection and per attester
+
+(This section was written for 0.13.17's per-connection budget; 0.14.0 keeps the budget per proven
+peer, as "No shared budget is spent before verification" above says, and authority statements
+spend it under the asking rule, as "Authority: MMP §6.6" says.)
+
+- **New signed statements are budgeted (0.13.15's other known limit).** The attestations,
+  checkpoints, witnesses and authority statements that arrive on one connection may make this node check at most
+  2,000 new statements a second, up to a burst of 10,000. A connection seen for the first time starts
+  with 100 and earns the rest at that rate. All connections together draw on one ceiling, 4,000 a
+  second after a burst of 20,000. Past either, a frame is dropped before its signature is checked, so
+  no sender, and no number of senders, buys more signature checks than the ceiling (~40 µs each: under
+  a fifth of a core). Attestations are covered as well as checkpoints and witnesses.
+- **Only a new statement spends it.** These are dropped first, for nothing: a repeat (an attestation
+  whose signature is held, however it is spelled, or an authority statement whose id is held; a checkpoint or witness held, waiting
+  for its checkpoint, or already refused as a conflict), a checkpoint older than every position held,
+  a further root for a position already in conflict, an unsigned or malformed frame, and a frame whose
+  signer's key this node does not hold.
+- **Sized above a busy room.** A room of R nodes, each gating G CMBs a second, makes R·G
+  attestations, R·G/8 checkpoints and R·G/8·(R−1) witnesses a second: 640 at R = 32, G = 4. Only the
+  first copy of a statement is new, so a peer spends the budget only for what it delivers first:
+  about what it signs itself (~20 a second there), and at most all 640 when it is this node's only
+  path to the room. 2,000 is three times that, and the ceiling six times the room's 640 in all.
+  `gossipBudget: { perSecond, burst, newLane, globalPerSecond, globalBurst }` changes it.
+- **The budget is the connection's, not a declared id's.** A connection is one TCP connection, or the
+  relay connection together with the sender id the relay names. A first reading kept the budget by the
+  peer id a sender declares, and gave an id seen for the first time the whole burst, so a sender that
+  minted ids bought 10,000 signature checks per id. Fresh ids on one TCP connection now share its
+  budget; over the relay each starts with 100, and together they stay under the ceiling. The budget is
+  never the claimed signer's, so a forged frame spends only its own connection's budget and the
+  ceiling. An honest peer relays only what it has verified, so its budget is never spent on
+  forgeries. A dropped frame is not marked seen, so the same statement from another peer is taken.
+  The budget refills, so a sender that stops flooding is heard again.
+- **Limits of the budget.** Under a flood from many ids or connections at once, the ceiling drops
+  honest peers' new statements too, for as long as the flood lasts (a copy that comes again later is
+  taken); what a flood cannot do is buy more checks than the ceiling. Over the relay this node cannot
+  tell whether the relay checked the sender id it names, so a sender that names an honest peer's id
+  spends that peer's relay budget.
+- **A drop is attributable.** A `gossip-over-budget` metric (`fromPeerId`, `from`, `dropped`,
+  `frames` by type, and up to 16 `authors` whose statements were dropped) and one log line name the
+  peer, at most once per 10 s per peer: the first drop at once, the rest when the 10 s close, so every
+  drop is counted (`gossipOverBudget` in `metrics()` keeps the total). Drops by the ceiling are said
+  in one report for all peers, `gossip-over-ceiling` (with up to 16 `fromPeerIds`), not one per id. A
+  gap a drop leaves is told apart from an omission by the attester. Budgets are kept for at most
+  4,096 connections, the least recently active evicted in O(1), without scanning. A log or metric
+  listener that throws cannot break the handling of a frame or `stop()`: a report's counts are reset
+  before it is said, so none is said twice, and the totals stay in `metrics()`.
+- **Authority statements are gossip like the rest.** 0.13's role grants were outside the budget and
+  de-duplicated by the signature as written, so one grant re-spelled (see Security) was stored and
+  relayed again for every spelling. Role grants are retired (MMP §6.6.11). An authority statement is
+  refused in the same order as the other statements (not of the shape, a repeat by its id) before it
+  spends the budget, and the store bounds what it keeps (see Authority: MMP §6.6, Capacity).
+- **One attester's checkpoints cannot make the room sign witnesses without end.** Each checkpoint a
+  node takes costs every node in the room a witness signed, gossiped and verified. The per-peer budget
+  bounds what one peer delivers, not what one attester signs: an attester sending new checkpoints
+  through every peer at once had every node witness each one. A node now takes one attester's new
+  checkpoints at most at 4 a second, after a burst of 128, whichever peer brings them. The rate is
+  spent after the signature is checked, so only that attester spends it. Past it a checkpoint is not
+  stored, witnessed or relayed; it is counted (`checkpointsOverRate` in `metrics()`) and said once per
+  10 s (`checkpoint-over-rate`, naming the attester and the peers that brought it). An attester commits
+  a checkpoint every 8 attestations: 0.5 a second in the busy room above. 4 a second is 8× that, and
+  the burst holds 1,024 attestations gated back to back. A second root for a position already held is
+  still recorded as a conflict, whatever the rate. A further root for a position already in conflict
+  adds nothing and is dropped before the budget and the signature check; it was verified, up to the
+  peer's 2,000 a second, where the attester's rate was meant to bound it. `checkpointRate: {
+  perSecond, burst }` changes it.
+- **Only the spelling a signer writes is stored.** Base64url decoding ignores padding, whitespace and
+  stray characters, so one signature could be spelled any number of ways that all verify. Each spelling
+  was stored and relayed as a new attestation. The chain hash and the Merkle root are computed over the
+  signature as written, so a re-spelling that arrived first made its attester's chain look broken. A
+  gossiped attestation, checkpoint or witness whose signature is not 64 bytes in unpadded
+  base64url is now refused before anything is spent on it, before the repeat check (which decoded a
+  re-spelling to look it up). It is counted (`signaturesNotCanonical` in `metrics()`) and said like a
+  budget drop (`signature-not-canonical`). A signature longer than 128 characters is malformed,
+  refused before it is decoded or looked up: one of ~900 KB cost a decode and a hash, for nothing.
+  Every signer sym knows writes the canonical spelling, and this node checks its own
+  before recording one. A log written before 0.14.0 can hold another spelling. Such a line is read as
+  the canonical spelling, which is counted and said once, so it can no longer make an honest chain
+  look broken; a rotation then writes the canonical one.
+- **A dropped attestation is logged once a minute per connection and reason, with a count.** It was
+  logged once per frame, and one naming a signer whose key is not held is dropped before any budget.
+  Per connection, not per peer: over the relay the id is the sender's to choose, and a fresh one per
+  frame bought a line per frame. A frame the room's door refuses is said the same way; it was said
+  once per frame.
+
+### Fixed — dependencies
+
+- `npm audit` is clean. Floors are raised past the vulnerable versions, because `overrides` do not
+  reach a consumer's install: `ws` `^8.20.2`, `@huggingface/transformers` `^4.3.0`, and `sharp` and
+  `adm-zip` as overrides.
+
+### Fixed — the daemon
+
+- **The log flood.** Every peer re-sends its whole wake-channel list on every connect, and the
+  receiver logged a line and rewrote `wake-channels.json` per entry per frame, so the daemon's
+  `stdout.log` reached 1 GB of `learned wake channel for unknown`. A repeat now changes nothing and
+  logs nothing; a frame that does teach something logs one line. Channels carry the time of the last
+  first-hand sighting (gossip forwards it instead of the time of sending) and expire after 30 days
+  unseen. A channel saved before this release gets one 30-day grace period, once: the stamp is
+  written back the first time it is loaded, so a restart does not renew it.
+- **A daemon rooted with `SYM_STATE_DIR` kept its room, tasks and relay.env in `~/.sym`.** It uses
+  the state root now, and so does the `sym` CLI: its pid file, room, relay.env and node directory.
+  Two rooted deployments sharing a home shared one pid file, so `sym stop` for one stopped the other.
+  `MeshAgent` and `llm-reason` read `relay.env` from the state root too, and LAN discovery keeps its
+  loopback registry there, so a rooted deployment meets only its own root's nodes over 127.0.0.1.
+- **A second daemon start took the socket from the one serving it.** The daemon removed any socket
+  file at start, assuming it stale, so a second start unlinked a live daemon's socket; that daemon
+  ran on, reachable by no client, and every client reported "sym-daemon not running".
+  - A start now exits before its node joins anything when a daemon answers on the path.
+  - It binds first and probes only a path that is taken. A stale file is removed only while it is
+    still the file it probed, so two daemons starting together cannot each take the path from the
+    other.
+  - At shutdown, a daemon closes its server only while the path is its own. Closing a Unix-socket
+    server removes its path, whoever has bound it since.
+  - A daemon whose socket file is removed listens on it again within 30 s, on a fresh server. It no
+    longer waits for its connected clients to leave (closing a server waits for every connection),
+    so a client attached for hours no longer left it unreachable and then exited it with
+    `ERR_SERVER_ALREADY_LISTEN` once the clients left. A failure to listen again is logged and
+    retried, and never ends the daemon.
+- **A daemon IPC request whose handler threw went unanswered.** It is answered with the error, and a
+  refused `remember` carries the SDK's code (`ECMBSIZE`, `ESIGN`).
+- **A relay-only daemon still announced its room on the LAN.** It no longer does.
+- **IPC on Windows.** The daemon and every client now resolve the IPC endpoint one way, and on
+  Windows a file path becomes a named pipe. `SymDaemonClient` defaulted to `/tmp/sym.sock`, which no
+  daemon listens on (every OS).
+- **Windows lock checks.** A live pid's start time is cached until the pid is seen dead, and several
+  pids are read in one PowerShell call. A mismatch is re-read before a lock is reclaimed.
+- The daemon reports a failed IPC command as that command's error instead of a parse error.
+
+### Fixed — tests and conformance
+
+- **A test node can no longer reach the real `~/.sym`.** Under the Node test runner, a `SymNode` (or
+  the daemon) throws `ETESTHOME` when its home, state root or identity dir is outside the temp dir.
+  `SYM_TEST_REAL_HOME=1` opts out. **This affects other projects:** a suite that builds a `SymNode`
+  under `node --test` with the real HOME now fails until it sandboxes HOME and USERPROFILE.
+- The published v2 conformance vectors are consumed verbatim, with their errata, plus a new
+  application-v2 test. The handshake transcript and AAD normalise room and names to NFC, as the
+  reference does (B-R17).
+- Windows test debt is fixed. The SIGTERM lock test is skipped on Windows, with a hard-kill reclaim
+  test on every platform. The lease test uses a live foreign holder with a real start time; it never
+  reached the start-time check before, on any OS. The relay-only test uses the platform's IPC endpoint.
+- Admission-as-collapse (B-L3) is pinned by a test: the conformance boundary of spec PR #17.
+- Tests wait on what they test instead of fixed sleeps: in-flight frames, and the encoder's own load.
+
 ## 0.13.17 (2026-10-07)
 
 A relay fix. The 0.13 line otherwise stays closed: further work goes into 0.14.0.
@@ -15,6 +1093,140 @@ A relay fix. The 0.13 line otherwise stays closed: further work goes into 0.14.0
   neighbours that also sat on the relay could stop hearing each other, because a CMB in the clear is refused over the
   relay.
 - `stop()` closes every transport a peer holds, and tolerates a peer with none.
+
+0.14.0 does not carry this code, because the defect cannot arise there: a 0.14 peer is a set of proven sessions, a
+session's close removes only itself, the active transport is recomputed before the old session is superseded, a peer
+with no transport is not sent to (counted as not reached, never thrown on), and `stop()` closes every session. The
+same scenes run against Core Secure in `tests/relay-reannounce-scenes.test.js`.
+
+## The 0.13.17 security candidate (not released as such; its fixes ship in 0.14.0)
+
+This entry is kept as the record of what the 0.13.17 review found and fixed. Two of its mechanisms
+do not ship: the 16,384-binding cap on the key registry (replaced by the binding lifetime) and the
+pending set for grants that arrive before their root (replaced by `role-chain-fetch`); see 0.14.0.
+
+A security hotfix. In 0.13.16 a peer could stop a node from ever starting again, and crash a
+running node or the daemon, with one frame. Every node and every daemon should take it.
+
+### Security
+
+- **One role-grant from any peer stopped a node from starting, for good.** A connected peer could
+  sign a role-grant itself (naming itself as grantor) and send it; the node checked the signature
+  against that peer's own key, which it had just learned from the peer's handshake, wrote the grant
+  to `role-grants.jsonl` and relayed it to every peer it had, which did the same. Reading any
+  `role-grants.jsonl` then threw (`object is not iterable`), so every node that had received the
+  frame failed in `new SymNode` on its next start, and kept failing. The anchor's own `grantRole()`
+  had the same effect on its own node. Now:
+  - a grant or revoke is kept only when it is rooted at the pinned anchor: its grantor held, when it
+    signed, the rank the record needs, by the chain the node already holds. A record that is not
+    rooted has no effect on any role, so it is not stored, not written and not relayed (and costs no
+    signature check). A node without an anchor (the daemon, by default) keeps none;
+  - gossip has no order, so a grant or a revoke can arrive before the grant that roots its grantor,
+    and there is no grant sync to ask for it again. Such a record (refused only because its
+    grantor's key or grant has not arrived yet) waits in memory, at most 1,024 of them, the oldest
+    dropped first. It is never written or relayed while it waits and changes no role; when a record
+    that roots it is stored, it is stored, written and relayed too. So a node resolves the roles
+    0.13.16 did, whatever order the records arrive in (an early revoke still takes effect). What
+    waits is not kept across a restart;
+  - the store looks grantor keys up through the roster's own lookup, on receipt and on reload alike;
+  - reading the file never stops a node from starting. A record that cannot be verified (not JSON,
+    malformed, unknown grantor key, bad signature, unrooted) is skipped and counted, and the node says
+    what it skipped, once; a file that cannot be read leaves the node starting with no grants. **A
+    node that 0.13.16 left unable to start starts on 0.13.17 with nothing to clean up**: the bad
+    records stay in the file (it is append-only and is not rewritten) and are skipped at each start;
+  - `grantRole`/`revokeRole` on a node without that rooted authority make nothing, send nothing, and
+    return `null`.
+- **A peer's `mood` frame crashed any node over the relay.** The relay path called the frame
+  handler with no guard (the LAN path caught a handler's throw inside the frame parser and dropped it
+  silently), and the mood handler always threw on a stock node: it registered the mood as a peer in
+  the coupling set and ran a coupling step that the stock coupler cannot run. The throw reached
+  `uncaughtException`; the daemon exits on that, and so does a host without a handler. On LAN, where
+  it was swallowed, the phantom peer stayed for two minutes and the node's own `remember()` threw for
+  as long: one mood frame every two minutes kept a node from publishing. Now:
+  - every inbound frame, over every transport (LAN and loopback, inbound and outbound, the relay),
+    goes through one guarded dispatch. A frame the node cannot handle is refused and counted
+    (`metrics().framesRefused`, `framesRefusedByType`), said at most once a minute per peer, and
+    never thrown out of the transport. The handshake that opens a LAN connection and the asynchronous
+    half of a CMB's evaluation go through the same guard;
+  - a mood's drift is measured directly against the node's own state; nothing is added to the
+    coupling set. The metrics logger and `peers()` read only what the coupler contract gives.
+- **A peer's `message` frame crashed the daemon over the relay.** The daemon fed every message to an
+  insight engine that a stock daemon does not have. It now checks for one, and the IPC requests that
+  read it (`xmesh-context`, `xmesh-search`) answer with an error when there is none.
+- **A peer could crash a node with its own name.** A peer's nodeId and name arrive as JSON, which can
+  carry an object that throws when printed, and 0.13.16 kept them as given and printed them later, in
+  timers and transport callbacks. Over the relay, a joiner's name reaches every node in the channel in
+  the relay's join notice and peer list, so one token holder could crash them all, again on every
+  reconnect; over the LAN, a handshake did it. A LAN handshake without a nodeId put a phantom peer in
+  the table that made `peers()` and `status()` throw until restart, and a handshake the node could
+  not take left its connection open with no deadline, so a peer could hold sockets without limit. A
+  nodeId is now a non-empty string or the announcement or connection is refused, a name is a string
+  or `'unknown'`, a key is text or it is not pinned, and a wake channel is kept only as text
+  (`{ platform, token, environment }`), before anything stores, prints or passes them on. A
+  `message`, `mood` or `xmesh-insight` frame's own `fromName` is taken the same way (it falls back to
+  the name the transport took); it was printed and passed on to listeners as given.
+- **A deeply nested frame crashed a node over the relay.** The relay measured a peer's payload by
+  serialising it again before the frame reached the guard. Serialising recurses once per level, so
+  a payload about 10,000 levels deep (24 KB, under every size bound) threw a RangeError out of the
+  socket callback, and the daemon exits on that. A `relay-error`'s message was printed as given, so
+  one that could not be turned into text threw the same way. Now:
+  - JSON a peer wrote that nests deeper than 128 levels is dropped before it is parsed, as malformed
+    JSON is: a LAN frame, a relay message, and the plaintext of an encrypted CMB. A frame that
+    parses can then always be serialised again, wherever the node keeps, relays, persists or
+    measures it;
+  - a `relay-error` is printed field by field (`kind`, `code`, `message`), each only when it has the
+    right type;
+  - every message off the relay socket goes through the inbound guard, the relay's own join notices
+    and peer list included (they carry what each joiner put in its relay-auth).
+- **The daemon checks each IPC message at the door, like a wire frame.** It must be a JSON object
+  with a string `type`, or it gets an error reply and goes no further, and nothing in it is printed
+  before that. A request that fails is answered with the error instead of only logged. (Naming a
+  failed request by a `type` that cannot be turned into text would make the error path itself throw
+  and stop the daemon.)
+- **A room peer could make a node keep more and more.** Each store a peer feeds now has one bound:
+  - wake channels: at most 1,024 in all, and at most 512 that one peer taught for nodes other than
+    itself. A node's own channel always has room, displacing the oldest gossiped one. Twenty
+    `peer-info` frames kept 5,120 channels before. `wake-channels.json` is written at most once a
+    second (and when the node stops), not once per frame. It is read back as a frame is: typed, and
+    within the same bound;
+  - wakes: the cooldown runs from the last attempt, so a failed wake is not tried again on the next
+    message. Every message and mood the daemon relays wakes every sleeping channel, and a node
+    without APNs keys fails every one, so each message logged a line per channel. At most 16 frames
+    wait for one sleeping peer, the oldest dropped first;
+  - per-peer state (room verdicts, the anchor debounce, E2E secrets and the key each was derived
+    from, identity keys, declared lifecycle roles): what is learned again from each connection's
+    handshake goes when the peer leaves. That is the lifecycle role, the derived-key cache, and an
+    admit verdict; a refusal verdict stays, since over the relay a refused peer can keep speaking.
+    Every such map holds at most 4,096 entries for peers that are not connected, the oldest dropped
+    first. A connected peer's entry is never dropped for room. The derived-key cache is one entry per
+    peer: one link re-sending its handshake with a new key each time had added one per handshake. A
+    lifecycle role is one of the named roles or it is not kept (it was kept as any JSON value);
+  - the roster's list of refused key rebindings: at most 256, each one kept once;
+  - key bindings: the roster key registry added a binding, and a line to its file, for every new
+    nodeId a handshake named. It now holds at most 16,384. Past that a new binding is refused and
+    none is ever evicted, since forgetting one would let its nodeId be pinned again with another
+    key. The refusal is said once and counted (`status().roster.refusedFull`), and a record signed
+    by a key that could not be pinned fails verification;
+  - peers added by relay announcements: the relay's join notices and peer list added a peer for
+    every nodeId they named. At most 4,096 peers that only an announcement introduced are now held;
+    an announcement for another unknown nodeId is ignored, said once and counted
+    (`status().relayState.announcementsIgnored`). Peers the node already knows, including any with
+    a live LAN connection, are not affected, and a peer that leaves the relay frees its place.
+- **The loopback scan threw on a registry file it could not use.** It runs in a timer and did
+  arithmetic and comparisons on registry file fields as read. Any process of the same user can write
+  that directory. A registration is now typed when it is read, or skipped.
+- **A refused LAN handshake could cost a connected peer its connection.** An inbound connection's
+  dedup ran before its admission was decided, so it could close the existing connection for the same
+  nodeId (as stale, or by the dual-dial tie-break), and only then refuse the new one. Admission is
+  now decided first. Nothing is learned from a refused handshake: no secret is derived, no key is
+  pinned, and nothing is read from its connection.
+
+### Known limit
+
+- **A handshake that claims a connected peer's nodeId can reset that peer's room verdict** until
+  the peer handshakes again. The cause is unproven identity: in 0.13 a peer's identity is trust on
+  first use, and the handshake proves nothing. 0.14.0 removes the cause by proving identity before
+  it keeps any per-peer state. This and the bounds above are described in the new `SECURITY.md`.
 
 ## 0.13.16 (2026-10-02)
 

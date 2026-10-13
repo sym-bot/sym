@@ -284,13 +284,14 @@ describe('SymNode', () => {
     const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
     await node.start();
 
-    // No domain data yet — remix should be rejected
-    const rejected = node.remember(
+    // No domain data yet — the REMIX PATH is refused, and says so (draft spec PR #35: §15.7 gates
+    // only the node's integration of a peer record, never remember()).
+    const rejected = await node.remix(
       { focus: 'remix attempt', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
     );
-    assert.strictEqual(rejected, null, 'remix without domain data should return null');
+    assert.deepStrictEqual(rejected, { refused: 'remix-without-new-domain-data' }, 'a remix without domain data is refused, by name');
 
     // Produce domain observation — this sets canRemix = true
     node.remember({
@@ -300,7 +301,7 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true);
 
     // Now remix should succeed
-    const accepted = node.remember(
+    const accepted = await node.remix(
       { focus: 'valid remix', issue: 'none', intent: 'test', motivation: 'test',
         commitment: 'test', perspective: 'test', mood: { text: 'neutral', valence: 0, arousal: 0 } },
       { parents: [{ key: 'cmb-fake-parent', lineage: { ancestors: [] } }] }
@@ -310,6 +311,30 @@ describe('SymNode', () => {
 
     await node.stop();
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
+  });
+
+  it('remember(fields, parents) is never gated (draft spec PR #35): two cited replies in a row both mint; a duplicate says so', async () => {
+    const name = `test-cited-${Date.now()}`;
+    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
+    await node.start();
+    try {
+      const cats = (focus) => ({ focus, issue: 'none', intent: 'reply', motivation: 'm', commitment: 'c', perspective: 'p', mood: { text: 'neutral' } });
+      node._hasNewDomainData = false;
+      const peer = { key: 'cmb-' + 'a'.repeat(64) };
+      const r1 = node.remember(cats('a cited reply'), { parents: [peer] });
+      const r2 = node.remember(cats('a second cited reply'), { parents: [peer] });
+      assert.ok(r1 && r1.key && !r1.refused, 'the first cited reply mints');
+      assert.ok(r2 && r2.key && !r2.refused, 'and so does the second: a reply is not a remix');
+      assert.strictEqual(node.canRemix(), true, 'an authored record is new domain data, with or without parents');
+      const dup = node.remember(cats('a second cited reply'), { parents: [peer] });
+      assert.deepStrictEqual({ key: dup.key, duplicate: dup.duplicate }, { key: r2.key, duplicate: true }, 'a re-assertion of HEAD is told apart from a refusal');
+      node.remember(cats('something else'));
+      const again = node.remember(cats('a cited reply'), { parents: [peer] });
+      assert.deepStrictEqual(again, { key: r1.key, duplicate: true }, 'and so is a record already stored');
+    } finally {
+      await node.stop();
+      fs.rmSync(nodeDir(name), { recursive: true, force: true });
+    }
   });
 
   it('should emit cmb-accepted when receiveFromPeer stores a CMB', async () => {
@@ -367,19 +392,19 @@ describe('SymNode', () => {
     assert.strictEqual(node.canRemix(), true, 'domain observation should enable remix');
 
     // Remix should succeed and RESET canRemix
-    const remix = node.remember(
+    const remix = await node.remix(
       { ...categories, focus: 'remix of peer signal' },
       { parents: [{ key: 'cmb-parent-123', lineage: { ancestors: [] } }] }
     );
-    assert.ok(remix, 'remix should succeed');
+    assert.ok(remix && remix.key, 'remix should succeed');
     assert.strictEqual(node.canRemix(), false, 'remix should reset hasNewDomainData');
 
     // Second remix without new domain data should be rejected
-    const rejected = node.remember(
+    const rejected = await node.remix(
       { ...categories, focus: 'second remix attempt' },
       { parents: [{ key: 'cmb-parent-456', lineage: { ancestors: [] } }] }
     );
-    assert.strictEqual(rejected, null, 'second remix without new domain data should be rejected');
+    assert.deepStrictEqual(rejected, { refused: 'remix-without-new-domain-data' }, 'second remix without new domain data should be rejected');
 
     // New domain observation re-enables remix
     node.remember({ ...categories, focus: 'fresh observation' });
@@ -389,147 +414,59 @@ describe('SymNode', () => {
     fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
-  it('should support multi-transport per peer (MMP Section 4.6)', async () => {
-    const name = `test-multi-transport-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-    await node.start();
-
-    const events = [];
-    node.on('peer-joined', (e) => events.push({ type: 'joined', ...e }));
-    node.on('peer-left', (e) => events.push({ type: 'left', ...e }));
-
-    // Mock transports with close event support
-    function mockTransport() {
-      const listeners = {};
-      return {
-        on: (event, fn) => { listeners[event] = fn; },
-        send: () => {},
-        close: () => { if (listeners.close) listeners.close(); },
-        _triggerClose: () => { if (listeners.close) listeners.close(); },
-      };
+  it('should support multi-transport per peer (MMP Section 4.6): one proven peer, two sessions', async () => {
+    const { connectNodes, until } = require('./_core-secure');
+    const a = new SymNode({ name: `test-multi-a-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+    const b = new SymNode({ name: `test-multi-b-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+    await a.start(); await b.start();
+    try {
+      const events = [];
+      a.on('peer-joined', (e) => events.push({ type: 'joined', ...e }));
+      a.on('peer-left', (e) => events.push({ type: 'left', ...e }));
+      const relayPipe = await connectNodes(a, b, { kind: 'relay' });
+      const peer = a._peers.get(b.nodeId);
+      assert.ok(peer, 'peer should exist');
+      assert.strictEqual(peer.transports.size, 1, 'should have 1 session');
+      const lanPipe = await connectNodes(a, b, { kind: 'bonjour' });
+      await until(() => peer.transports.size === 2);
+      assert.strictEqual(a._peers.get(b.nodeId), peer, 'the same peer: a second transport is a secondary path');
+      assert.strictEqual(peer.transports.size, 2, 'should have 2 sessions');
+      assert.strictEqual(a._bestTransport(peer), peer.transports.get('bonjour'), 'LAN should be preferred');
+      // Close the relay path — the peer stays (the LAN session is still live).
+      relayPipe.tc.close();
+      await until(() => peer.transports.size === 1);
+      assert.ok(a._peers.has(b.nodeId), 'peer should still exist after the relay session closes');
+      assert.strictEqual(events.filter((e) => e.type === 'left').length, 0, 'should NOT emit peer-left');
+      // Close the LAN path — now the peer is gone.
+      lanPipe.tc.close();
+      await until(() => !a._peers.has(b.nodeId));
+      assert.ok(!a._peers.has(b.nodeId), 'peer should be removed after all sessions close');
+      assert.strictEqual(events.filter((e) => e.type === 'left').length, 1, 'should emit peer-left');
+    } finally {
+      await a.stop(); await b.stop();
     }
-
-    // First transport: relay
-    const relayTransport = mockTransport();
-    const peer = node._createPeer(relayTransport, 'peer-abc', 'test-peer', true, 'relay');
-    node._addPeer(peer);
-
-    assert.ok(node._peers.has('peer-abc'), 'peer should exist');
-    assert.strictEqual(peer.transports.size, 1, 'should have 1 transport');
-
-    // Second transport: bonjour (same peer, different transport type)
-    const bonjourTransport = mockTransport();
-    const peer2 = node._createPeer(bonjourTransport, 'peer-abc', 'test-peer', false, 'bonjour');
-    // _createPeer returns existing peer when peer already exists
-    assert.strictEqual(peer2, peer, 'should return existing peer');
-    assert.strictEqual(peer.transports.size, 2, 'should have 2 transports');
-
-    // Active transport should be bonjour (higher priority)
-    assert.strictEqual(node._bestTransport(peer), bonjourTransport, 'bonjour should be preferred');
-
-    // Close relay — peer should NOT be removed (bonjour still active)
-    relayTransport._triggerClose();
-    assert.ok(node._peers.has('peer-abc'), 'peer should still exist after relay close');
-    assert.strictEqual(peer.transports.size, 1, 'should have 1 transport remaining');
-    assert.strictEqual(events.filter(e => e.type === 'left').length, 0, 'should NOT emit peer-left');
-
-    // Close bonjour — peer SHOULD be removed (all transports closed)
-    bonjourTransport._triggerClose();
-    assert.ok(!node._peers.has('peer-abc'), 'peer should be removed after all transports close');
-    assert.strictEqual(events.filter(e => e.type === 'left').length, 1, 'should emit peer-left');
-
-    await node.stop();
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
   it('should prefer LAN transport over relay (MMP Section 4.6 priority)', async () => {
-    const name = `test-transport-priority-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-    await node.start();
-
-    function mockTransport() {
-      const listeners = {};
-      return {
-        on: (event, fn) => { listeners[event] = fn; },
-        send: () => {},
-        close: () => { if (listeners.close) listeners.close(); },
-      };
+    const { connectNodes } = require('./_core-secure');
+    const a = new SymNode({ name: `test-prio-a-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+    const b = new SymNode({ name: `test-prio-b-${Date.now()}`, silent: true, discovery: new NullDiscovery() });
+    await a.start(); await b.start();
+    try {
+      await connectNodes(a, b, { kind: 'relay' });
+      const peer = a._peers.get(b.nodeId);
+      assert.strictEqual(peer.transport.kind, 'relay', 'initial session is the relay one');
+      await connectNodes(a, b, { kind: 'bonjour' });
+      assert.strictEqual(a._bestTransport(peer).kind, 'bonjour', 'LAN should be preferred over relay');
+    } finally {
+      await a.stop(); await b.stop();
     }
-
-    // Connect via relay first
-    const relay = mockTransport();
-    const peer = node._createPeer(relay, 'peer-xyz', 'priority-test', true, 'relay');
-    node._addPeer(peer);
-    assert.strictEqual(peer.transport, relay, 'initial transport should be relay');
-
-    // Add bonjour — should become preferred
-    const bonjour = mockTransport();
-    node._createPeer(bonjour, 'peer-xyz', 'priority-test', false, 'bonjour');
-    assert.strictEqual(node._bestTransport(peer), bonjour, 'bonjour should be preferred over relay');
-
-    await node.stop();
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
   });
 
-  // THE RELAY RE-ANNOUNCES A PEER THIS NODE ALREADY HOLDS (7 Oct 2026, xmesh-world-room): a cloud peer that
-  // reconnected to the relay is announced again while its old relay transport is still registered and idle.
-  // The prior reads as stale and is replaced. A RelayPeerTransport emits 'close' synchronously, so with the
-  // prior still registered its handler removed the peer, nulled peer.transport and emitted peer-left; the
-  // caller re-added the same peer object with transport null, and from then on every send and broadcast in
-  // the room threw "Cannot read properties of null (reading 'send')", and stop() threw on 'close'.
-  it('a relay peer announced again over the relay keeps a live transport; the room can still send', async () => {
-    const { RelayPeerTransport } = require('../lib/transport');
-    const name = `test-relay-reannounce-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-    await node.start();
-    const left = [];
-    node.on('peer-left', (e) => left.push(e));
-    const ws = { readyState: 1, sent: [], send(d) { this.sent.push(d); } };
-
-    const first = new RelayPeerTransport(ws, 'peer-cloud');
-    const peer = node._createPeer(first, 'peer-cloud', 'cloud-peer', true, 'relay');
-    node._addPeer(peer);
-    peer.lastSeen = Date.now() - 5000;   // idle: the registered relay transport reads as stale
-
-    const again = new RelayPeerTransport(ws, 'peer-cloud');
-    const back = node._createPeer(again, 'peer-cloud', 'cloud-peer', true, 'relay');
-    if (!node._peers.has('peer-cloud')) node._addPeer(back);   // as the relay's peer-joined handler does
-
-    assert.strictEqual(node._peers.get('peer-cloud'), peer, 'the same peer, still held');
-    assert.strictEqual(peer.transport, again, 'its active transport is the new relay transport');
-    assert.strictEqual(peer.transports.get('relay'), again);
-    assert.strictEqual(left.length, 0, 'a replaced transport is not a disconnect');
-    assert.doesNotThrow(() => node._broadcastToPeers({ type: 'ping' }));
-    assert.doesNotThrow(() => node.remember({ focus: 'after the re-announce', issue: 'the room still sends', intent: 'regression check' }), 'a room send does not throw');
-
-    await node.stop();
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
-  });
-
-  it('a LAN transport added to a peer first met over the relay becomes its active transport', async () => {
-    const { RelayPeerTransport } = require('../lib/transport');
-    const name = `test-relay-then-lan-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-    await node.start();
-    const ws = { readyState: 1, send() {} };
-    const relay = new RelayPeerTransport(ws, 'peer-both');
-    const peer = node._createPeer(relay, 'peer-both', 'lan-and-relay', true, 'relay');
-    node._addPeer(peer);
-    const lan = { on() {}, send() { return true; }, close() {} };
-    node._createPeer(lan, 'peer-both', 'lan-and-relay', false, 'bonjour');
-    assert.strictEqual(peer.transport, lan, 'sends go over the LAN, not the relay (where a clear CMB is refused)');
-    await node.stop();
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
-  });
-
-  it('stop() closes every peer and survives a peer without a transport', async () => {
-    const name = `test-stop-null-${Date.now()}`;
-    const node = new SymNode({ name, silent: true, discovery: new NullDiscovery() });
-    await node.start();
-    node._peers.set('ghost', { peerId: 'ghost', name: 'ghost', transport: null, transports: new Map() });
-    await assert.doesNotReject(() => node.stop());
-    fs.rmSync(nodeDir(name), { recursive: true, force: true });
-  });
+  // The three 0.13.17 relay tests (a re-announced relay peer keeps a live transport, a LAN transport added to
+  // a relay-first peer becomes active, stop() survives a peer without a transport) drove the 0.13 peer table
+  // (_createPeer, _addPeer). 0.14.0 has none: the same scenes run under Core Secure sessions in
+  // tests/relay-reannounce-scenes.test.js.
 
   after(() => {
     fs.rmSync(nodeDir(nodeName), { recursive: true, force: true });

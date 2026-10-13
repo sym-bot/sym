@@ -48,7 +48,7 @@ describe('MMP v2.0 session discipline', () => {
   it('fails closed: no send or receive before confirmation', () => {
     const { client, server } = pair();
     assert.throws(() => client.nextSend(), /unconfirmed/);
-    assert.throws(() => server.acceptRecv('0', C2S), /unconfirmed/);
+    assert.throws(() => server.receive('0', C2S, () => null), /unconfirmed/);
   });
 
   it('a tampered peer confirmation is rejected and leaves the session closed', () => {
@@ -64,15 +64,13 @@ describe('MMP v2.0 session discipline', () => {
     const s = client.nextSend();
     assert.strictEqual(s.direction, C2S);
     const frame = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey });
-    const r = server.acceptRecv(frame.sequence, frame.direction);
-    const out = openEncryptedFrame({ frame, trafficKey: r.trafficKey });
+    const out = server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey }));
     assert.deepStrictEqual(out.cmb.categories, cmb.categories);
     // server → client
     const s2 = server.nextSend();
     assert.strictEqual(s2.direction, S2C);
     const frame2 = buildEncryptedFrame({ cmb, sessionId: server.sessionId, direction: s2.direction, sequence: s2.sequence, trafficKey: s2.trafficKey });
-    const r2 = client.acceptRecv(frame2.sequence, frame2.direction);
-    assert.ok(openEncryptedFrame({ frame: frame2, trafficKey: r2.trafficKey }));
+    assert.ok(client.receive(frame2.sequence, frame2.direction, (trafficKey) => openEncryptedFrame({ frame: frame2, trafficKey })));
   });
 
   it('sequence starts at 0 and advances by exactly one per direction', () => {
@@ -84,18 +82,37 @@ describe('MMP v2.0 session discipline', () => {
     assert.strictEqual(server.nextSend().sequence, '0');
   });
 
-  it('refuses replay, rollback, and gaps on the receive side', () => {
+  it('refuses replay, rollback, and gaps on the receive side (authentic frames out of order)', () => {
     const { client, server } = confirm(pair());
-    assert.ok(server.acceptRecv('0', C2S));            // exact-next
-    assert.throws(() => server.acceptRecv('0', C2S), /replay|rollback/); // replay of 0
-    assert.throws(() => server.acceptRecv('2', C2S), /gap/);             // skip 1
-    assert.ok(server.acceptRecv('1', C2S));            // 1 is now exact-next
-    assert.throws(() => server.acceptRecv('0', C2S), /replay|rollback/); // rollback below 2
+    const f = [0, 1, 2].map(() => { const s = client.nextSend(); return buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s.direction, sequence: s.sequence, trafficKey: s.trafficKey }); });
+    const take = (frame) => server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey }));
+    assert.ok(take(f[0]));                                      // exact-next
+    assert.throws(() => take(f[0]), (e) => e.name === 'SessionDesyncError' && e.kind === 'replay');
+    assert.throws(() => take(f[2]), (e) => e.name === 'SessionDesyncError' && e.kind === 'gap');
+    assert.ok(take(f[1]));                                      // 1 is now exact-next
+    assert.throws(() => take(f[0]), /replay|rollback/);         // rollback below 2
+    assert.strictEqual(server.nextRecv, '2');
+  });
+
+  it('a forged frame at the right sequence is refused and does NOT move the counter (design D2)', () => {
+    const { client, server } = confirm(pair());
+    const s0 = client.nextSend();
+    const genuine = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s0.direction, sequence: s0.sequence, trafficKey: s0.trafficKey });
+    // An injector knows the next sequence but not the key: it seals under a key of its own.
+    const forged = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s0.direction, sequence: '0', trafficKey: crypto.randomBytes(32) });
+    const take = (frame) => server.receive(frame.sequence, frame.direction, (trafficKey) => openEncryptedFrame({ frame, trafficKey }));
+    assert.throws(() => take(forged), (e) => e.name !== 'SessionDesyncError', 'refused as unauthentic, not as out of order');
+    assert.strictEqual(server.nextRecv, '0', 'the counter did not move');
+    assert.ok(take(genuine), 'so the genuine frame 0 still opens: the session is not desynchronised');
+    // A forged frame claiming a gap sequence cannot tear the session down either.
+    const forgedGap = buildEncryptedFrame({ cmb, sessionId: client.sessionId, direction: s0.direction, sequence: '7', trafficKey: crypto.randomBytes(32) });
+    assert.throws(() => take(forgedGap), (e) => e.name !== 'SessionDesyncError');
+    assert.strictEqual(server.nextRecv, '1');
   });
 
   it('refuses a frame whose declared direction is not this session\'s receive direction', () => {
     const { client, server } = confirm(pair());
     // The server receives c2s; a frame claiming s2c must be refused before any key use.
-    assert.throws(() => server.acceptRecv('0', S2C), /receive direction/);
+    assert.throws(() => server.receive('0', S2C, () => assert.fail('no key is used for the wrong direction')), /receive direction/);
   });
 });

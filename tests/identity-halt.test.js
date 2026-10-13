@@ -24,6 +24,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 /**
  * Point SYM_IDENTITY_DIR at a throwaway dir. No require-cache busting: identityDir() reads the
@@ -160,19 +161,29 @@ test('AC-3.2: no `-2` identity can be created by any path', () => {
   } finally { restore(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the lease refuses a second holder and never suggests renaming', () => {
+test('the lease refuses a second holder and never suggests renaming', (t) => {
   // The old error advised "set a different SYM_NODE_NAME", which under agent-id-is-identity
   // is advice to become a different agent — the exact move the ruling forbids.
+  //
+  // The foreign holder is a real, live child process recorded with its real start time — the
+  // current lock format exactly as a running holder writes it. This used to be PID 1 with a
+  // `startTime` key: Windows has no PID 1, and the reader's key is `start`, so the metadata was
+  // ignored and the test only ever exercised the legacy no-start-time branch.
+  const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  t.after(() => { try { holder.kill('SIGKILL'); } catch {} });
   const dir = tmp();
   const { cfg, restore } = freshConfig(dir);
   const name = `agent-lease-${process.pid}@mesh`;
   const lockPath = path.join(cfg.nodeDir(name), 'lock.pid');
   try {
+    const start = cfg.processStartTime(holder.pid);
+    assert.ok(start, 'precondition: this platform can read the holder\'s start time');
     fs.mkdirSync(cfg.nodeDir(name), { recursive: true });
-    // A live foreign holder: PID 1 always exists and is never us.
-    fs.writeFileSync(lockPath, `1\n${JSON.stringify({ startTime: 0 })}`);
+    fs.writeFileSync(lockPath, `${holder.pid}\n${JSON.stringify({ start, createdAt: Date.now() })}\n`);
+    assert.equal(cfg.readLockFile(lockPath).start, start, 'the lock carries the start time the reader checks');
     assert.throws(() => cfg.acquireIdentityLock(name), (e) => {
       assert.equal(e.code, 'EIDENTITYLOCK');
+      assert.equal(e.holderPid, holder.pid);
       assert.ok(!/different SYM_NODE_NAME/.test(e.message),
         'must not advise renaming — that is advice to become a different agent');
       assert.match(e.message, /same agent/);

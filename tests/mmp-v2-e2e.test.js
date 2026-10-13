@@ -46,3 +46,33 @@ describe('MMP v2.0 E2E AEAD conformance (X25519-HKDF-SHA256-ChaCha20-Poly1305)',
     });
   }
 });
+
+// The AAD binds the record's room. The same visible room name can arrive composed or
+// decomposed; the reference NFC-normalizes it (as the record signature does), so a frame sealed
+// by a peer that typed the other form still authenticates.
+describe('MMP v2.0 AAD: the room is NFC-normalized', () => {
+  const m = vec.metadata;
+  const c = vec.cases[0];
+  const aadFor = (room) => aeadAADv2({
+    protocolVersion: vec.protocolVersion, sessionId: vec.sessionId,
+    direction: c.direction, sequence: c.sequence,
+    key: m.key, assertionId: m.assertionId, createdByNodeId: m.createdByNodeId, room, to: m.to,
+  });
+
+  it('a decomposed room produces the same AAD bytes as the composed one', () => {
+    const NFC = 'café-rööm';
+    const NFD = 'café-rööm';
+    assert.notStrictEqual(NFC, NFD);
+    assert.strictEqual(aadFor(NFD).toString('hex'), aadFor(NFC).toString('hex'));
+    assert.ok(aadFor(NFD).includes(Buffer.from(NFC, 'utf8')), 'the AAD carries the composed form');
+  });
+
+  it('so a frame sealed under the composed room opens under the decomposed one', () => {
+    const NFC = 'café-room';
+    const NFD = 'café-room';
+    const key = Buffer.from(c.trafficKeyHex, 'hex');
+    const nonce = Buffer.from(c.nonceHex, 'hex');
+    const sealed = sealV2(key, nonce, aadFor(NFC), Buffer.from('x'));
+    assert.strictEqual(openV2(key, nonce, aadFor(NFD), sealed).toString(), 'x');
+  });
+});

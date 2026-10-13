@@ -55,10 +55,17 @@ process.on('unhandledRejection', (reason) => {
   console.error(`[${new Date().toISOString()}] [ERROR] Unhandled rejection: ${reason}`);
 });
 
+// Under the test runner, a daemon whose state root is the real home is refused (ETESTHOME)
+// before it reads relay.env, migrates stores or builds its node — all of which touch ~/.sym.
+require('../lib/core/state-root').assertTestSandbox();
+
 // ── Configuration ──────────────────────────────────────────────
 
-const SYM_DIR = path.join(os.homedir(), '.sym');
-const { getSocketPath, getLogDir } = require('../lib/platform');
+// The daemon's own files live in the same state root as every node's: SYM_STATE_DIR when set, else
+// ~/.sym. Building it from the home dir sent a rooted daemon's room, tasks and relay.env to the
+// user's real ~/.sym.
+const SYM_DIR = require('../lib/core/state-root').SYM_STATE_DIR;
+const { getSocketPath, getLogDir, listenExclusive, socketAnswers } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or platform-scoped default
 // (not hostname — macOS appends random suffixes to hostname on WiFi,
@@ -74,7 +81,7 @@ const LOG_DIR = getLogDir('sym-daemon');
 
 // Load relay config from ~/.sym/relay.env if env vars not set
 if (!process.env.SYM_RELAY_URL) {
-  const envFile = path.join(os.homedir(), '.sym', 'relay.env');
+  const envFile = path.join(SYM_DIR, 'relay.env');
   if (fs.existsSync(envFile)) {
     for (const line of fs.readFileSync(envFile, 'utf8').split('\n')) {
       const m = line.match(/^(\w+)=(.*)$/);
@@ -109,9 +116,11 @@ if (args.includes('--status')) {
 // Resolve which room this node joins, in precedence order:
 //   1. SYM_ROOM env   2. persisted ~/.sym/room (written by `sym join`)   3. default
 // The persisted file is the source of truth across launchd/spawn restarts;
-// env overrides it for one run. room -> service type matches the MCP node +
-// sym-swift, so CLI peers discover app/Claude peers in the same room.
-const { roomServiceType, isValidRoom } = require('../lib/rooms');
+// env overrides it for one run. Every room is advertised on _sym._tcp with its name in the TXT
+// `room` key (MMP §5.1, update 1); the per-room type earlier releases advertised is browsed too,
+// where it is a valid service name, so a 2.0 node still advertising only that type is found.
+const { isValidRoom } = require('../lib/rooms');
+const { legacyServiceType } = require('../lib/core/room-id');
 const ROOM_FILE = path.join(SYM_DIR, 'room');
 // The room used to persist under a different filename. That file is NOT read — one name, no
 // fallback — but its presence is ANNOUNCED, because the alternative is the worst outcome
@@ -138,10 +147,11 @@ if (ROOM === 'default' && !process.env.SYM_ROOM) {
 }
 
 if (!isValidRoom(ROOM)) {
-  log(`Invalid room "${ROOM}" — must be kebab-case or "default". Falling back to default.`);
+  log(`Invalid room "${ROOM}" — a room is [a-z0-9._-], 1 to 64 characters (MMP §5.8), and not "sym". Falling back to default.`);
   ROOM = 'default';
 }
-log(`Mesh room: ${ROOM} (${roomServiceType(ROOM)})`);
+const LEGACY_BROWSE = legacyServiceType(ROOM);
+log(`Mesh room: ${ROOM} (_sym._tcp, TXT room=${ROOM}${LEGACY_BROWSE ? `; also browsing ${LEGACY_BROWSE}` : ''})`);
 
 // ── SYM Node ───────────────────────────────────────────────────
 
@@ -162,7 +172,8 @@ const node = new SymNode({
   cliHostMode: true,  // Local CLI-host peer — forward only, no persistence
   relayOnly: RELAY_ONLY,
   room: ROOM,
-  discoveryServiceType: roomServiceType(ROOM),
+  discoveryServiceType: '_sym._tcp',
+  discoveryBrowseTypes: LEGACY_BROWSE ? [LEGACY_BROWSE] : [],
   relay: relayUrl,
   relayToken: relayToken,
   silent: false,
@@ -170,10 +181,11 @@ const node = new SymNode({
 
 // ── IPC Server (Unix Socket) ───────────────────────────────────
 
-/** Connected virtual nodes. socketId → { socket, name, cognitiveProfile } */
-const virtualNodes = new Map();
-/** Hosted agents (Section 3.2 + 4.3). socketId → { socket, nodeId, name, publicKey, activity } */
-const hostedAgents = new Map();
+// sym 0.14 (design D8): ONE AGENT, ONE NODE. The daemon's virtual nodes (`register`), hosted agents
+// (`register-agent`) and their outbound path (`agent-cmb`, which broadcast a plain `cmb` with a
+// client-supplied `from`) are gone: an autonomous agent is its own node, with its own identity, and a
+// node's reasoning process is its interior (lib/interior.js), which has no mesh identity. Local
+// clients query the daemon's node and subscribe to its events with `listen` (MMP §14.9).
 /** Agent activity state. name → { status, timestamp } */
 const agentActivity = new Map();
 /** Task board — persisted to ~/.sym/tasks.json */
@@ -207,67 +219,161 @@ const listeners = new Map(); // socketId → socket — real-time event subscrib
  * See MMP v0.2.0 Section 13 (Application).
  * @returns {net.Server}
  */
-function startIPCServer() {
+/**
+ * Whether a daemon is serving the socket path: a connect that succeeds means yes; a refused or
+ * missing socket is stale. Named pipes (Windows) have no file to remove, so they are not probed.
+ * @returns {Promise<boolean>}
+ */
+function socketServed() {
+  if (process.platform === 'win32' || !fs.existsSync(SOCKET_PATH)) return Promise.resolve(false);
+  return socketAnswers(SOCKET_PATH);
+}
+
+/** The socket file this daemon created (its inode), so it never removes another daemon's. */
+let ownSocketIno = null;
+function socketIsOurs() {
+  if (process.platform === 'win32' || ownSocketIno === null) return false;
+  try { return fs.statSync(SOCKET_PATH).ino === ownSocketIno; } catch { return false; }
+}
+
+/** The server listening on SOCKET_PATH now. Closing a Unix-socket server removes its path, whoever
+ *  has bound it since, so it is closed only while the path is still its own. */
+let listeningServer = null;
+
+/** One IPC connection: newline-delimited JSON in, results and events out. */
+function onIPCConnection(socket) {
+  const socketId = nextSocketId++;
+  let buffer = '';
+
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    // One line is at most IPC_MAX_LINE: a client that never sends a newline cannot grow the buffer.
+    if (buffer.length > IPC_MAX_LINE && buffer.indexOf('\n') === -1) {
+      log(`IPC client ${socketId} sent ${buffer.length} bytes without a newline; closing it`);
+      buffer = '';
+      socket.destroy();
+      return;
+    }
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (line.trim()) takeIPCLine(socketId, socket, line);
+    }
+  });
+
+  socket.on('close', () => {
+    listeners.delete(socketId);
+  });
+
+  socket.on('error', (err) => {
+    if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
+      log(`IPC socket error: ${err.message}`);
+    }
+    listeners.delete(socketId);
+  });
+}
+
+function onListening() {
+  // chmod not applicable on Windows named pipes
+  if (process.platform !== 'win32') {
+    try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
+    try { ownSocketIno = fs.statSync(SOCKET_PATH).ino; } catch { ownSocketIno = null; }
+  }
+  log(`IPC server listening: ${SOCKET_PATH}`);
+}
+
+/** A server that only logs its errors once it is listening: an accept error never ends the daemon. */
+function newIPCServer() {
+  const server = net.createServer(onIPCConnection);
+  return server;
+}
+
+/** @returns {Promise<net.Server|null>} the listening server, or null when another daemon serves the path */
+async function startIPCServer() {
   // Ensure ~/.sym/ exists
   if (!fs.existsSync(SYM_DIR)) {
     fs.mkdirSync(SYM_DIR, { recursive: true });
   }
-  // Clean up stale socket
-  if (fs.existsSync(SOCKET_PATH)) {
-    try { fs.unlinkSync(SOCKET_PATH); } catch {}
+  // Bind first, and probe only a path that is taken: a socket file is removed only when nothing
+  // answers on it and it is still the file probed. Probing first and then removing whatever was
+  // there let two daemons starting together each take the path from the other.
+  const server = newIPCServer();
+  if (await listenExclusive(server, SOCKET_PATH) === 'served') return null;
+  server.on('error', (err) => log(`IPC server error: ${err.message}`));
+  listeningServer = server;
+  onListening();
+
+  // If the socket file is removed or replaced while this daemon runs, clients can no longer reach
+  // it. It is checked every 30 s and, when gone, a fresh server listens on it. That never waits for
+  // the clients already connected: they stay on the connections they have (closing a server stops it
+  // accepting and leaves its connections open). One attempt at a time, and a failure is logged and
+  // retried at the next check, never fatal.
+  if (process.platform !== 'win32') {
+    let relistening = false;
+    setInterval(async () => {
+      if (relistening || ownSocketIno === null || socketIsOurs()) return;
+      if (fs.existsSync(SOCKET_PATH)) return; // another process's socket now: leave it alone
+      relistening = true;
+      try {
+        log(`IPC socket ${SOCKET_PATH} was removed while this daemon was serving; listening again`);
+        // The old listener goes first: closing it removes the path, which is still empty now.
+        if (listeningServer) { listeningServer.close(); listeningServer = null; }
+        ownSocketIno = null;
+        const fresh = newIPCServer();
+        if (await listenExclusive(fresh, SOCKET_PATH) === 'served') {
+          log(`Another sym-daemon now serves ${SOCKET_PATH}; this one keeps the clients it has`);
+          return;
+        }
+        fresh.on('error', (err) => log(`IPC server error: ${err.message}`));
+        listeningServer = fresh;
+        onListening();
+      } catch (err) {
+        log(`IPC listen again on ${SOCKET_PATH} failed: ${err.message}; retried at the next check`);
+      } finally {
+        relistening = false;
+      }
+    }, Number(process.env.SYM_SOCKET_CHECK_MS) || 30_000).unref();
   }
 
-  const server = net.createServer((socket) => {
-    const socketId = nextSocketId++;
-    let buffer = '';
-
-    socket.on('data', (data) => {
-      buffer += data.toString();
-      let idx;
-      while ((idx = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 1);
-        if (line.trim()) {
-          try {
-            handleIPCMessage(socketId, socket, JSON.parse(line));
-          } catch (err) {
-            log(`IPC parse error: ${err.message}`);
-          }
-        }
-      }
-    });
-
-    socket.on('close', () => {
-      const vn = virtualNodes.get(socketId);
-      if (vn) { log(`Virtual node disconnected: ${vn.name}`); virtualNodes.delete(socketId); }
-      const ha = hostedAgents.get(socketId);
-      if (ha) { log(`Hosted agent disconnected: ${ha.name}`); hostedAgents.delete(socketId); }
-      listeners.delete(socketId);
-    });
-
-    socket.on('error', (err) => {
-      if (err.code !== 'EPIPE' && err.code !== 'ECONNRESET') {
-        log(`IPC socket error: ${err.message}`);
-      }
-      virtualNodes.delete(socketId);
-      hostedAgents.delete(socketId);
-    });
-  });
-
-  server.listen(SOCKET_PATH, () => {
-    // chmod not applicable on Windows named pipes
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
-    }
-    log(`IPC server listening: ${SOCKET_PATH}`);
-  });
-
-  server.on('error', (err) => {
-    log(`IPC server error: ${err.message}`);
-    process.exit(1);
-  });
-
   return server;
+}
+
+const NO_INSIGHT_ENGINE = 'this node runs no insight engine';
+/** The longest IPC line taken (a remember with its payload is far below it). */
+const IPC_MAX_LINE = 8 * 1024 * 1024;
+
+/** The text of a thrown value, without trusting it to print. */
+function errorText(err) {
+  return err && typeof err.message === 'string' ? err.message.slice(0, 500) : 'unknown error';
+}
+
+/**
+ * Take one IPC line. An IPC message is typed at the door, as a wire frame is: it is a JSON object
+ * whose `type` is a non-empty string, or it is refused with an error reply and handled no
+ * further. Only then is anything in it printed: the catch below names the message by its type,
+ * and in 0.13.17 as first built it printed `type` unchecked, so one line whose type was an object
+ * that cannot be turned into text made the catch itself throw, and the daemon exited (FATAL).
+ */
+function takeIPCLine(socketId, socket, line) {
+  let msg;
+  try { msg = JSON.parse(line); } catch (err) {
+    log(`IPC parse error: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: null, error: 'not JSON' });
+    return;
+  }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg) || typeof msg.type !== 'string' || !msg.type) {
+    log('IPC message refused: not an object with a string type');
+    sendIPC(socket, { type: 'result', action: null, error: 'an IPC message is a JSON object with a string type' });
+    return;
+  }
+  const type = msg.type.slice(0, 64);
+  try {
+    handleIPCMessage(socketId, socket, msg);
+  } catch (err) {
+    log(`IPC '${type}' failed: ${errorText(err)}`);
+    sendIPC(socket, { type: 'result', action: type, error: errorText(err), code: err && typeof err.code === 'string' ? err.code : undefined });
+  }
 }
 
 /**
@@ -280,64 +386,20 @@ function startIPCServer() {
  */
 function handleIPCMessage(socketId, socket, msg) {
   switch (msg.type) {
-    case 'register': {
-      virtualNodes.set(socketId, {
-        socket,
-        name: msg.name || `virtual-${socketId}`,
-        cognitiveProfile: msg.cognitiveProfile || null,
-      });
-      sendIPC(socket, {
-        type: 'registered',
-        nodeId: node._identity?.nodeId,
-        name: node.name,
-        relay: relayUrl,
-      });
-      log(`Virtual node registered: ${msg.name}`);
+    // A client's opener: who this daemon's node is. (The `register` virtual-node path is gone in
+    // 0.14, design D8: a client is not a node.)
+    case 'hello':
+      sendIPC(socket, { type: 'result', action: 'hello', nodeId: node._identity?.nodeId, name: node.name, relay: relayUrl });
       break;
-    }
 
-    // ── Hosted Agent Registration (Section 4.3.1) ──────────
-    case 'register-agent': {
-      if (!msg.nodeId || !msg.name) {
-        sendIPC(socket, { type: 'error', message: 'register-agent requires nodeId and name' });
-        break;
-      }
-      hostedAgents.set(socketId, {
-        socket,
-        nodeId: msg.nodeId,
-        name: msg.name,
-        publicKey: msg.publicKey || null,
-        svafFieldWeights: msg.svafFieldWeights || null,
-        svafFreshnessSeconds: msg.svafFreshnessSeconds || null,
-      });
+    case 'register':
+    case 'register-agent':
+    case 'agent-cmb':
       sendIPC(socket, {
-        type: 'registered-agent',
-        nodeId: msg.nodeId,
-        daemonNodeId: node._identity?.nodeId,
-        relay: relayUrl,
-        peers: node.peers(),
+        type: 'result', action: msg.type, code: 'EREMOVED',
+        error: `'${msg.type}' was removed in sym 0.14 (one agent, one node): an agent runs its own node; a node's mind submits through its interior socket. Use 'hello' and 'listen' for local clients.`,
       });
-      log(`Hosted agent registered: ${msg.name} (${msg.nodeId.slice(0, 8)})`);
       break;
-    }
-
-    // ── Hosted Agent Outbound CMB (Section 4.3.2) ─────────
-    case 'agent-cmb': {
-      // Hosted agent produced a CMB — broadcast to remote peers with agent's nodeId
-      if (!msg.cmb || !msg.from) break;
-      const frame = { type: 'cmb', timestamp: msg.timestamp || Date.now(), cmb: msg.cmb, from: msg.from, fromName: msg.fromName };
-      // Broadcast via all peer transports
-      for (const [, peer] of node._peers) {
-        peer.transport.send(frame);
-      }
-      // Also forward to other hosted agents (local mesh)
-      for (const [id, agent] of hostedAgents) {
-        if (id !== socketId) {
-          sendIPC(agent.socket, { type: 'event', event: 'frame-received', data: { peerId: msg.from, peerName: msg.fromName, frame } });
-        }
-      }
-      break;
-    }
 
     case 'agent-activity':
       if (msg.name && msg.status) {
@@ -389,7 +451,7 @@ function handleIPCMessage(socketId, socket, msg) {
       tasks.set(id, task);
       saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-create', task });
-      broadcastToHostedAgents({ type: 'event', event: 'task-created', data: task });
+      broadcastToListeners({ type: 'event', event: 'task-created', data: task });
       break;
     }
 
@@ -414,7 +476,7 @@ function handleIPCMessage(socketId, socket, msg) {
       task.updatedAt = now;
       saveTasks();
       sendIPC(socket, { type: 'result', action: 'task-update', task });
-      broadcastToHostedAgents({ type: 'event', event: 'task-updated', data: task });
+      broadcastToListeners({ type: 'event', event: 'task-updated', data: task });
       break;
     }
 
@@ -433,14 +495,16 @@ function handleIPCMessage(socketId, socket, msg) {
       if (msg.categories) {
         try {
           const entry = node.remember(msg.categories, { tags: msg.tags, parents: msg.parents });
-          if (entry) {
+          if (entry && !entry.duplicate) {
             sendIPC(socket, { type: 'result', action: 'remember', key: entry.key });
+          } else if (entry) {
+            sendIPC(socket, { type: 'result', action: 'remember', key: entry.key, duplicate: true });
           } else {
-            sendIPC(socket, { type: 'result', action: 'remember', duplicate: true });
+            sendIPC(socket, { type: 'result', action: 'remember', error: 'not stored', code: 'ESTORE' });
           }
         } catch (err) {
           log(`remember failed: ${err.message}`);
-          sendIPC(socket, { type: 'result', action: 'remember', error: err.message });
+          sendIPC(socket, { type: 'result', action: 'remember', error: err.message, code: err.code });
         }
       }
       break;
@@ -465,7 +529,7 @@ function handleIPCMessage(socketId, socket, msg) {
           motivation: 'mesh communication',
           commitment: msg.message.slice(0, 120),
           perspective: `${node.name}, direct message`,
-          mood: { text: 'neutral', valence: 0, arousal: 0 },
+          mood: { text: 'neutral' },
         });
         sendIPC(socket, { type: 'result', action: 'send', peers: node.peers().length });
       }
@@ -480,26 +544,9 @@ function handleIPCMessage(socketId, socket, msg) {
       log(`Listener registered (socket ${socketId}${msg.categoryWeights ? ', with category weights' : ''})`);
       break;
 
-    case 'peers': {
-      const hostedNames = new Set(Array.from(hostedAgents.values()).map(a => a.name));
-      const meshPeers = node.peers().filter(p => !hostedNames.has(p.name));
-      const hosted = Array.from(hostedAgents.values()).map(a => {
-        const act = agentActivity.get(a.name);
-        return {
-          id: a.nodeId?.slice(0, 8) || '',
-          name: a.name,
-          connected: true,
-          lastSeen: Date.now(),
-          coupling: 'hosted',
-          drift: 0,
-          source: 'ipc',
-          activity: act?.status || 'idle',
-          svafFieldWeights: a.svafFieldWeights || null,
-        };
-      });
-      sendIPC(socket, { type: 'result', action: 'peers', peers: [...meshPeers, ...hosted] });
+    case 'peers':
+      sendIPC(socket, { type: 'result', action: 'peers', peers: node.peers() });
       break;
-    }
 
     case 'metrics':
       sendIPC(socket, { type: 'result', action: 'metrics', metrics: node.metrics() });
@@ -510,27 +557,21 @@ function handleIPCMessage(socketId, socket, msg) {
         type: 'result',
         action: 'status',
         status: node.status(),
-        virtualNodes: Array.from(virtualNodes.values()).map(v => v.name),
-        hostedAgents: Array.from(hostedAgents.values()).map(a => ({
-          nodeId: a.nodeId, name: a.name,
-        })),
       });
       break;
 
+    // The insight engine is a capability a node may not have (a stock daemon has none): checked,
+    // answered either way, never assumed — unchecked, this threw and the client waited out its timeout.
     case 'xmesh-context':
-      sendIPC(socket, {
-        type: 'result',
-        action: 'xmesh-context',
-        context: node._xmesh.getContext({ timeWindow: msg.timeWindow }),
-      });
+      sendIPC(socket, node._xmesh
+        ? { type: 'result', action: 'xmesh-context', context: node._xmesh.getContext({ timeWindow: msg.timeWindow }) }
+        : { type: 'result', action: 'xmesh-context', error: NO_INSIGHT_ENGINE });
       break;
 
     case 'xmesh-search':
-      sendIPC(socket, {
-        type: 'result',
-        action: 'xmesh-search',
-        insights: node._xmesh.getInsights(msg.query),
-      });
+      sendIPC(socket, node._xmesh
+        ? { type: 'result', action: 'xmesh-search', insights: node._xmesh.getInsights(msg.query) }
+        : { type: 'result', action: 'xmesh-search', error: NO_INSIGHT_ENGINE });
       break;
 
     case 'catchup':
@@ -552,17 +593,6 @@ function handleIPCMessage(socketId, socket, msg) {
  */
 function sendIPC(socket, msg) {
   try { socket.write(JSON.stringify(msg) + '\n'); } catch {}
-}
-
-/**
- * Broadcast to all hosted agents (Section 4.3.2).
- * Hosted agents receive raw frames — they run their own SVAF.
- */
-function broadcastToHostedAgents(msg) {
-  const data = JSON.stringify(msg) + '\n';
-  for (const [id, agent] of hostedAgents) {
-    try { agent.socket.write(data); } catch { hostedAgents.delete(id); }
-  }
 }
 
 // MMP Section 13.9.2: Subscriber Category Weights.
@@ -598,8 +628,8 @@ function broadcastToListeners(msg) {
   }
 }
 
-/** Forward mesh events to all registered virtual nodes. */
-function forwardEventsToVirtualNodes() {
+/** Forward mesh events to the local subscribers (`listen`, MMP §14.9). */
+function forwardEventsToListeners() {
   const events = [
     ['mood-delivered', (d) => ({ type: 'event', event: 'mood-delivered', data: d })],
     ['mood-rejected', (d) => ({ type: 'event', event: 'mood-rejected', data: d })],
@@ -609,54 +639,33 @@ function forwardEventsToVirtualNodes() {
   ];
 
   for (const [event, formatter] of events) {
-    node.on(event, (data) => broadcastToVirtualNodes(formatter(data)));
+    node.on(event, (data) => broadcastToListeners(formatter(data)));
   }
 
   node.on('message', (from, content) => {
-    broadcastToVirtualNodes({ type: 'event', event: 'message', data: { from, content } });
     broadcastToListeners({ type: 'event', event: 'message', data: { from, content, timestamp: Date.now() } });
 
-    // Feed messages (including Telegram) into XMesh
-    node._xmesh.ingestSignal({ type: 'message', from, content });
+    // Feed messages (including Telegram) into the insight engine, if this node has one. A stock
+    // daemon has none (`node._xmesh` is null: the engine is injected, never assumed); calling it
+    // unchecked threw inside the frame dispatch, so any peer's `message` frame over the relay
+    // took the daemon down in 0.13.16.
+    if (node._xmesh) node._xmesh.ingestSignal({ type: 'message', from, content });
 
-    // Wake sleeping peers that might need this message.
-    // The daemon acts as wake proxy — it has APNs keys and gossiped wake channels.
-    // When a remote peer (Telegram bot) sends a message, and a local peer (MeloTune)
-    // is sleeping, the daemon wakes it so the relay can deliver the message.
-    node._wakeManager?.wakeSleepingPeers('message', {
-      type: 'message', from: node._identity.nodeId, fromName: node.name,
-      content, timestamp: Date.now(),
-    });
+    // A peer's message is not re-sent under this node's name to sleeping peers (security review):
+    // it was the peer's, signed to this node. A message for another node is that node's to send.
   });
 
-  node.on('mood-delivered', (data) => {
-    // XMesh ingestion happens via cmb → SVAF path, not here.
-    // Wake sleeping local peers so they can receive the mood.
-    node._wakeManager?.wakeSleepingPeers('mood', {
-      type: 'mood', from: node._identity.nodeId, fromName: node.name,
-      mood: data.mood, timestamp: Date.now(),
-    });
-  });
+  // A peer's mood is not re-broadcast under this node's name either (security review): before
+  // 0.14 the daemon queued every delivered mood for sleeping peers as its own `mood` frame.
 
   node.on('xmesh-insight', (data) => {
-    broadcastToVirtualNodes({ type: 'event', event: 'xmesh-insight', data });
+    broadcastToListeners({ type: 'event', event: 'xmesh-insight', data });
   });
 
   node.on('memory-received', ({ from, entry, decision }) => {
     // XMesh ingestion already happens in frame-handler after SVAF evaluation.
-    broadcastToVirtualNodes({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
+    broadcastToListeners({ type: 'event', event: 'memory-received', data: { from, content: entry.content, decision } });
   });
-}
-
-/**
- * Broadcast a message to all connected virtual nodes.
- * @param {object} msg — message to broadcast
- */
-function broadcastToVirtualNodes(msg) {
-  const data = JSON.stringify(msg) + '\n';
-  for (const [id, vn] of virtualNodes) {
-    try { vn.socket.write(data); } catch { virtualNodes.delete(id); }
-  }
 }
 
 // ── launchd Install/Uninstall ──────────────────────────────────
@@ -793,7 +802,8 @@ function showStatus() {
           console.log(`  relay:    ${s.relayConnected ? 'connected' : 'disconnected'} (${s.relay || 'none'})`);
           console.log(`  peers:    ${s.peerCount}`);
           console.log(`  memories: ${s.memoryCount}`);
-          console.log(`  virtual:  ${(msg.virtualNodes || []).join(', ') || 'none'}`);
+          if (s.coreSecure) console.log(`  sessions: ${s.coreSecure.sessions.confirmed} confirmed (Core Secure)${s.coreSecure.keyConflicts.length ? `, ${s.coreSecure.keyConflicts.length} KEY CONFLICT(S) to resolve: sym keys` : ''}`);
+          if (s.legacyImport && s.legacyImport.sessions.length) console.log(`  legacy:   ${s.legacyImport.sessions.length} Legacy Import session(s) — legacy encryption, no forward secrecy, no transcript proof`);
           console.log(`  socket:   ${SOCKET_PATH}`);
         }
       } catch {}
@@ -824,9 +834,11 @@ function log(msg) {
 // ── Room discovery beacon (MMP §5.8) ──────────────────────────
 // Advertise this node's room on one shared service type so `sym rooms` can
 // list live rooms cross-platform — bonjour-service browse works where Apple
-// dns-sd is absent (e.g. Windows). Discovery-only: comms stay isolated on the
-// room's own `_<room>._tcp`. The room name is whatever the user chose and
-// can be an anonymous/opaque code, so the broadcast need not reveal its purpose.
+// dns-sd is absent (e.g. Windows). Discovery-only: comms stay separated by the
+// TXT `room` on `_sym._tcp` (a node dials only its own room's advertisements,
+// MMP §5.1) and by the handshake, which binds the room. The room name is
+// whatever the user chose and can be an anonymous/opaque code, so the
+// broadcast need not reveal its purpose.
 let roomBeacon = null;
 function startRoomBeacon() {
   try {
@@ -861,25 +873,25 @@ async function main() {
   log(`  relay: ${relayUrl || 'none'}`);
   log(`  socket: ${SOCKET_PATH}`);
 
+  // A socket another daemon answers on is its: this start stops before its node joins anything.
+  if (await socketServed()) {
+    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
+    process.exit(1);
+  }
+
   await node.start();
   log(`SYM node started (${node._identity?.nodeId?.slice(0, 8)})`);
 
-  startRoomBeacon();
+  // A relay-only daemon has LAN discovery off, so it must not announce its room on the LAN either.
+  if (RELAY_ONLY) log('Room beacon: off (relay-only)');
+  else startRoomBeacon();
 
   loadTasks();
   log(`Loaded ${tasks.size} task(s)`);
 
-  forwardEventsToVirtualNodes();
+  forwardEventsToListeners();
 
-  // Section 4.3.2: forward raw frames to hosted agents (before SVAF evaluation)
-  node.on('frame-received', ({ peerId, peerName, frame }) => {
-    if (hostedAgents.size > 0) {
-      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: { peerId, peerName, frame } });
-    }
-  });
-
-  // When daemon accepts a CMB (from peer or local observe), forward to hosted agents
-  // so they can ingest it into their local memory via their own SVAF
+  // A CMB the daemon's node accepted (from a peer or a local observe) goes to the subscribers.
   node.on('cmb-accepted', (entry) => {
     broadcastToListeners({
       type: 'event', event: 'cmb-accepted',
@@ -891,33 +903,15 @@ async function main() {
         timestamp: entry.timestamp || Date.now(),
       },
     });
-    if (hostedAgents.size > 0) {
-      // Wrap as a cmb frame so hosted agent's SVAF can evaluate it
-      const frame = {
-        type: 'cmb',
-        timestamp: entry.timestamp || entry.storedAt || Date.now(),
-        cmb: entry.cmb,
-        source: entry.source,
-      };
-      broadcastToHostedAgents({ type: 'event', event: 'frame-received', data: {
-        peerId: entry.peerId || entry.source || 'daemon',
-        peerName: entry.source || 'daemon',
-        frame,
-      }});
-    }
   });
 
-  // Forward peer events to hosted agents
-  node.on('peer-joined', (data) => {
-    broadcastToHostedAgents({ type: 'event', event: 'peer-joined', data });
-    broadcastToListeners({ type: 'event', event: 'peer-joined', data: { name: data.name || 'unknown', peerId: data.peerId } });
-  });
-  node.on('peer-left', (data) => {
-    broadcastToHostedAgents({ type: 'event', event: 'peer-left', data });
-    broadcastToListeners({ type: 'event', event: 'peer-left', data: { name: data.name || 'unknown', peerId: data.peerId } });
-  });
+  // peer-joined/left reach the subscribers through forwardEventsToListeners.
 
-  const ipcServer = startIPCServer();
+  if (!(await startIPCServer())) {
+    log(`Another sym-daemon is serving ${SOCKET_PATH}; not starting a second one.`);
+    await node.stop();
+    process.exit(1);
+  }
 
   log('sym-daemon ready');
 
@@ -926,10 +920,9 @@ async function main() {
     log('Shutting down...');
     stopRoomBeacon();
     node.stop();
-    ipcServer.close();
-    if (fs.existsSync(SOCKET_PATH)) {
-      try { fs.unlinkSync(SOCKET_PATH); } catch {}
-    }
+    // Only our own socket file: closing a server removes its path, so a path another daemon now
+    // serves is not closed over; exiting releases this one's handle without touching it.
+    if (listeningServer && socketIsOurs()) listeningServer.close();
     process.exit(0);
   };
 

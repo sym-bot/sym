@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meshcognition.org/spec/mmp/schema/cmb-fetch-result.schema.json",
+  "title": "MMP cmb-fetch-result frame (§7, §15.8, §18.2.1)",
+  "description": "Sent sealed inside control-encrypted. Carries no record: each returned record travels before it as its own cmb-encrypted frame.",
+  "type": "object",
+  "required": [
+    "type",
+    "reqId",
+    "returned",
+    "missing"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "const": "cmb-fetch-result"
+    },
+    "reqId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "returned": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" },
+      "description": "Keys whose records were sent, each as its own cmb-encrypted frame, before this result"
+    },
+    "missing": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^cmb-[0-9a-f]{64}$" },
+      "description": "Requested keys not returned: not held, or not disclosable to this requester"
+    }
+  }
+}

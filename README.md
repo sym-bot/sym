@@ -37,7 +37,7 @@ sym listen
 Back in the first terminal, publish one observation:
 
 ```bash
-sym publish '{"focus":"trying SYM","intent":"confirm the second terminal receives this","mood":{"text":"curious","valence":0.4,"arousal":0.3}}'
+sym publish '{"focus":"trying SYM","intent":"confirm the second terminal receives this","mood":{"text":"curious"}}'
 ```
 
 The listening terminal should receive the typed observation with its source. No API key is required for this wire test.
@@ -113,31 +113,78 @@ mesh-channel are open source.
 ## Security, and what the relay can and cannot see
 
 We treat this as the product's first property, and we state it as mechanisms with their
-limits rather than as a promise.
+limits rather than as a promise. Since 0.14 every sym node is an MMP 2.0 **Core Secure**
+participant.
 
-- **Every node signs.** A node's identity is an Ed25519 keypair on its own disk; every CMB it
-  emits is signed, and a receiver verifies the signature against the key it pinned at the
-  handshake.
-- **Content is encrypted for each peer.** At the handshake two nodes exchange X25519 public
-  keys and derive a secret only they hold. A CMB's seven categories — the content — are
-  encrypted for each recipient separately before they leave the sender. This is the same on
-  the local network and through a relay.
-- **Never in the clear through a relay** (engine 0.13.7 and later). If a peer reached only
-  over a relay presented no encryption key, the sender sends it nothing, says so once in its
-  log, and `sym status` shows the peer with `e2e: false, clearRefused: true`. On the local
-  network a keyless peer still receives, because the frame never leaves that network.
-- **The relay is a forwarder that cannot read what it carries.** `@sym-bot/sym-relay` reads
-  only the routing envelope (who, to whom, which room), forwards the sealed payload, and drops
-  it: no message store, no keys, no addresses. A channel is the set of nodes connected with
-  the same token; a self-serve token must be 32 characters or more, and a refused connection
-  is logged with the token's length, never the token.
+- **A peer is a proven session, never a hint.** Two nodes run the MMP §5.2 handshake on every
+  transport — LAN, loopback and relay. Each proves possession of its Ed25519 identity key over
+  a transcript that binds both nonces, both nodeIds, both keys, the room and the extensions,
+  and confirms the X25519 key schedule. Nothing about a peer — its key, its room membership, its
+  roles — exists until both proofs validate. A discovery record or a relay roster entry only
+  decides whom to dial.
+- **One key per nodeId, for life.** A session that proves a nodeId with a different key from the
+  one this node binds — durably, or for a session that is live — is a *conflict*: refused with
+  1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to resolve
+  (`sym keys <name> resolve`). No source overrides a different key. A handshake alone binds a
+  key only for its session; the binding becomes durable when it is earned (an admitted verified
+  record, a verified record its author signed to this node, a pin, an in-force grant), so
+  churning identities cannot fill the registry, and nothing is ever evicted to make room.
+- **Every record is signed, and verified by its author's node id.** A record is accepted only
+  if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
+  `createdByNodeId` — a key it proved, pinned from an invite, or holds from an in-force grant.
+  An unsigned, legacy or unresolvable record is refused. What is kept, delivered
+  and served is the record's signed projection: members no signature covers are dropped.
+- **A record goes only where its author signed it to.** A record signed to one node is sealed to
+  that node's session and no other's, whichever path offers it.
+- **Content is sealed per session.** Records travel only as `cmb-encrypted` frames, and every
+  other frame (mood, gossip, authority statements) as a sealed control frame, under directional keys derived
+  fresh for each handshake (X25519, HKDF-SHA256, ChaCha20-Poly1305). A relay sees routing
+  envelopes and ciphertext. There is no long-lived encryption key to steal later.
+- **Authority is a function of a set, and follows the key (MMP §6.6).** Grants, revokes and
+  endorses are signed statements that name one another by the hash of their signed bytes, rooted
+  at a pinned anchor key set with a threshold. A grant names a nodeId and a key and confers its role
+  on that pair only. What is in force is computed from the statements a node holds and nothing
+  else (no clock, no arrival order), so nodes holding the same statements resolve the same
+  authority and the same root. Delegation is at most 4 links, scopes only narrow, and every bucket
+  has a quota. Every signature sym checks, here and everywhere, uses one Ed25519 rule (§18.3.2).
 - **Each node decides what it keeps.** Admission is receiver-local: a node runs its own
-  evaluation on every block it hears and stores only what it admits.
+  evaluation on every record it hears and stores only what it admits.
+- **Bounded.** Every store a peer can feed — key bindings, authority statements, wake channels, gossip, relay
+  candidates, per-peer state — has a fixed bound; [SECURITY.md](SECURITY.md) lists each one.
 
-What this does not cover: a room name or relay token is not an enterprise trust boundary —
-anyone holding the token is in the channel; the envelope (names, room, timing, sizes) is
-visible to the relay operator; and a peer's own machine is trusted with everything that peer
-admitted.
+What this does not solve, said plainly:
+
+- **First contact** with a node you hold no anchor, invite or grant for is *trust on first
+  proven use*: the handshake proves the peer holds the key it presents, not that the key is
+  the one you meant. Pin it out of band (an invite carries the issuer's key) when that matters.
+  A node whose records yours never admitted, and that never signed a record to yours, is first contact
+  again once it leaves; and whoever reaches yours first under a nodeId and has one record accepted
+  holds that nodeId there for good (a nodeId is not derived from its key).
+- **A revoke takes effect where it has arrived.** Until a node holds a revoke it treats the grant
+  as in force; gossip and digest exchanges carry it, and a partitioned node stays exposed until it
+  reconnects. The anchor's threshold holders are the root of authority.
+- **Upgrading from 0.13 is a flag day for authority.** Old role grants confer nothing under §6.6;
+  the anchor and each grantor re-issue what should stand (`node.legacyRoleGrants()` lists the old
+  ones; [docs/AUTHORITY-OPERATOR.md](docs/AUTHORITY-OPERATOR.md) says how, and how to pin and re-pin).
+- **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
+  replace another node's connection (close 4004). A squatter gets no Core Secure session — it
+  cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
+- **Key compromise.** There is no key rotation: a node whose private key leaks must be
+  replaced, under a new nodeId.
+- **Your own machine.** Another process running as the same user can read the identity file.
+  Operating-system isolation is out of scope.
+- **Legacy peers (0.13 and older)** are reached only through explicit Legacy Import routes,
+  which use the old encryption (no forward secrecy, no transcript proof). A 0.13 hello proves
+  nothing, so over the relay anyone can answer as a routed node; what this node sends is
+  encrypted to the routed node's pinned X25519 key, so such a squatter cannot read it, but anyone
+  who later obtains that node's X25519 private key can read what was recorded. What legacy peers
+  send is quarantined as unverified, and they never join a gated room. Network Legacy Import is
+  removed in 0.15.0.
+
+A room name or relay token is still not an enterprise trust boundary — anyone holding the
+token is in the channel; the envelope (who, to whom, room, timing, sizes) is visible to the
+relay operator; and a peer's own machine is trusted with everything that peer admitted. See
+[SECURITY.md](SECURITY.md).
 
 ## Current boundaries
 

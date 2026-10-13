@@ -41,20 +41,20 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     B._svafEvaluator.evaluate = async () => null;
 
     const [tA, tB] = pair();
-    tA.on('message', f => A._frameHandler.handle(B.nodeId, bName, f));
-    tB.on('message', f => B._frameHandler.handle(A.nodeId, aName, f));
-    A._addPeer(A._createPeer(tA, B.nodeId, bName, true, 'bonjour'));
-    B._addPeer(B._createPeer(tB, A.nodeId, aName, false, 'bonjour'));
+    A.connectTransport(tA, { role: 'client', expectNodeId: B.nodeId });
+    B.connectTransport(tB, { role: 'server' });
     await sleep(400);
     const announced = [];
     B.on('attestation-received', (e) => announced.push(e));
-    assert.ok(B._peerIdentityKeys.get(A.nodeId), 'B has A\'s authenticated identity key from the handshake');
+    // The handshake binds A's key for the session (security review D): durable only once earned.
+    assert.strictEqual(B._identityKey(A.nodeId), A._identity.publicKey, 'B has A\'s identity key, proven by the handshake');
+    assert.strictEqual(B._keySource(A.nodeId), 'session');
 
     const entry = B.remember({
       focus: 'attestation gossip e2e', issue: 'verify attestation reaches the author',
       intent: 'D2', motivation: 'cross-mesh audit trail', commitment: 'roster gossip',
       perspective: 'B', mood: { text: 'procedural', valence: 0, arousal: 0 },
-    }, { to: A.nodeId });
+    }); // room-bound: no attestation about a directed record is sent (sym-attest-v1 §5.1, MMP 2.0 update 1)
     const K = entry.key;
 
     const arrived = await (async () => { for (let i = 0; i < 100; i++) { await sleep(50); if (B.attestationsFor(K).length) return true; } return false; })();
@@ -73,12 +73,12 @@ describe('E2E Admission Attestation gossip (D2)', () => {
     assert.strictEqual(live[0].from, aName);
     assert.strictEqual(live[0].relayed, false);
     assert.strictEqual(live[0].verified, true);
-    assert.strictEqual(live[0].keySource, 'handshake');
+    assert.strictEqual(live[0].keySource, 'session');
     assert.strictEqual(live[0].sig, att.sig);
 
     // A forged attestation (bad signature) must be dropped on ingest.
     const before = B._attestations.size();
-    B._frameHandler.handle(A.nodeId, aName, {
+    B._receiveSessionFrame(B._peers.get(A.nodeId).transport, {
       type: 'attestation',
       attestation: { of: K, by: A.nodeId, at: Date.now(), roster: 'sym-bot-team', verdict: 'aligned', categories: {}, role: 'participant', seq: 99, prev: 'x', sig: 'AAAAforged', sigAlg: 'ed25519' },
     });

@@ -235,11 +235,11 @@ Every participant is a full node — cryptographic identity, a per-field relevan
 
 ## Rooms — your "room chat"
 
-A mesh holds many rooms. The default mesh (`_sym._tcp`) is the public square; a **named room is a separate room** — only nodes in the same room discover each other and exchange CMBs. The CLI, the Claude MCP node, and sym-swift share one naming convention, so they all meet in the same room.
+A mesh holds many rooms. The default room is the public square; a **named room is a separate room** — only nodes in the same room exchange CMBs. Every node advertises on `_sym._tcp` with its room in the TXT `room` key and dials only advertisements in its own room (MMP §5.1); the handshake, which binds the room, is what admits. A room name is `[a-z0-9._-]`, 1 to 64 characters (MMP §5.8), for example `acme-office` or `acme.prod`; `sym` is refused.
 
 ```bash
 sym start --room acme-office   # join a room at launch
-sym join acme-office            # switch into one (kebab-case, or "default")
+sym join acme-office            # switch into one ([a-z0-9._-], or "default")
 sym rooms                      # list rooms live on your LAN
 sym room                       # show your current room
 sym leave                       # back to the default mesh
@@ -295,6 +295,23 @@ const node = new SymNode({
     svafFreshnessSeconds: 10800
 });
 ```
+
+### The attestation audit trail: how much history is kept
+
+Every node keeps the admission attestations, checkpoints and witnesses it holds in `attestations/` in
+its node directory. Rotation keeps each live log bounded. When a log is rotated, the old one moves
+whole into `attestations/archive/`, and the archives hold the older history. They are pruned oldest
+first once a log's archives pass a bound: **128 MiB per log** by default, the newest archive included.
+**0 keeps every archive.** If you need the whole audit trail, set 0 and own the disk it takes.
+
+| Setting | Where | Meaning |
+|---------|-------|---------|
+| `SYM_ATTESTATION_ARCHIVE_MAX_BYTES` | environment (the daemon, any node) | bytes of archive kept per log; `0` keeps every archive |
+| `attestationArchiveMaxBytes` | `new SymNode({ ... })` | the same, for one node; wins over the environment |
+
+A value that is not a whole number of bytes ≥ 0 falls back to 128 MiB, and the node says so once in
+its log. One process writes a node's `attestations/` directory: the node's identity lock admits one
+process per node.
 
 ### CAT7 — the 7 universal fields
 
