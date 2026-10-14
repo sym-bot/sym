@@ -5,8 +5,9 @@
 **An agent no longer loses its key to the 0.13 → by-id upgrade.** An XMesh review of `lib/config.js` 0.14.2 returned
 "do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
 or expose a key and the small ones beside them, by reading the state of an identity only from records committed in one
-atomic step (see "Identity and on-disk state"). The wire is unchanged; the public surface gains `relocation.abortExport`
-and `IdentityExportPendingError`.
+atomic step (see "Identity and on-disk state"). The wire changes in one place, relay-auth, which now carries a key proof
+to a relay that asks for one (see "Transport and node lifecycle"); a 0.14.3 node and a 0.14.2 node mesh as before, over
+an old relay or a new one. The public surface gains `relocation.abortExport` and `IdentityExportPendingError`.
 
 ### What was wrong
 
@@ -257,7 +258,7 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
 
 An independent review (R3) ran the transport and the node lifecycle against a local relay and found
 the defects below; each is fixed here with a test that fails on 0.14.2 and passes on 0.14.3. The wire
-is unchanged except where a line says so.
+is unchanged except where a line says so (relay-auth key proof is the one change).
 
 #### What was wrong
 
@@ -279,9 +280,10 @@ is unchanged except where a line says so.
   per-message bound (MAX_FRAME_SIZE + 4096) was the connection's ws `maxPayload`, so one longer
   message (a payload sym-relay before 0.6.1 re-serialised longer than it arrived, or a roster padded
   with long names) closed the shared connection, and the sender could do it on every reconnect.
-- **4004 and 4006 stopped the client for good (R3-3).** relay-auth carries no key proof, so any
-  holder of the channel token could claim a member's nodeId once, leave, and the member never came
-  back to the relay until it restarted.
+- **Any holder of the channel token could switch a member off the relay (R3-3).** The relay keyed a
+  connection's slot by the nodeId relay-auth claimed, and relay-auth proved no key: claiming a member's
+  nodeId got the member closed (4004) or refused (4006), and the client stopped for good on either, as
+  MMP §4.4.7 has it. One claim, and the member never came back to the relay until it restarted.
 - **The backoff started over when the socket opened (R3-10)**, not when the relay took the auth, so a
   relay that accepted the socket and then closed it (1013, 4008, 1009) was dialled every second.
 - **Text split across two reads was corrupted, and the interior signed it (R3-7).** Every line reader
@@ -315,9 +317,19 @@ is unchanged except where a line says so.
   takes the identity lock again (EIDENTITYLOCK if another process took it meanwhile) and the inbox,
   when no other node in this process owns it, read again from disk with the delivery ledger.
   `_running` is true only while running.
-- **A relay URL is checked where it comes in.** `new SymNode({ relay })` throws `EBADRELAY` unless it
-  is an absolute ws:// or wss:// URL, and so does `new RelayConnection`; `parseInvite` returns an
-  error for an invite whose `relay` is not one.
+- **A relay setting never stops the node; one that is no relay URL disables the relay.** The relay is
+  an optional transport. http:// and https:// are the same relay as ws:// and wss:// (sym 0.14.2 dialled
+  them; ws maps them) and are spelled so wherever a relay URL comes in: `new SymNode({ relay })`,
+  `new RelayConnection`, `parseInvite` and the daemon's `SYM_RELAY_URL`, so the node dials, shows and
+  signs its key proof's origin over one spelling. A setting that is still no relay URL (no scheme, an
+  ftp:// URL, no host) never throws from the constructor or fails start(): the relay is disabled,
+  `status().relayState.phase` is `disabled` with `disabled.reason` (worded without the setting, which
+  may carry a secret), `relayStatus` says the fix, one `RELAY DISABLED:` log line, and one
+  `relay-disabled` event at start(); the node runs on the LAN. `parseInvite` still refuses an invite
+  whose relay is no URL, with an error that says so. (A 0.14.3 candidate threw `EBADRELAY` from the
+  constructor and refused http(s), so mesh-channel 0.11.0 exited at startup and the daemon
+  crash-looped under KeepAlive for anyone whose `SYM_RELAY_URL` was https://: B1 of the release
+  re-review.)
 - **Records the pacer never wrote are held and offered again (R3-4).** When the relay connection
   closes, or a relay session ends while the connection stays up, the records the node dispatched that
   its pacer still holds come back to the node and are held for that peer, for the identity key they
@@ -344,19 +356,43 @@ is unchanged except where a line says so.
   The current relay (sym-relay `origin/main`, package 0.7.0; the bound landed in 0.6.1) already builds
   every delivered frame and the roster within MAX_DELIVERED_BYTES, so this is defence in depth there;
   against 0.5.2 it is the fix.
-- **4004 and 4006 are retried on a long backoff, loudly, with a ping-pong detector (R3-3).** The first
-  retry is after 1 min, doubling to 30 min. Each close is logged (`IDENTITY CLOSE: …`) and shown in
-  `relayStatus`. Three identity closes inside 30 min are a ping-pong — two live processes holding
-  this identity and replacing each other — said as that (`PING-PONG: … Stop one of them.`), told to
-  the host and retried only every 30 min, until a connection stays up 70 min (the other process has
-  gone). `identity-collision` fires at the first close in 30 min and when a ping-pong is found, now
-  with `pingPong` and `retryInMs`; a single close proves no second
-  process, so a host that exits on it should exit on `pingPong` instead. The metric is
-  `relay-identity-close` (was `relay-hard-stop`). `relayState.stopped` holds the last identity close
-  until an auth succeeds. **This departs from MMP §4.4.7** ("MUST NOT automatically reconnect" after
-  4004, "SHOULD NOT" after 4006) and needs a spec ruling; `relayIdentityRetry: false` keeps §4.4.7 as
-  written. A relay-side key proof would end the impostor case; it needs a spec ruling and is not
-  implemented.
+- **relay-auth proves the node's key (R3-3; wire; sym-relay 0.8.0 verifies it).** The fix for an
+  identity nobody verified is to verify it, not to retry around it. relay-auth carries
+  `keyProof: "mmp-relay-auth-v1"` when the node holds its identity key. A relay that knows it answers
+  `relay-challenge` with a fresh 32-byte nonce and registers nothing; the node sends relay-auth again
+  with `publicKey` and `proof`, an Ed25519 signature by the identity key over the length-prefixed,
+  domain-separated transcript `"mmp-relay-auth-v1"`, nonce, room, nodeId, and the origin of the URL the
+  node dialed (lib/core/relay-auth-proof.js; `tests/relay-auth-proof-v1.json` is the vector sym-relay
+  carries too). The token is never signed or logged. A relay that verifies keys keys the slot by the
+  key: a token holder that claims the nodeId under another key, or with no proof, holds a slot of its
+  own and can neither evict nor block the member. **Sequencing, by testing old peers:** sym 0.13.17
+  and 0.14.2 ignore an unknown frame before relay-peers, and sym-relay 0.7.0 ignores unknown fields
+  in relay-auth but refuses a fan-out entry carrying one. So the node ASKS for the challenge inside a
+  whole relay-auth, which a relay before 0.8.0 authenticates as it is: the node connects at once
+  (no wait for a challenge that never comes), records `relayVerifiesKeys: false` in
+  `relayState` and `relayStatus`, and says once that any token holder can claim its nodeId there.
+  Old clients send no `keyProof` and are never challenged.
+- **4004 and 4006 stop the client for good again (MMP §4.4.7), and say why.** A 0.14.3 candidate
+  retried them on a long backoff with a ping-pong detector (`relayIdentityRetry`, `pingPong`,
+  `retryInMs`, metric `relay-identity-close`): a patch over the unverified identity, which also let
+  two live processes holding one key flap forever. It is removed. On a connection whose key the
+  relay verified, a 4004 means another process proved this identity's key, the newest proof wins
+  once, and this one stops: `FATAL: … another process proved this identity's key on this relay;
+  this one stopped. Not reconnecting.` On a relay that does not verify keys, 4004 or 4006 stops
+  with `… this relay does not verify keys, so any holder of the token can cause this; upgrade the
+  relay`. `identity-collision` has its 0.14.2 shape, `{ nodeId, name, code, kind, reason }`, plus
+  `relayVerifiesKeys`, and fires once; the metric is `relay-hard-stop` again; `relayState.stopped`
+  keeps the stop (with `relayVerifiesKeys`) and outlives `destroy()`.
+- **The relay's slots, as the client sees them.** A relay that lists `key-proof` gives each roster
+  and presence entry of a proven slot its `key` and `proven: true`, one entry per key. The slot
+  proven for the key this node binds to a nodeId is that peer; a legacy claim is a candidate only
+  while no slot of the bound key is listed; a slot proven for another key is never a candidate,
+  and its departure ends nothing (an impostor that leaves cannot take the member's sessions with
+  it). With no binding, the newest proven slot is the candidate. A directed frame names `toKey`,
+  the bound key, when the relay lists `key-proof` and a slot proven for that key, in a unicast or a
+  fan-out entry, so the relay hands it to that slot only; otherwise it goes to every slot of the
+  nodeId (sealed end to end, so a slot that cannot open it gains nothing), which is how it reaches
+  a bound peer on an older engine. At most 16 slots per nodeId are held (`relayState.slotsIgnored`).
 - **The backoff starts over when the relay takes the auth (R3-10)**, in the relay-peers handler, not
   when the socket opens: 1 s, 2 s, 4 s, … 30 s for a relay that keeps closing after the open.
 - **Lines are cut on bytes and decoded whole (R3-7)** (`lib/line-reader.js`): the interior socket and
@@ -386,10 +422,18 @@ is unchanged except where a line says so.
   review D) unevaluated while the sender reports them dispatched. Of R3's 260 directed records sent at
   once, 55 were accepted in one run with no relay drop at all; R3's "227 lost after a drop" counts
   these too. The tests here stay under the budget.
-- **mesh-channel exits on `identity-collision`** (server.js), so one spoofed 4004 still stops a channel
-  host until it exits on `info.pingPong` only.
-- A token holder that keeps claiming a nodeId keeps that member off the relay most of the time; only a
-  relay-side key proof ends it.
+- **mesh-channel exits on `identity-collision`** (server.js). On a relay that verifies keys only another
+  process holding the key causes one; on a relay that does not, a token holder still can, and
+  `info.relayVerifiesKeys` says which.
+- **A delivered relay frame names its sender's nodeId, not the key that proved it.** A slot proven for
+  another key under a member's nodeId can send frames "from" the member. They cannot open or forge a
+  session (the handshake binds the key), but a flood of client-hellos from it at the relay's rate holds
+  the member's per-sender hello budget at a peer, and a member that restarts cannot re-handshake with
+  that peer while the flood lasts (measured on localhost: 25 a second kept it out for the 40 s
+  watched; 4 a second did not). A `fromKey` on frames from proven slots, and per-(nodeId, key) state
+  at the receiver, would end it; that is a wire addition for sym-relay and the spec, not made here.
+- A relay setting that is no relay URL is said in status and the log; mesh-channel's own relay store
+  passes what it holds to SymNode unchanged, so it shows the setting as written.
 
 #### Tests
 

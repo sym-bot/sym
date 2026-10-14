@@ -170,14 +170,27 @@ of it; on the LAN the transport itself closes and nothing is sent. What sym choo
   case-insensitively, the first occurrence winning. The daemon also browses `_<room>._tcp` where
   that is a valid RFC 6335 name (the §5.1 migration browse), and never advertises it.
 - The relay client reconnects with backoff after every close but 4004 and 4006 (4005, 4008, 1001,
-  1009, 1011, 1013, and 4007). Since 0.14.3 the backoff starts over only when the relay has taken the
-  auth (relay-peers), not when the socket opens; 4004 and 4006 are retried too, on a long backoff
-  (1 min, doubling to 30 min, every 30 min after a ping-pong: three identity closes in 30 min), which
-  departs from §4.4.7's "MUST NOT automatically reconnect" (`relayIdentityRetry: false` keeps it); and
-  a message over the per-message bound (MAX_FRAME_SIZE + 4096) is dropped on its own instead of
+  1009, 1011, 1013, 4002 and 4007), and never after those two (§4.4.7). Since 0.14.3 the backoff
+  starts over only when the relay has taken the auth (relay-peers), not when the socket opens; and a
+  message over the per-message bound (MAX_FRAME_SIZE + 4096) is dropped on its own instead of
   closing the connection (the ws ceiling is 8 MiB, and the roster is read up to it). It forgets a
   relay's `features` with its socket; and sends relay-auth's
-  nodeId lowercase, with `room` (when not default) and `engine`. It paces at 20 frames a second,
+  nodeId lowercase, with `room` (when not default) and `engine`.
+- **Relay-auth key proof (0.14.3; sym-relay 0.8.0; not yet in MMP).** relay-auth carries
+  `keyProof: "mmp-relay-auth-v1"` when the node holds its identity key. A relay that knows it
+  answers `{ type: "relay-challenge", keyProof, nonce }` (32 bytes, base64url) and registers
+  nothing; the node sends relay-auth again with `publicKey` (32 bytes) and `proof` (64 bytes), both
+  canonical unpadded base64url: Ed25519 over `lp("mmp-relay-auth-v1") ‖ lp(nonce) ‖ lp(room) ‖
+  lp(nodeId) ‖ lp(origin)` (lp = 4-byte big-endian length ‖ bytes; room `default` when none is
+  declared; origin = the WHATWG origin of the URL the node dialed). A relay that does not know it
+  takes the first frame as it is; the node records `relayVerifiesKeys: false` and says so once.
+  Roster and presence entries of a relay listing `key-proof` carry `key` and `proven: true` for a
+  proven slot; the slot proven for the key this node binds to a nodeId is that peer, and one proven
+  for another key is never a candidate. A directed frame names `toKey` (that key) when the relay
+  lists `key-proof` and a slot proven for it, in a unicast or a fan-out entry. tests/relay-auth-proof-v1.json
+  is the vector. http:// and https:// relay URLs are dialled as ws:// and wss://; a relay setting
+  that is no URL disables the relay (status phase `disabled`) and never stops the node.
+- The relay client paces at 20 frames a second,
   burst 200, under the update's floors (§19.1: 25 a second, burst 300), counting relay-auth and
   relay-pong inside the same bucket, ahead of every other frame.
 
