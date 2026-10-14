@@ -45,12 +45,17 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   binding is earned — an admitted verified record, a verified record its author signed to this
   node and this node accepted for delivery (directed exchange is a relationship, so a squatter
   cannot take over a conversation once its peer's sessions end), an out-of-band pin (invite, Legacy
-  Import route), or an in-force grant (MMP §6.6.9: a view over the in-force set, never stored, binding
-  only an unbound nodeId, and ending with the grant) — and never replaces it: a different key, from any source or
-  while a session holds the nodeId, is a recorded conflict an operator resolves (a session
-  proving it is closed with error 1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one,
-  earns nothing; nothing is evicted before it expires; a `proven` binding that verified nothing
-  expires after 30 days unseen. This node's own nodeId is always its own key. Keys pinned before
+  Import route), or an in-force grant (MMP §6.6.9 as narrowed in 0.14.3: only an unscoped grant whose
+  chain is the anchor and `admin` grants; a view over the in-force set, never stored, binding only a
+  nodeId nothing else binds, and ending with the grant: a session proving the key it names stores
+  nothing, and a session proving another key is admitted on its own proof with the conflict recorded,
+  never refused) — and never replaces it: a different key, from any source or while a session holds
+  the nodeId, is a recorded conflict an operator resolves (a session proving it is closed with error
+  1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one, earns nothing; nothing is evicted
+  before it expires; a `proven` binding that is new (it verified nothing, or only within one day)
+  expires after 30 days unseen, and new bindings hold at most a quarter of the registry; one that
+  verified records on occasions a day or more apart expires after 180 days unseen. A scoped grant
+  binds no key: it confers its role inside its scope only. This node's own nodeId is always its own key. Keys pinned before
   0.14 — from unproven hellos, or from 0.13 grants never checked against their grantors — become
   `legacy-claim`: expected, never trusted to verify, so a squatter racing the upgrade cannot take
   an honest node's id.
@@ -118,9 +123,16 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   must be of prime order too. Tested with the published vectors (ed25519-strict-v2.json) and, at each
   of those sites, with two signatures Node's `crypto.verify` accepts and the rule rejects (the
   identity key's universal forgery, and R = identity with S = k·a).
-- **A forgery in a session's own name ends the session.** A statement that names the session's own
-  peer as its signer and does not verify under the key that session proved closes it, and its
-  nodeId is not admitted again for 60 s. A statement the session relays for another signer is
+- **A forgery in a session's own name ends the session — when the whole statement travelled sealed.**
+  An attestation, checkpoint or witness (sealed whole in `control-encrypted`) that names the session's
+  own peer as its signer and does not verify under the key that session proved closes it, and its
+  nodeId is not admitted again for 60 s. A RECORD is never charged this way (0.14.3): in `cmb-encrypted`
+  its signature, `createdBy`, `createdTimestamp`, lineage and application descriptor travel in clear,
+  outside the AEAD, so a relay or an on-path writer could break them on an honest record. The
+  receiver checks the AAD-bound assertionId first (§8.8.5) and drops and counts a record whose
+  assertionId or signature fails (`cmb-clear-metadata-altered`, `cmb-signature-unattributable`). A
+  verification lane also spends a record's size (1 MiB/s, burst 4 MiB), and the SVAF lane its size too
+  (128 KiB/s, burst 1.5 MiB). A statement the session relays for another signer is
   verified under this node's binding for that signer, which may differ from the relayer's (a local
   view); one that fails is dropped and counted (`relayed-signature-unverified`), and the relayer is
   not charged. Not charging it does not make forgeries free: each session's records spend a

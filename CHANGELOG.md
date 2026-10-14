@@ -106,6 +106,73 @@ or expose a key and the small ones beside them. The wire and the public surface 
 - A pinned start leaves another agent's 0.13 directory (same name, different nodeId) unmigrated, as above; with
   `SYM_IDENTITY_DIR` set and that identity in the node directory it halts with the instructions given for that case.
 
+### Security
+
+An independent security review (R2) of the 0.14 core reproduced each finding below; each fix has a test in
+`tests/security-0.14.3*.test.js` that fails on 0.14.3's base (632b95d) and passes here.
+
+- **A grant binds a key only when it is mesh-wide and rooted in the anchor through admins (R2-1, high).** Any holder
+  of a delegating grant, even one scoped to one world, could bind any unbound nodeId to its own key at every node
+  holding the grant; the victim's own session was then refused as an identity conflict, and once the squatter
+  connected the binding was stored `proven` and outlived the revoke. Now only an unscoped grant whose chain is the
+  anchor and `admin` grants is a key-binding source; the grant view binds only a nodeId nothing else binds, so a
+  session proving another key is admitted on its own proof and the conflict recorded (never refused); a session
+  proving the key the grant names stores nothing (never promoted to `proven`), so a revoke removes what the grant
+  bound. This narrows MMP §6.6.9 (a spec erratum is proposed).
+- **A relay can no longer get an honest peer closed and banned as a forger (R2-2, high).** The `cmb-encrypted` AAD
+  binds the key, assertionId, author nodeId, room and to; the signature, `createdBy`, `createdTimestamp`, lineage
+  and the application descriptor travel in clear. The receiver now recomputes the AAD-bound assertionId before the
+  signature (§8.8.5 order): a mismatch is altered clear metadata, dropped and counted (`cmb-clear-metadata-altered`).
+  A bad record signature is never a penalty (the signature is outside the AEAD): dropped and counted
+  (`cmb-signature-unattributable`); one relayed in another's name keeps the relayed path. The forgery penalty stays
+  for attestations, checkpoints and witnesses, which travel wholly sealed.
+- **One admitted peer can no longer buy CPU, memory or disk without bound (R2-3, high).** The per-session
+  verification and record budgets are also charged by size (1 MiB/s burst 4 MiB before verification, 128 KiB/s
+  burst 1.5 MiB before SVAF); the SVAF kernel reads at most 16 KiB of a text; the local-state context reads at most
+  2 KiB of an entry and 16 KiB in all, and is re-encoded at most once a second; the store's entry cache is an LRU
+  (2,048 entries, 32 M characters). The review's 24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now.
+- Gossip signature checks are bounded whatever the number of sessions: every new attestation, checkpoint, witness or
+  authority statement takes one global token before verification, through the sending peer's fair share. The ceiling
+  after verification is gone (R2-4).
+- LAN client-hellos are rate-limited before any crypto: a token bucket per remote host (8/s, burst 32) and one over
+  all hosts (64/s, burst 256). A hello past either is closed unanswered (R2-5).
+- Actionable delivery is de-duplicated by assertion identity (§8.8.2, R2-6): two room records with the same
+  categories and different signed application sections are both delivered, and one memory de-duplicates is still
+  delivered (`remixed: false`); a replay of either is not. An actionable room record signed more than 30 days ago is
+  refused as stale (its delivery mark is kept that long).
+- Equivocation evidence and this node's own-witness memory are never evicted. When full, new attesters are refused
+  or not witnessed, and that is counted (R2-7).
+- `aggregateAttestations` weighs only attestations naming the held record's `assertionId`, or `opts.assertionId`. The
+  result carries `assertionId` (R2-8).
+- Earned key bindings age out (R2-9): a new one (everything it verified fell within a day) after 30 days unseen, and
+  new bindings hold at most a quarter of the registry; an established one after 180 days unseen. One directed record
+  from a fresh identity used to earn a binding that never expired.
+- A gated room now admits its grant-holders over a relay: a sealed frame goes to any confirmed session for its relay
+  `from`, so the room-join reaches the door, which still decides (R2-11).
+- Public `verifyCMB` (`@sym-bot/sym/core`) checks the record's own bytes: a member the signature does not cover, or a
+  wrong assertionId (checked before the signature), makes a record invalid. The result names the signing `suite` and
+  says `coreSecure`, and a valid v2.0 record comes with its frozen signed projection (`record`). A 0.13-suite record
+  whose sections carry an application, a node id or anything else 0.13 never minted is invalid. A genuine 0.13 record
+  stays valid unless the caller passes `{ coreSecure: true }` (R2-12). See docs/reference.md.
+- One signature verifies one string: a signed string with a lone surrogate is refused, and createCMB mints such text
+  as U+FFFD (R2-13).
+- Keys and signatures are accepted only in canonical unpadded base64url, one spelling each, in the strict verifier,
+  the record projection, the key registry, room-join grants, handshake proofs and attestations (R2-14).
+- A checkpoint that does not link to the chain held, next to a held checkpoint, is refused as `malformed-link` and is
+  never stored or witnessed (R2-15).
+- A second attestation at a held (attester, seq) is refused and kept as fork evidence, never a replacement (R2-16).
+- An honest witness of an equivocator's other checkpoint is not muted, and a mute is lifted once the attester's
+  equivocation is known (R2-17).
+- Peer-chosen text no longer reaches a log line or the terminal as given: control characters, line separators and
+  bidi overrides are written as escapes in every node log line, in mesh-agent output and in `sym listen` /
+  `sym peers` (R2-18).
+- The Bonjour reconnect cache is bounded: at most 512 entries, only advertisements the node dials, the least recently
+  announced dropped first (R2-20).
+- An invite parse error no longer repeats the URL, which can carry a relay token (R2-21).
+- The delivery ledger is pruned (R2-22): each mark carries its expiry (a directed one the replay window past its
+  signed time, others 30 days), expired marks drop at load, the file is rewritten when it doubles, and past 200,000
+  marks the author holding the most loses its oldest. A 0.14.2 ledger is read and rewritten with expiries.
+
 ### Tests
 
 - `tests/identity-migration-by-id.test.js`: 51 tests (50 run on macOS; one real cross-filesystem test runs on Linux).
