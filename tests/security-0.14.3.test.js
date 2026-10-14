@@ -152,3 +152,154 @@ describe('R2-2: a record whose signed bytes the AEAD did not authenticate is dro
     });
   }
 });
+
+describe('R2-6: actionable delivery is de-duplicated by assertion identity (§8.8.2)', () => {
+  const { settle } = require('./_settle');
+  const appOf = (m) => (m.record && m.record.metadata.application ? Buffer.from(m.record.metadata.application.data, 'base64url').toString() : 'none');
+
+  it('R2-6: two actionable room records with the same categories are both delivered; a replay of either is not', async () => {
+    try {
+      const node = mk('r26');
+      if (typeof node._store.load === 'function') await node._store.load();
+      const mallory = identity('mallory'); const alice = identity('alice');
+      const sm = admitAs(node, mallory); const sa = admitAs(node, alice);
+      const cats = { focus: 'release 0.14.3 approved', intent: 'deploy' };
+      const front = signedRecord(mallory, { categories: cats, room: 'sec', application: applicationFor(Buffer.from('{"deploy":"mallory-build"}')) });
+      const real = signedRecord(alice, { categories: cats, room: 'sec', application: applicationFor(Buffer.from('{"deploy":"official-build"}')) });
+      deliver(node, sm, { type: 'cmb', cmb: front }); await settle(100);
+      deliver(node, sa, { type: 'cmb', cmb: real }); await settle(100);
+      const job1 = signedRecord(alice, { categories: { focus: 'run job', intent: 'act' }, room: 'sec', application: applicationFor(Buffer.from('{"job":1}')) });
+      const job2 = signedRecord(alice, { categories: { focus: 'run job', intent: 'act' }, room: 'sec', application: applicationFor(Buffer.from('{"job":2}')) });
+      deliver(node, sa, { type: 'cmb', cmb: job1 }); await settle(100);
+      deliver(node, sa, { type: 'cmb', cmb: job2 }); await settle(100);
+      // Replays of each, by the author and by a relay.
+      for (const r of [front, real, job1, job2]) { deliver(node, sa, { type: 'cmb', cmb: JSON.parse(JSON.stringify(r)) }); await settle(30); }
+      const got = node.inbox({ peek: true }).messages.map((m) => `${m.from}:${appOf(m)}`);
+      assert.deepStrictEqual(got.sort(), ['alice:{"deploy":"official-build"}', 'alice:{"job":1}', 'alice:{"job":2}', 'mallory:{"deploy":"mallory-build"}'].sort());
+    } finally { await stopAll(); }
+  });
+});
+
+describe('R2-3: one admitted peer cannot buy CPU, memory or disk without bound', () => {
+  const { settle } = require('./_settle');
+  const { FrameHandler } = require('../lib/frame-handler');
+  const big = (n, seed) => { let t = ''; let j = 0; while (t.length < n) t += `deploy pipeline status report build ${seed}_${j++} `; return t.slice(0, n); };
+
+  it('R2-3: the record and verification budgets are charged by size: two of the largest records pass, a third waits', () => {
+    const fh = new FrameHandler({ _log: () => {} }, {});
+    const session = {};
+    const largest = 720 * 1024;
+    const r = [0, 1, 2].map(() => fh._recordBudget(session, largest));
+    assert.deepStrictEqual(r, [true, true, false], 'the record lane spends the size');
+    const small = {};
+    for (let i = 0; i < 32; i++) assert.strictEqual(fh._recordBudget(small, 2048), true, 'small records are counted by number as before');
+    const v = {};
+    let passed = 0;
+    for (let i = 0; i < 12; i++) if (fh._verifyBudget(v, 400 * 1024)) passed++;
+    assert.ok(passed >= 8 && passed <= 11, `the verification lane spends the size too (${passed} of 12 passed)`);
+  });
+
+  it('R2-3: a burst of large records from one peer: only what its size budget holds reaches SVAF', async () => {
+    try {
+      const node = mk('r23-flood');
+      if (typeof node._store.load === 'function') await node._store.load();
+      const mallory = identity('mallory');
+      const s = admitAs(node, mallory);
+      const over = []; node.on('metric', (m) => { if (m.type === 'cmb-over-budget' || m.type === 'cmb-over-verify-budget') over.push(m.type); });
+      let evaluated = 0;
+      const admit = node._frameHandler._admit;
+      node._frameHandler._admit = (...a) => { evaluated++; return admit(...a); };
+      for (let i = 0; i < 12; i++) {
+        const rec = signedRecord(mallory, { categories: { focus: big(200000, `f${i}`), issue: big(200000, `i${i}`) }, room: 'sec' });
+        deliver(node, s, { type: 'cmb', cmb: rec });
+      }
+      await settle(300);
+      assert.ok(evaluated <= 4, `at most what 1.5 MiB holds was evaluated (${evaluated})`);
+      assert.ok(over.length >= 8, 'the rest was dropped and counted');
+    } finally { await stopAll(); }
+  });
+
+  it('R2-3: the local-state context reads a bounded amount of each entry and in all', async () => {
+    try {
+      const node = mk('r23-context');
+      if (typeof node._store.load === 'function') await node._store.load();
+      node._store.allEntries = () => Array.from({ length: 20 }, (_, i) => ({ content: big(300000, `e${i}`) }));
+      const ctx = node._buildContext();
+      assert.ok(ctx.length <= 16 * 1024 + 64, `the context is bounded (${ctx.length} characters)`);
+      assert.ok(ctx.length > 4096, 'and still reads several entries');
+    } finally { await stopAll(); }
+  });
+
+  it('R2-3: the local state is re-encoded at most once a second, whatever the admits', async () => {
+    const calls = [];
+    const node = { _buildContext: () => 'context', _meshNode: { updateLocalState: () => calls.push(Date.now()) }, _log: () => {} };
+    const fh = new FrameHandler(node, {});
+    for (let i = 0; i < 50; i++) fh._reencodeLocalStateAfterAdmit();
+    assert.strictEqual(calls.length, 1, 'the first admit re-encodes at once; the rest share one trailing re-encode');
+    await until(() => calls.length >= 2, 2500);
+    assert.strictEqual(calls.length, 2, 'one trailing re-encode, so the last admit is reflected');
+  });
+
+  it('R2-3: the SVAF kernel reads at most SVAF_TEXT_MAX characters of one text', async () => {
+    const enc = require('../lib/core/context-encoder');
+    const text = big(300000, 'svaf');
+    const head = text.slice(0, 16 * 1024);
+    const a = await enc.svafKernel().encode(text);
+    const b = await enc.svafKernel().encode(head);
+    assert.deepStrictEqual(a.h1, b.h1, 'a text longer than the cap encodes as its first SVAF_TEXT_MAX characters');
+  });
+
+  it('R2-3: the store\'s entry cache is bounded, by count and by text', async () => {
+    try {
+      const node = mk('r23-cache');
+      if (typeof node._store.load === 'function') await node._store.load();
+      const cache = node._store._cache;
+      for (let i = 0; i < 3000; i++) cache.set(`cmb-${String(i).padStart(64, '0')}`, { key: `k${i}`, content: 'x' });
+      assert.ok(cache.size <= 2048, `bounded by count (${cache.size})`);
+      for (let i = 0; i < 40; i++) cache.set(`big-${i}`, { key: `b${i}`, content: big(1024 * 1024, `c${i}`) });
+      let chars = 0; for (const [, e] of cache) chars += (e.content || '').length;
+      assert.ok(chars <= 32 * 1024 * 1024 + 1024 * 1024, `bounded by text (${chars} characters)`);
+      assert.ok(cache.has('big-39'), 'the most recent is kept');
+    } finally { await stopAll(); }
+  });
+});
+
+describe('R2-22: the delivery ledger is pruned', () => {
+  const { FrameHandler } = require('../lib/frame-handler');
+  const path = require('path');
+  const os = require('os');
+
+  it('R2-22: each mark carries its expiry; expired marks are dropped at load and the file is rewritten', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-ledger-'));
+    try {
+      const file = path.join(dir, '.delivered-marks');
+      const now = Date.now();
+      fs.writeFileSync(file, [
+        'a|cmb-old-format-line',                        // a 0.14.2 line: protects from now on
+        `a|cmb-expired\t${now - 1000}`,
+        `a|cmb-live#asrt-x\t${now + 3600_000}`,
+      ].join('\n') + '\n');
+      const fh = new FrameHandler({ _log: () => {}, _store: { _dir: dir } }, {});
+      assert.deepStrictEqual([...fh._ledger.keys()].sort(), ['a|cmb-live#asrt-x', 'a|cmb-old-format-line']);
+      const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+      assert.strictEqual(lines.length, 2, 'the file holds what is kept');
+      assert.ok(lines.every((l) => /\t\d+$/.test(l)), 'each with its expiry');
+      // A directed mark lasts the replay window past its signed time; any other LEDGER_TTL_MS.
+      const msg = { _cmbVerified: true, _verifiedAuthorNodeId: 'b', _directedToMe: true, cmb: { metadata: { createdTimestamp: now } } };
+      fh._markCmbSurfaced('cmb-d#asrt-d', msg);
+      const at = fh._ledger.get('b|cmb-d#asrt-d');
+      assert.ok(at > now + 24 * 3600_000 && at < now + 26 * 3600_000, 'a directed mark ends with its replay window');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('R2-22: the ledger is bounded, and one author\'s flood pushes out only its own marks', () => {
+    const fh = new FrameHandler({ _log: () => {} }, {});
+    fh._ledgerPath = null;
+    const as = (author) => ({ _cmbVerified: true, _verifiedAuthorNodeId: author });
+    for (let i = 0; i < 10; i++) fh._markCmbSurfaced(`cmb-alice-${i}`, as('alice'));
+    for (let i = 0; i < 200_100; i++) fh._markCmbSurfaced(`cmb-m-${i}`, as('mallory'));
+    assert.ok(fh._ledger.size <= 200_000, `bounded (${fh._ledger.size})`);
+    for (let i = 0; i < 10; i++) assert.ok(fh._ledger.has(`alice|cmb-alice-${i}`), 'another author\'s marks are kept');
+    assert.ok(fh._ledger.has('mallory|cmb-m-200099'), 'the flooder keeps its newest');
+  });
+});
