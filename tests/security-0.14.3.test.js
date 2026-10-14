@@ -7,7 +7,8 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
  * The 0.14.3 security review (R2): each finding fixed here as a regression test that fails on the
  * 0.14.3 base (632b95d) for its own reason.
  *
- *   R2-1   a delegating grant, even a scoped one, bound any unbound nodeId to its holder's key
+ *   R2-1   a delegating grant, even a scoped one, bound any unbound nodeId to its holder's key (the
+ *          precedence of the certification that remains: security-0.14.3-cert.test.js)
  *   R2-2   a relay editing a sealed record's clear metadata got an honest peer banned as a forger
  *   R2-3   one admitted peer's large records cost CPU, memory and disk without bound
  *   R2-6   actionable room records were de-duplicated by cognition key, not assertion identity
@@ -85,18 +86,20 @@ describe('R2-1: a grant binds a key only when it is unscoped and its chain is th
     } finally { await stopAll(); }
   });
 
-  it('R2-1: a grant view never refuses a proving session: the session is admitted and the conflict recorded', async () => {
+  // Changed by the certification design (0.14.3): an anchor certification outranks a session's proof,
+  // so a session proving another key is refused (security-0.14.3-cert.test.js has the rest).
+  it('R2-1: an anchor certification refuses a session proving another key: refused, and the conflict recorded', async () => {
     try {
       const R = mk('r21-norefuse', { anchor: PIN });
       const V = mk('r21-victim2', { anchor: PIN });
       const evil = identity('evil');
       const g = sign('anchor', anchor, { kind: 'grant', subject: { nodeId: V.nodeId, key: evil.publicKey }, role: 'participant' });
       assert.strictEqual(R.submitAuthority(g).status, 'in-force');
-      assert.strictEqual(R._identityKey(V.nodeId), evil.publicKey, 'the scene: the view names another key');
-      await connectNodes(V, R, { timeoutMs: 3000 });
-      assert.ok(R._peers.has(V.nodeId), 'admitted on its own proof');
-      assert.strictEqual(R._identityKey(V.nodeId), V._identity.publicKey, 'its proven key verifies, not the view\'s');
-      assert.ok(R._roster.conflicts().some((c) => c.nodeId === V.nodeId && c.hadSource === 'grant' && c.got === V._identity.publicKey), 'the disagreement is recorded');
+      assert.strictEqual(R._identityKey(V.nodeId), evil.publicKey, 'the scene: the anchor certifies another key');
+      await assert.rejects(connectNodes(V, R, { timeoutMs: 1500 }), /did not confirm/);
+      assert.ok(!R._peers.has(V.nodeId), 'the certification decides which key is the nodeId\'s');
+      assert.strictEqual(R._identityKey(V.nodeId), evil.publicKey);
+      assert.ok(R._roster.conflicts().some((c) => c.nodeId === V.nodeId && c.hadSource === 'grant' && c.got === V._identity.publicKey), 'the conflict is recorded');
     } finally { await stopAll(); }
   });
 

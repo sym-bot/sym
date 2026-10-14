@@ -40,22 +40,37 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   session's room (a node's store is per node, not per room), whatever path offered it (a broadcast,
   an anchor replay, a fetch answer, a queued frame), so its content is never disclosed to a peer that
   would refuse it.
-- **One key per nodeId.** Every confirmed session runs with a binding: the key it proved, held for
-  that nodeId while the session lives. The durable key registry binds a nodeId only when the
-  binding is earned — an admitted verified record, a verified record its author signed to this
-  node and this node accepted for delivery (directed exchange is a relationship, so a squatter
-  cannot take over a conversation once its peer's sessions end), an out-of-band pin (invite, Legacy
-  Import route), or an in-force grant (MMP §6.6.9 as narrowed in 0.14.3: only an unscoped grant whose
-  chain is the anchor and `admin` grants; a view over the in-force set, never stored, binding only a
-  nodeId nothing else binds, and ending with the grant: a session proving the key it names stores
-  nothing, and a session proving another key is admitted on its own proof with the conflict recorded,
-  never refused) — and never replaces it: a different key, from any source or while a session holds
-  the nodeId, is a recorded conflict an operator resolves (a session proving it is closed with error
-  1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one, earns nothing; nothing is evicted
+- **One key per nodeId.** A nodeId is self-chosen, so "nodeId X has key K" is a statement some
+  source makes, and one precedence decides which key verifies (0.14.3): the anchor pin and this
+  node's own key, then an out-of-band pin the operator accepted (invite, Legacy Import route, `sym
+  keys resolve`), then an anchor certification, then trust on first proven use, then a legacy
+  claim. Every confirmed session runs with a binding: the key it proved, held for that nodeId while
+  the session lives. The durable key registry binds a nodeId only when the binding is earned — an
+  admitted verified record, a verified record its author signed to this node and this node accepted
+  for delivery (directed exchange is a relationship, so a squatter cannot take over a conversation
+  once its peer's sessions end), or an out-of-band pin. An ANCHOR CERTIFICATION is an in-force grant
+  that is unscoped and whose whole chain is unscoped `admin` grants up to the anchor (MMP §6.6.9 as
+  narrowed in 0.14.3); only the identity authority says which key is a nodeId's, a session proves only
+  that its peer holds some key. It is a view over the in-force set, never stored. While it certifies
+  X -> K1, a session proving X with another key is refused (a live one is closed), nothing verifies
+  as X but under K1, and a stored binding of another key is superseded: kept on disk, recorded, never
+  used to verify. A session proving K1 stores nothing, so a revoke removes what the certification
+  bound: a nodeId nothing else binds is unbound again, while a superseded binding stays conflicted
+  (it verifies nothing and every session for X is refused) until the operator resolves it or a pin or
+  a new certification settles it. A pin outranks a certification (the conflict is recorded);
+  certifications naming two keys for one nodeId certify neither. Otherwise a binding is never
+  replaced: a different key, from any source or while a session holds the nodeId, is a recorded
+  conflict an operator resolves (a session proving it is closed with error 1009
+  `IDENTITY_CONFLICT`, sealed), and an invite never repoints a stored binding the authority has not
+  superseded. The consequence for operators: an anchor or admin that certifies the wrong key for a
+  nodeId locks the real holder out at every node holding the grant until it is revoked and the
+  conflict resolved. A handshake, or a second one, earns nothing; nothing is evicted
   before it expires; a `proven` binding that is new (it verified nothing, or only within one day)
   expires after 30 days unseen, and new bindings hold at most a quarter of the registry; one that
-  verified records on occasions a day or more apart expires after 180 days unseen. A scoped grant
-  binds no key: it confers its role inside its scope only. This node's own nodeId is always its own key. Keys pinned before
+  verified records on occasions a day or more apart expires after 180 days unseen; a superseded
+  binding never expires and is outside that quarter. A scoped grant, or one under an issuer or a
+  validator, binds no key: it confers its role inside its scope only, and a grant gives its role only
+  to what verifies under its subject key. This node's own nodeId is always its own key. Keys pinned before
   0.14 — from unproven hellos, or from 0.13 grants never checked against their grantors — become
   `legacy-claim`: expected, never trusted to verify, so a squatter racing the upgrade cannot take
   an honest node's id.

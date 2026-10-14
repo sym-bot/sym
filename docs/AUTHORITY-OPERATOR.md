@@ -53,6 +53,15 @@ anyNode.submitAuthority(whole);                           // then it spreads by 
 An admin grants and revokes below itself the same way (`node.grant`, `node.revoke`). Delegation is
 at most 4 links from the anchor; a scoped grant can only narrow its parent's scope.
 
+**An unscoped grant from the anchor, or under a chain of unscoped admins, also certifies its key**
+for that nodeId at every node holding it (sym 0.14.3). While it is in force, a session proving another
+key for that nodeId is refused (1009 `IDENTITY_CONFLICT`), nothing verifies as that nodeId but under the
+certified key, and a binding of another key a node had stored is set aside (superseded) and recorded;
+once the grant goes, that binding stays conflicted, and the nodeId is refused, until `sym keys resolve`.
+A pin the operator accepted (an invite, `sym keys resolve`) outranks a certification. So name the key
+the node really holds: `grantRole` takes it from a proven session, a pin or a certification. A scoped
+grant, or one under an issuer or a validator, certifies nothing: it confers its role in its scope.
+
 ## 3. Re-pin
 
 Change the pin on every node and restart it. Nothing is deleted: statements are kept in one file

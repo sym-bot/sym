@@ -302,7 +302,9 @@ describe('§6.6.8: the frames, their bounds and pacing', () => {
 });
 
 describe('§6.6.9 and §6.6.10 on a node', () => {
-  it('an in-force grant is a binding source; a conflicting one leaves the binding as it was; one naming this node with a foreign key confers nothing and is reported', async () => {
+  // Changed in 0.14.3 (the certification design): an anchor certification outranks a proven binding, so
+  // the conflicting grant supersedes it rather than leaving it as it was.
+  it('an in-force grant is a binding source; a conflicting certification supersedes a proven binding; one naming this node with a foreign key confers nothing and is reported', async () => {
     try {
       const N = node('auth-view');
       const p = party(); const q = party(); const qOther = party();
@@ -314,8 +316,10 @@ describe('§6.6.9 and §6.6.10 on a node', () => {
       const foreign = grant('anchor', { nodeId: N.nodeId, key: qOther.key }, 'admin');
       N.submitAuthority(foreign);
       assert.strictEqual(N._identityKey(p.nodeId), p.key, 'the grant taught the key');
-      assert.strictEqual(N._identityKey(q.nodeId), q.key, 'a proven binding stays');
-      assert.strictEqual(N.resolveRole(q.nodeId), 'participant', 'roles follow the key the node is bound to');
+      assert.strictEqual(N._identityKey(q.nodeId), qOther.key, 'the certification supersedes the proven binding');
+      assert.deepStrictEqual(N._roster.superseded(q.nodeId), { key: q.key, by: qOther.key }, 'kept, set aside');
+      assert.strictEqual(N.resolveRole(q.nodeId), 'admin', 'roles follow the key the node is bound to');
+      assert.strictEqual(N.resolveRole(q.nodeId, { key: q.key }), 'participant', 'and give nothing to the superseded key');
       assert.strictEqual(N.resolveRole(N.nodeId), 'participant', 'a grant to this nodeId with a foreign key confers nothing');
       assert.ok(metrics.some((m) => m.type === 'authority-foreign-self-key' && m.id === sid(foreign)));
     } finally { await stopAll(); }
