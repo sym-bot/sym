@@ -183,7 +183,11 @@ is unchanged except where a line says so.
   closes, or a relay session ends while the connection stays up, the records the node dispatched that
   its pacer still holds come back to the node and are held for that peer, for the identity key they
   were sealed to. The next session proving that key (relay or LAN) is offered them, sealed afresh,
-  oldest first, at most 4 MiB or 512 of them waiting in its pacer at once. A record counts as written
+  oldest first, at most 4 MiB or 512 of them waiting in its pacer at once and only while the pacer has
+  half of each of its bounds to spare (a sealed frame the pacer refuses ends the session); a pass the
+  pacer's room stopped tries again by itself. A relay client session still waiting to supersede is
+  offered them once it does. A session that sent its peer the sealed 1010 keeps what was queued
+  before it (the notice continues their sequence, and the peer can still open them). A record counts as written
   when the socket's write callback says so, not when ws took it. Until then it is reported as not
   delivered: `node.pendingDeliveries()` lists it, `status().pendingDeliveries` counts it, and metrics
   say each step (`cmb-requeued`, `cmb-redelivered`, and `cmb-undelivered` with reason
@@ -205,8 +209,9 @@ is unchanged except where a line says so.
   retry is after 1 min, doubling to 30 min. Each close is logged (`IDENTITY CLOSE: …`) and shown in
   `relayStatus`. Three identity closes inside 30 min are a ping-pong — two live processes holding
   this identity and replacing each other — said as that (`PING-PONG: … Stop one of them.`), told to
-  the host and retried only every 30 min. `identity-collision` fires at the first close of an episode
-  and again at a ping-pong, now with `pingPong` and `retryInMs`; a single close proves no second
+  the host and retried only every 30 min, until a connection stays up 70 min (the other process has
+  gone). `identity-collision` fires at the first close in 30 min and when a ping-pong is found, now
+  with `pingPong` and `retryInMs`; a single close proves no second
   process, so a host that exits on it should exit on `pingPong` instead. The metric is
   `relay-identity-close` (was `relay-hard-stop`). `relayState.stopped` holds the last identity close
   until an auth succeeds. **This departs from MMP §4.4.7** ("MUST NOT automatically reconnect" after
