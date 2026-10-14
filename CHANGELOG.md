@@ -437,16 +437,32 @@ is unchanged except where a line says so (relay-auth key proof is the one change
 
 #### Tests
 
-- `tests/node-lifecycle.test.js` (8), `tests/relay-redelivery.test.js` (5), `tests/relay-resilience.test.js` (10),
+- `tests/node-lifecycle.test.js` (8), `tests/relay-redelivery.test.js` (5), `tests/relay-resilience.test.js` (6),
   `tests/ipc-utf8.test.js` (3), `tests/daemon-long-socket-path.test.js` (1), `tests/frame-parser-linear.test.js` (2),
-  `tests/socket-identity.test.js` (2): 31 tests, of which 30 fail on 0.14.2 (run on a `git archive` of 632b95d) and
-  one pins parsing that did not change. A few of the 30 fail there only because what they check is new (the
-  held-record list, `identityRetry: false`, `stampSocket`, the line reader); the rest fail on the behaviour R3
-  reported. They pass on macOS (Node 22) and on Linux in `node:22-slim` and `node:20-slim`. The relay runs R3 made
-  were repeated against sym-relay 0.5.2 and the current `origin/main` (0.7.0) on localhost: the oversized-envelope
-  and padded-roster attacks no longer close the victim's connection on 0.5.2 (the current relay already bounds
-  both), and a member evicted by a spoofed 4004 is back on either relay after its retry.
-- `tests/relay-state.test.js`: the 4004 and 4006 cases now pin the long-backoff retry.
+  `tests/socket-identity.test.js` (2): 27 tests, of which 26 fail on 0.14.2 (run on a `git archive` of 632b95d) and
+  one pins parsing that did not change. A few of the 26 fail there only because what they check is new (the
+  held-record list, `stampSocket`, the line reader); the rest fail on the behaviour R3 reported. The R3-3 retry
+  tests are gone with the retry. The relay runs R3 made were repeated against sym-relay 0.5.2 and 0.7.0 on
+  localhost: the oversized-envelope and padded-roster attacks no longer close the victim's connection on 0.5.2
+  (0.7.0 already bounds both).
+- **Key proof and the relay setting:** `tests/relay-key-proof.test.js` (13) and `tests/relay-url-setting.test.js` (7).
+  Of the 20, 18 fail on the 0.14.3 candidate before this change (a `git archive` of 9f6847c, with
+  `lib/core/relay-auth-proof.js` copied in so the fake relays can verify) and on 0.14.2 (fe285a3). Two pass on
+  both: the shared transcript vector, which tests the copied module, and "no `toKey` to a relay that does not list
+  key-proof", which pins what neither candidate does. `tests/relay-state.test.js` pins 4004 and 4006 as hard stops
+  with their cause and the proof state in `relayStatus` (3 cases that fail on 9f6847c), and node-lifecycle's R3-11
+  case now has a relay setting that is no URL disable the relay rather than throw (it fails on 9f6847c and
+  0.14.2). Suite: 1,667 tests, 1,663 pass, 4 skipped; integration 6/6; the stock-nodes gate passes; `npm audit`
+  0. The new and changed relay test files pass on Linux in `node:22-slim` and `node:20-slim` (68/68).
+- **Across versions, with real processes on 127.0.0.1** (sym-relay `scripts/key-proof-matrix`, 46 checks, all
+  pass): sym-relay 0.8.0 with 0.14.3 nodes verifies both keys, an impostor with another key and a legacy claim of
+  the same nodeId get their own slots and evict or block nothing, A's directed records (`toKey`) reach only the
+  member, and a second process holding the member's key replaces the first, which stops for good with
+  `relayVerifiesKeys: true` and does not flap in the 15 s watched; 0.8.0 with 0.14.2 pairs and with 0.13.17 pairs
+  connects and exchanges records, challenging neither; sym-relay 0.7.0 (live) with 0.14.3 nodes connects at
+  once, reports `relayVerifiesKeys: false` and refuses no fan-out; a room mixing 0.14.3 and 0.14.2 nodes on 0.8.0
+  exchanges records both ways, and rooms stay apart. mesh-channel 0.11.0's `server.js` with an https://, http://
+  and a malformed `SYM_RELAY_URL` exits at once on 9f6847c and stays up on this branch.
 
 ## 0.14.2 — 2026-10-14
 
