@@ -371,7 +371,12 @@ is unchanged except where a line says so (relay-auth key proof is the one change
   whole relay-auth, which a relay before 0.8.0 authenticates as it is: the node connects at once
   (no wait for a challenge that never comes), records `relayVerifiesKeys: false` in
   `relayState` and `relayStatus`, and says once that any token holder can claim its nodeId there.
-  Old clients send no `keyProof` and are never challenged.
+  Old clients send no `keyProof` and are never challenged. A key proof the relay refuses for a reason a
+  retry cannot fix (`relay-error` `kind: key-proof`, `reason` `origin-mismatch`, `invalid` or
+  `no-challenge`, then 4002) is a non-retryable auth refusal: phase `refused` (`refused.kind`
+  `key-proof`, `refused.origin` the origin this node signed for), one loud `FATAL` naming that origin,
+  and the slow cadence (10 min), never a fall-back to unproven auth on a relay that challenged (a
+  downgrade). `reason: rate` comes as 4008 and is retried with the usual backoff.
 - **4004 and 4006 stop the client for good again (MMP §4.4.7), and say why.** A 0.14.3 candidate
   retried them on a long backoff with a ping-pong detector (`relayIdentityRetry`, `pingPong`,
   `retryInMs`, metric `relay-identity-close`): a patch over the unverified identity, which also let

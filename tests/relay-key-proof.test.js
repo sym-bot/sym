@@ -414,3 +414,58 @@ test('ambiguity (receiver): a nodeId present under two proven keys, none bound, 
     assert.equal(node.status().coreSecure.identityAmbiguities.length, 0);
   } finally { await node.stop(); await r.close(); }
 });
+
+/** A relay that challenges, then refuses the proof with relay-error kind key-proof (`reason`) and closes `code`. */
+function refusingRelay(reason, code) {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  const st = { dials: 0, auths: [] };
+  wss.on('connection', (ws) => {
+    st.dials++;
+    ws.on('message', (d) => {
+      const m = JSON.parse(String(d));
+      if (m.type !== 'relay-auth') return;
+      st.auths.push(m);
+      if (!m.proof) { ws.send(JSON.stringify({ type: 'relay-challenge', keyProof: proof.KEY_PROOF, nonce: crypto.randomBytes(32).toString('base64url') })); return; }
+      ws.send(JSON.stringify({ type: 'relay-error', kind: 'key-proof', code, reason, message: `Invalid auth: key proof was made for ws://somewhere, and this relay answers to wss://elsewhere` }));
+      ws.close(code, 'Key proof for another origin');
+    });
+  });
+  return { st, ready: new Promise((r) => wss.once('listening', r)), url: () => `ws://127.0.0.1:${wss.address().port}`,
+    close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
+}
+
+test('an origin-mismatch refusal is not looped on: refused, the origin named, the slow cadence, never a downgrade to unproven auth', async () => {
+  const r = refusingRelay('origin-mismatch', 4002);
+  await r.ready;
+  const refused = [];
+  const c = client(r.url(), identity('om-client'), { onAuthRefused: (i) => refused.push(i), authRefusedRetryMs: 60_000 });
+  try {
+    c.rc.connect();
+    assert.ok(await until(() => c.rc.state().phase === 'refused', 5000), 'refused, not reconnecting');
+    const s = c.rc.state();
+    assert.equal(s.refused.kind, 'key-proof');
+    assert.equal(s.refused.origin, r.url(), 'the origin this node signed for');
+    assert.ok(s.nextRetryAt - Date.now() > 50_000, `the slow cadence (${Math.round((s.nextRetryAt - Date.now()) / 1000)} s), not the 1-30 s backoff`);
+    assert.match(c.rc.describe(), /key proof was not accepted .*signed for ws:\/\/127\.0\.0\.1:\d+.*Not falling back to unproven auth/);
+    assert.equal(c.logs.filter((l) => /^FATAL: .*key proof \(origin-mismatch\)/.test(l)).length, 1, 'said once, loudly');
+    assert.match(c.logs.find((l) => /^FATAL/.test(l)), /signed for the origin ws:\/\/127\.0\.0\.1:\d+, which the relay does not answer to/);
+    await wait(1500);
+    assert.equal(r.st.dials, 1, 'no fast redial');
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0].kind, 'key-proof');
+    assert.equal(refused[0].proofReason, 'origin-mismatch');
+    // Every relay-auth it sent asked for the proof: none was a plain unproven auth.
+    assert.ok(r.st.auths.every((a) => a.keyProof === proof.KEY_PROOF), 'never downgraded to unproven auth');
+  } finally { c.stop(); await r.close(); }
+});
+
+test('a rate refusal of a key proof (4008) is an ordinary close, retried with the usual backoff', async () => {
+  const r = refusingRelay('rate', 4008);
+  await r.ready;
+  const c = client(r.url(), identity('rate-client'));
+  try {
+    c.rc.connect();
+    assert.ok(await until(() => r.st.dials >= 2, 5000), 'redialled soon: a rate limit is a retry');
+    assert.notEqual(c.rc.state().phase, 'refused');
+  } finally { c.stop(); await r.close(); }
+});
