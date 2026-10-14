@@ -242,6 +242,64 @@ describe('R1-3: what a 0.13 node kept behind a link is followed and copied', () 
   });
 });
 
+describe('the staged commit: what it checks before the one rename', () => {
+  it('a copy that does not read back as its source is not installed, and the source is untouched', () => {
+    const name = uniq('verify');
+    const id = legacyNode(name);
+    const before = treeOf(path.join(NODES_DIR, name));
+    assert.throws(() => patchFs('copyFileSync', (o) => function (a, b, ...r) {
+      const out = o.call(fs, a, b, ...r);
+      if (String(b).endsWith('c3.json')) fs.appendFileSync(b, ' '); // a copy that came out different
+      return out;
+    }, () => cfg.migrateNodeDir(name)), /does not match/);
+    assert.ok(!exists(cfg.nodeDirById(id.nodeId)), 'nothing installed');
+    assert.deepStrictEqual(treeOf(path.join(NODES_DIR, name)), before, 'the source is untouched');
+    assert.strictEqual(cfg.nodeIdForName(name), null);
+    assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey, 'the next start copies it right');
+  });
+
+  it('a directory inside the 0.13 node that is a relative link is copied as the directory it leads to', () => {
+    const name = uniq('sublink');
+    const id = makeIdentity(name);
+    put(path.join(NODES_DIR, name, 'identity.json'), JSON.stringify(id));
+    put(path.join(NODES_DIR, `${name}-store`, 'x.json'), '{"x":1}');
+    fs.symlinkSync(`../${name}-store`, path.join(NODES_DIR, name, 'cmbs'), 'dir');
+    cfg.loadIdentity({ name });
+    const cmbs = path.join(cfg.nodeDirById(id.nodeId), 'cmbs');
+    assert.ok(!isLink(cmbs) && read(path.join(cmbs, 'x.json')) === '{"x":1}', 'a real directory holding the files');
+  });
+
+  it('a by-id husk whose lock a live process holds is not replaced: EIDENTITYLOCK, nothing changed', async () => {
+    const name = uniq('husk-live');
+    const id = legacyNode(name);
+    const husk = cfg.nodeDirById(id.nodeId);
+    fs.mkdirSync(husk, { recursive: true });
+    put(path.join(husk, 'inbox.json'), '{"seq":99}');
+    const child = spawn(process.execPath, ['-e', `
+      const c = require(${JSON.stringify(path.join(LIB, 'config.js'))});
+      c.acquireIdentityLock('h', { dir: ${JSON.stringify(husk)} }); console.log('held'); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    try {
+      await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('exit', () => reject(new Error('holder exited'))); });
+      assert.throws(() => cfg.loadIdentity({ name }), (e) => e.code === 'EIDENTITYLOCK');
+      assert.strictEqual(read(path.join(husk, 'inbox.json')), '{"seq":99}', 'the husk is where it was');
+      assert.ok(!exists(path.join(husk, 'identity.json')));
+      assert.ok(!isLink(path.join(NODES_DIR, name)), 'the 0.13 directory is where it was');
+    } finally { child.kill('SIGKILL'); await new Promise((r) => child.once('exit', r)); }
+  });
+
+  it('a staging directory of a live process is left alone; one of a process that is gone is cleared', () => {
+    const name = uniq('partials');
+    const id = legacyNode(name);
+    const live = path.join(NODES_DIR, 'by-id', `.${id.nodeId}.partial-${process.ppid}-aaaaaaaa`); // our parent is alive
+    const dead = path.join(NODES_DIR, 'by-id', `.${id.nodeId}.partial-2147483646-bbbbbbbb`);
+    put(path.join(live, 'x'), '1'); put(path.join(dead, 'x'), '1');
+    cfg.loadIdentity({ name });
+    assert.ok(exists(live), 'a live process\'s staging is not touched');
+    assert.ok(!exists(dead), 'a dead one\'s is cleared');
+    fs.rmSync(live, { recursive: true, force: true });
+  });
+});
+
 describe('R1-4: a stale identity lock is removed only if it is still the lock judged stale', () => {
   it('a start that judged a dead holder\'s lock stale does not remove the lock another start took meanwhile', async () => {
     // 632b95d read the lock, judged it stale, unlinked whatever was there, and created its own: with six starters at a
