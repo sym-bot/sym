@@ -398,6 +398,8 @@ is unchanged except where a line says so (relay-auth key proof is the one change
   fan-out entry, so the relay hands it to that slot only; otherwise it goes to every slot of the
   nodeId (sealed end to end, so a slot that cannot open it gains nothing), which is how it reaches
   a bound peer on an older engine. At most 16 slots per nodeId are held (`relayState.slotsIgnored`).
+  `relay-slot-left` (sym-relay 0.8.0: one slot left while the nodeId holds another in the room) removes
+  that slot only; a client before 0.8.0 ignores it, as it must, since it keys presence by nodeId.
 - **The backoff starts over when the relay takes the auth (R3-10)**, in the relay-peers handler, not
   when the socket opens: 1 s, 2 s, 4 s, … 30 s for a relay that keeps closing after the open.
 - **Lines are cut on bytes and decoded whole (R3-7)** (`lib/line-reader.js`): the interior socket and

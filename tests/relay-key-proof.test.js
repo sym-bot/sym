@@ -469,3 +469,25 @@ test('a rate refusal of a key proof (4008) is an ordinary close, retried with th
     assert.notEqual(c.rc.state().phase, 'refused');
   } finally { c.stop(); await r.close(); }
 });
+
+test('relay-slot-left removes one slot only: the nodeId stays present while its preferred slot does', async () => {
+  const P = '01900000-0000-7000-8000-0000000000f9';
+  const k = identity('sl').publicKey;
+  let sock = null;
+  const r = relay({ after: (ws) => { sock = ws; } });
+  await r.ready;
+  const c = client(r.url(), identity('sl-w'), { keyOf: (n) => (n === P ? k : undefined) });
+  try {
+    c.rc.connect();
+    await c.rc.awaitOutcome(5000);
+    sock.send(JSON.stringify({ type: 'relay-peer-joined', nodeId: P, name: 'member', key: k, proven: true }));
+    sock.send(JSON.stringify({ type: 'relay-peer-joined', nodeId: P, name: 'claim' }));
+    assert.ok(await until(() => c.rc.present.get(P) === 'member', 2000));
+    sock.send(JSON.stringify({ type: 'relay-slot-left', nodeId: P, name: 'claim' }));
+    await wait(100);
+    assert.equal(c.gone.length, 0, 'the legacy slot leaving ends nothing');
+    assert.equal(c.rc.present.get(P), 'member');
+    sock.send(JSON.stringify({ type: 'relay-peer-left', nodeId: P, name: 'member', key: k, proven: true }));
+    assert.ok(await until(() => c.gone.length === 1, 2000));
+  } finally { c.stop(); await r.close(); }
+});
