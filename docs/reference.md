@@ -382,6 +382,38 @@ store.get(key).anchorWeight;                              // 0.5
 files. It refuses only a caller that states none. Open a store only while no node holds it. A running node
 keeps its own copy in memory and writes its own files, so a second writer is not coordinated with it.
 
+### Verifying a record read from a store
+
+A record a node delivered was verified before the host heard of it (the `verified-record` event). One read from a
+file was not: `verifyCMB` of `@sym-bot/sym/core` checks it.
+
+```javascript
+const { verifyCMB } = require('@sym-bot/sym/core');
+const v = verifyCMB(entry.cmb, keyBoundFor(entry.cmb.metadata.createdByNodeId), { coreSecure: true });
+if (v.valid) act(v.record);   // the signed projection, frozen: nothing the signature does not cover
+```
+
+Since 0.14.3 it is the whole of MMP §8.8.5's checks on the record's own bytes (the audience and whose key it is are
+the caller's): any member the signature does not cover makes a record invalid (`unsigned-member`), and a wrong
+`assertionId` does too (`assertion-id-mismatch`, checked before the signature). The result names the suite that
+signed it: `suite: 'mmp-sig-v2.0'` with `coreSecure: true` for a valid Core Secure record, or `suite: 'mmp-sig-v2'`
+with `coreSecure: false` for a record a 0.13 node minted. The 0.13 suite does not sign the author's node id or an
+application section, so a 0.13 record carrying either is invalid; a genuine one is still `valid: true` by default,
+so a store of 0.13 history keeps reading as it did. What a 0.13 node kept beside a record's two sections
+(`payload`, `provenance`, `tether`, `admission`) was never signed: it is not judged, and not to be trusted. Pass `{ coreSecure: true }` wherever the result decides
+anything (a lifecycle change, an action): it refuses every record that is not v2.0 (`not-core-secure`).
+
+| `error` | Meaning |
+|---|---|
+| `unsigned-member` | the record carries a member its signature does not cover (`detail` names it) |
+| `malformed-record` | it is not a well-formed v2.0 record: a type, a bound, NFC or well-formed Unicode (`detail`) |
+| `assertion-id-mismatch` | its `assertionId` is not the hash of its signed preimage |
+| `bad-signature` | the signature does not verify under the key given |
+| `content-mismatch` | a category key or the record's address is not that of its text |
+| `not-core-secure` | `{ coreSecure: true }` was asked and the record is under the 0.13 suite |
+| `unknown-signature-suite` | it names a suite this release does not know |
+| `cannot-verify: …` | no readable container, or one still encrypted: could not check, which is not forged |
+
 ### Host options of `SymNode`
 
 | Option | Default | Notes |

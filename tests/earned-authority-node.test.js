@@ -27,8 +27,10 @@ function kp() {
     pub: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'),
   };
 }
+/** The assertion the attestations below name (an aggregate weighs one assertion, never a cognition key: R2-8). */
+const AGG_ASSERTION = `asrt-${'a'.repeat(64)}`;
 function att(by, role, verdict, categories, priv) {
-  const a = { of: 'cmb-agg', by, at: Date.now(), roster: 'g', method: 'heuristic', verdict, categories, role, seq: 1, prev: null };
+  const a = { of: 'cmb-agg', assertionId: AGG_ASSERTION, by, at: Date.now(), roster: 'g', method: 'heuristic', verdict, categories, role, seq: 1, prev: null };
   return signAttestation(a, priv);
 }
 const uniq = (b) => `${b}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -176,7 +178,7 @@ describe('aggregateAttestations: weights judged against the in-force set when ap
       node._attestations.record(att(O.nodeId, 'anchor', 'rejected', { focus: 'reject' }, O.priv));
       node._attestations.record(att(U.nodeId, 'participant', 'aligned', { focus: 'admit' }, U.priv));
 
-      const agg = node.aggregateAttestations('cmb-agg');
+      const agg = node.aggregateAttestations('cmb-agg', { assertionId: AGG_ASSERTION });
       assert.strictEqual(agg.total, 4);
       assert.strictEqual(agg.weight, 8, '4 + 2 + 1 + 1');
       assert.deepStrictEqual(agg.byRole, { participant: 2, issuer: 0, validator: 1, admin: 0, anchor: 1 });
@@ -188,7 +190,7 @@ describe('aggregateAttestations: weights judged against the in-force set when ap
 
       // The validator's grant revoked: the same attestations weigh as the set stands now.
       node.revoke([statementId(gV)]);
-      const after = node.aggregateAttestations('cmb-agg');
+      const after = node.aggregateAttestations('cmb-agg', { assertionId: AGG_ASSERTION });
       assert.strictEqual(after.weight, 7, '4 + 1 + 1 + 1: no role "at the time" is kept');
       assert.strictEqual(after.mismatches.length, 2, 'the validator\'s stamp is now an over-claim');
     } finally { cleanup(name); }
@@ -202,7 +204,7 @@ describe('aggregateAttestations: weights judged against the in-force set when ap
       const a = att(P.nodeId, 'participant', 'aligned', { focus: 'admit' }, P.priv);
       a.verdict = 'rejected';
       node._attestations.record(a);
-      const agg = node.aggregateAttestations('cmb-agg');
+      const agg = node.aggregateAttestations('cmb-agg', { assertionId: AGG_ASSERTION });
       assert.strictEqual(agg.total, 0);
       assert.deepStrictEqual(agg.excluded, [{ by: P.nodeId, reason: 'bad-signature' }]);
     } finally { cleanup(name); }

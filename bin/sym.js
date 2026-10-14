@@ -2,6 +2,7 @@
 'use strict';
 
 const { recordCreatedBy } = require('../lib/record');
+const { logSafe } = require('../lib/wire-identity'); // peer-chosen text on the terminal (R2-18)
 
 /**
  * sym — CLI for the SYM mesh.
@@ -1003,14 +1004,14 @@ function cmdListen() {
         }
         if (msg.event === 'cmb-accepted') {
           const d = msg.data;
-          console.log(`[${d.source}] ${d.focus}`);
+          console.log(`[${logSafe(d.source)}] ${logSafe(d.focus)}`);
         } else if (msg.event === 'message') {
           const d = msg.data;
-          console.log(`[message from ${d.from}] ${d.content}`);
+          console.log(`[message from ${logSafe(d.from)}] ${logSafe(d.content)}`);
         } else if (msg.event === 'peer-joined') {
-          console.log(`[+] ${msg.data.name} joined`);
+          console.log(`[+] ${logSafe(msg.data.name)} joined`);
         } else if (msg.event === 'peer-left') {
-          console.log(`[-] ${msg.data.name} left`);
+          console.log(`[-] ${logSafe(msg.data.name)} left`);
         } else if (jsonFlag) {
           console.log(JSON.stringify(msg));
         }
@@ -1109,8 +1110,8 @@ function formatPeers(msg) {
   console.log(`${peers.length} peer(s):\n`);
   for (const p of peers) {
     const via = p.via || (p.relay ? 'relay' : 'lan');
-    console.log(`  ${bold(p.name || p.nodeId)} ${dim('via ' + via)}`);
-    if (p.mood) console.log(`    mood: ${p.mood}`);
+    console.log(`  ${bold(logSafe(p.name || p.nodeId))} ${dim('via ' + logSafe(via))}`);
+    if (p.mood) console.log(`    mood: ${logSafe(p.mood)}`);
   }
 }
 

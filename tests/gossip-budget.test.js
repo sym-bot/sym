@@ -176,7 +176,9 @@ describe('gossip budget — only new statements spend it', () => {
 
   it('a checkpoint older than every position held is dropped before it', () => {
     withNode(1, ({ node, keys: [A] }) => {
-      for (let n = 1; n <= 32; n++) ingest(node, 'p', { type: 'checkpoint', checkpoint: signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 100 + n, upto_seq: 100 + n, prev: (100 + n) === 1 ? 'genesis' : `p${100 + n}`, root: `r${n}`, at: n }, A.priv, signCheckpoint) });
+      // One chain (each prev the root before it: an unlinked successor is refused, R2-15).
+      for (let n = 1; n <= 32; n++) ingest(node, 'p', { type: 'checkpoint', checkpoint: signed({ type: 'checkpoint', by: A.id, roster: ROOM, from_seq: 100 + n, upto_seq: 100 + n, prev: n === 1 ? 'p101' : `r${n - 1}`, root: `r${n}`, at: n }, A.priv, signCheckpoint) });
+      assert.strictEqual(node._attestations.checkpointsOf(A.id).length, 32);
       const spent = node._gossipNewLane - node._gossipBuckets.get('p').tokens;
       for (let i = 0; i < 1000; i++) {
         const pos = (i % 99) + 1;

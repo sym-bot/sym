@@ -68,10 +68,14 @@ describe('N1: the forgery penalty is charged only to a session that signed in it
       assert.strictEqual(b._store.allEntries().length, 0, 'the record is not stored');
 
       // The squatter's session delivering a record in its own name (X) that its proven key did not
-      // sign is attributable: it is closed and refused.
+      // sign: a record's signature travels in the clear metadata of cmb-encrypted, outside the AEAD,
+      // so a bad record signature is never attributable (security review R2-2, 0.14.3): the record is
+      // dropped and counted, and the session is neither closed nor refused.
       deliver(b, sM, { type: 'cmb', cmb: signedRecord(X, { categories: { focus: 'X said this too' }, room: b._room }) });
-      assert.strictEqual(sM.closed, true, 'the session that sent a record in its own name its key did not sign is closed');
-      assert.strictEqual(b._penalised(X.nodeId), true);
+      assert.strictEqual(sM.closed, false, 'a bad record signature is not charged to the session (R2-2)');
+      assert.strictEqual(b._penalised(X.nodeId), false);
+      assert.ok(metrics.some((m) => m.type === 'cmb-signature-unattributable' && m.peer === X.nodeId));
+      assert.strictEqual(b._store.allEntries().length, 0, 'and the record is not stored');
     } finally { await stopAll(b); }
   });
 
