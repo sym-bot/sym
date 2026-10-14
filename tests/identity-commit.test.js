@@ -608,6 +608,39 @@ describe('R1-11: names Windows cannot hold, and Windows junctions', () => {
   });
 });
 
+describe('R4-9: a start pinned to a nodeId never takes a name from another identity', () => {
+  // 632b95d re-pointed the name's index entry to the pin: a folder whose .sym/node.json pins X under "reviewer" took the
+  // name from another folder's agent Y; Y's next start by name then ran as X, and Y was left without its name.
+  it('the pinned identity is here and the name is another agent\'s: the start halts, the entry is left as it is', () => {
+    const name = uniq('r49');
+    const y = cfg.loadIdentity({ name });                // the agent the name belongs to
+    const x = cfg.loadIdentity({ name: uniq('r49-x') }); // another agent on the host
+    for (const create of [false, true]) {
+      assert.throws(() => cfg.loadIdentity({ name, nodeId: x.nodeId, create }),
+        (e) => e instanceof IdentityHaltError && e.reason.includes(x.nodeId) && e.reason.includes(y.nodeId), `create: ${create}`);
+      assert.strictEqual(cfg.nodeIdForName(name), y.nodeId, 'the index still names Y');
+    }
+    assert.strictEqual(cfg.loadIdentity({ name }).nodeId, y.nodeId, 'the next start by name is Y');
+    assert.strictEqual(fs.realpathSync(path.join(NODES_DIR, name)), fs.realpathSync(cfg.nodeDirById(y.nodeId)), 'and the compat link leads to Y');
+  });
+
+  it('the pin is not on this host and the name is another agent\'s: never answered with that agent', () => {
+    const name = uniq('r49-absent');
+    const y = cfg.loadIdentity({ name });
+    const pin = cfg.uuidv7();
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: pin, create: true }), (e) => e instanceof IdentityHaltError && e.reason.includes(y.nodeId));
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: pin, create: false }), (e) => e.code === 'EIDENTITYABSENT' && e.message.includes(y.nodeId));
+    assert.strictEqual(cfg.nodeIdForName(name), y.nodeId);
+  });
+
+  it('a name nobody has is claimed for the pinned identity', () => {
+    const x = cfg.loadIdentity({ name: uniq('r49-own') });
+    const name = uniq('r49-free');
+    assert.strictEqual(cfg.loadIdentity({ name, nodeId: x.nodeId, create: false }).nodeId, x.nodeId);
+    assert.strictEqual(cfg.nodeIdForName(name), x.nodeId);
+  });
+});
+
 describe('error texts: the operator is never told to delete what leads to a key that is on disk', () => {
   it('SYM_IDENTITY_DIR switched on after the agent was made: the halt says where the key is, and not to remove the index', () => {
     const name = uniq('err-iddir');
