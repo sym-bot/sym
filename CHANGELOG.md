@@ -130,7 +130,10 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   verification and record budgets are also charged by size (1 MiB/s burst 4 MiB before verification, 128 KiB/s
   burst 1.5 MiB before SVAF); the SVAF kernel reads at most 16 KiB of a text; the local-state context reads at most
   2 KiB of an entry and 16 KiB in all, and is re-encoded at most once a second; the store's entry cache is an LRU
-  (2,048 entries, 32 M characters). The review's 24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now.
+  (2,048 entries, 32 M characters); the inbox holds at most 32 M characters (read items make room, oldest first; an
+  unread one never goes, and a delivery that does not fit is refused and counted, `inbox-full-refused`). The review's
+  24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now. The store itself is still unbounded on disk by default
+  (retention is unlimited unless configured); the size budget bounds how fast one session can grow it.
 - Gossip signature checks are bounded whatever the number of sessions: every new attestation, checkpoint, witness or
   authority statement takes one global token before verification, through the sending peer's fair share. The ceiling
   after verification is gone (R2-4).
