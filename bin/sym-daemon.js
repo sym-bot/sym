@@ -65,7 +65,8 @@ require('../lib/core/state-root').assertTestSandbox();
 // ~/.sym. Building it from the home dir sent a rooted daemon's room, tasks and relay.env to the
 // user's real ~/.sym.
 const SYM_DIR = require('../lib/core/state-root').SYM_STATE_DIR;
-const { getSocketPath, getLogDir, listenExclusive, socketAnswers, socketIdentity, socketIsStill } = require('../lib/platform');
+const { getSocketPath, getLogDir, listenExclusive, socketAnswers, socketIdentity, socketIsStill, stampSocket, isMappedIpcEndpoint, checkIpcEndpoint, unixSocketPathMax } = require('../lib/platform');
+const { LineReader } = require('../lib/line-reader');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or platform-scoped default
 // (not hostname — macOS appends random suffixes to hostname on WiFi,
@@ -244,24 +245,22 @@ let listeningServer = null;
 /** One IPC connection: newline-delimited JSON in, results and events out. */
 function onIPCConnection(socket) {
   const socketId = nextSocketId++;
-  let buffer = '';
-
-  socket.on('data', (data) => {
-    buffer += data.toString();
-    // One line is at most IPC_MAX_LINE: a client that never sends a newline cannot grow the buffer.
-    if (buffer.length > IPC_MAX_LINE && buffer.indexOf('\n') === -1) {
-      log(`IPC client ${socketId} sent ${buffer.length} bytes without a newline; closing it`);
-      buffer = '';
+  // Lines are cut on bytes and decoded whole (lib/line-reader.js, R3-7): decoding each chunk on its own
+  // stored a task title split across two reads with U+FFFD in it. One line is at most IPC_MAX_LINE
+  // BYTES: a client that never sends a newline cannot grow the buffer. A line that is not UTF-8 is
+  // refused like one that is not JSON.
+  const reader = new LineReader({
+    maxLineBytes: IPC_MAX_LINE,
+    strict: true,
+    onOverflow: (n) => {
+      log(`IPC client ${socketId} sent a line of more than ${IPC_MAX_LINE} bytes (${n} so far); closing it`);
       socket.destroy();
-      return;
-    }
-    let idx;
-    while ((idx = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 1);
-      if (line.trim()) takeIPCLine(socketId, socket, line);
-    }
+    },
+    onInvalid: () => sendIPC(socket, { type: 'result', action: null, error: 'not UTF-8' }),
+    onLine: (line) => { if (line.trim()) takeIPCLine(socketId, socket, line); },
   });
+
+  socket.on('data', (data) => reader.push(data));
 
   socket.on('close', () => {
     listeners.delete(socketId);
@@ -279,9 +278,15 @@ function onListening() {
   // chmod not applicable on Windows named pipes
   if (process.platform !== 'win32') {
     try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
+    // A token in the socket file's times, so a file made later at the same inode is never taken for
+    // this one (lib/platform.js socketIdentity, R3-14).
+    stampSocket(SOCKET_PATH);
     ownSocket = socketIdentity(SOCKET_PATH);
   }
   log(`IPC server listening: ${SOCKET_PATH}`);
+  if (isMappedIpcEndpoint(SOCKET_PATH)) {
+    log(`(the configured IPC path is longer than the ${unixSocketPathMax()} bytes a Unix socket path holds: mapped to ${SOCKET_PATH}, which every sym client computes the same way)`);
+  }
 }
 
 /** A server that only logs its errors once it is listening: an accept error never ends the daemon. */
@@ -296,6 +301,9 @@ async function startIPCServer() {
   if (!fs.existsSync(SYM_DIR)) {
     fs.mkdirSync(SYM_DIR, { recursive: true });
   }
+  // A configured path longer than a Unix socket path can be is mapped (lib/platform.js unixEndpoint,
+  // R3-6) to a private directory of this user's under /tmp, made here and checked by every client.
+  checkIpcEndpoint(SOCKET_PATH, { create: true });
   // Bind first, and probe only a path that is taken: a socket file is removed only when nothing
   // answers on it and it is still the file probed. Probing first and then removing whatever was
   // there let two daemons starting together each take the path from the other.
@@ -786,11 +794,13 @@ function showStatus() {
     return;
   }
 
+  checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
   const client = net.createConnection(SOCKET_PATH, () => {
     client.write(JSON.stringify({ type: 'status' }) + '\n');
   });
 
   let data = '';
+  client.setEncoding('utf8'); // whole characters across reads (R3-7)
   client.on('data', (chunk) => {
     data += chunk;
     if (data.includes('\n')) {

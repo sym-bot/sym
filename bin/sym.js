@@ -47,7 +47,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 
-const { getSocketPath, getLogDir } = require('../lib/platform');
+const { getSocketPath, getLogDir, checkIpcEndpoint } = require('../lib/platform');
 const { isValidRoom } = require('../lib/rooms');
 // The CLI's state lives where its daemon's does (SYM_STATE_DIR, default ~/.sym): rooted in the
 // home, two SYM_STATE_DIR deployments shared one pid file (`sym stop` for one stopped the other),
@@ -886,12 +886,14 @@ function broadcastQuestion(question) {
       try { socket.removeAllListeners('data'); socket.destroy(); } catch {}
       resolve(v);
     };
+    checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
     const socket = net.createConnection(SOCKET_PATH, () => {
       socket.write(JSON.stringify({ type: 'hello' }) + '\n');
     });
+    socket.setEncoding('utf8'); // whole characters across reads (R3-7)
     let buffer = '';
     socket.on('data', (data) => {
-      buffer += data.toString();
+      buffer += data;
       let idx;
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx); buffer = buffer.slice(idx + 1);
@@ -985,12 +987,14 @@ function cmdListen() {
     console.error('sym-daemon is not running. Start it with: sym start');
     process.exit(1);
   }
+  checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
   const socket = net.createConnection(SOCKET_PATH, () => {
     socket.write(JSON.stringify({ type: 'listen' }) + '\n');
   });
+  socket.setEncoding('utf8'); // whole characters across reads (R3-7)
   let buffer = '';
   socket.on('data', (data) => {
-    buffer += data.toString();
+    buffer += data;
     let idx;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx);
@@ -1161,6 +1165,7 @@ function cmdIPC(msg, formatter) {
     process.exit(1);
   }
 
+  checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
   const socket = net.createConnection(SOCKET_PATH, () => {
     // For status, no registration needed — send raw
     if (msg.type === 'status') {
@@ -1172,6 +1177,7 @@ function cmdIPC(msg, formatter) {
     // virtual node — design D8).
     socket.write(JSON.stringify({ type: 'hello' }) + '\n');
   });
+  socket.setEncoding('utf8'); // whole characters across reads (R3-7)
 
   let buffer = '';
   let registered = false;
@@ -1182,7 +1188,7 @@ function cmdIPC(msg, formatter) {
   }
 
   socket.on('data', (data) => {
-    buffer += data.toString();
+    buffer += data;
     let idx;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx);
