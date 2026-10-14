@@ -47,12 +47,17 @@ or expose a key and the small ones beside them. The wire and the public surface 
   `identity.json` (or other content that cannot be merged) already filed under it. A directory that is empty, or holds a
   stale lock, claims nothing: the node is MERGED into it. The same identity on both sides is an interrupted move, and
   the next start finishes it. A real duplicate is still refused: nothing is moved and nothing is overwritten.
-- **The name is indexed before anything moves, and the identity moves last.** A second starter that arrives in the
-  middle finds the agent; an interrupted move is re-entered on the next start by the identity's absence. A step that
-  fails because another process just did it is re-run (up to three times) against what that process left, and a path
-  that has become an alias of its destination through the other process's compat link is never "merged" onto itself.
-  Measured with real processes: four starters at once, 320 starters in all (with and without a by-id directory already
-  in place), every one loaded the original agent and the original key was intact every time. The same run on 0.14.2
+- **The name is indexed before anything moves, and the identity moves last.** A crash in the middle leaves the name
+  pointing at the agent and the identity still where the next start will find it, so an interrupted move is re-entered
+  by the identity's absence instead of being mistaken for "no such agent".
+- **One process migrates at a time.** Moving a directory is many steps, and two processes interleaving them could each
+  delete what the other had just filed. Found by running four real processes at it with a stall injected into every
+  file call (about one round in a hundred lost the identity file), after plain concurrent runs had passed. The migrator
+  now holds a lock (`nodes/.migrating/lock.pid`, the identity lock: reclaimed when its holder is gone) while it moves
+  something; the others wait (up to 30 s, then fail loudly), read the state again and find it done. It is taken only
+  when a 0.13 directory is there to move. Under that lock: 1,200 starters in 300 rounds, then 1,600 in 400 rounds
+  without a husk, every one loaded the original agent, no errors, the key in place every round. A path that has
+  become an alias of its destination is never deleted as a "duplicate" of it. The same four-process run on 0.14.2
   made a new identity in 14 of 100 starters, and destroyed the key in every round that had a by-id directory.
 - **A start never makes an identity where one exists.** Before it makes one it checks that no 0.13 `identity.json`
   sits under the name (in `nodes/<name>/` or `SYM_IDENTITY_DIR/<name>/`); if one does and could not be migrated it
@@ -84,8 +89,8 @@ or expose a key and the small ones beside them. The wire and the public surface 
 
 ### Tests
 
-- `tests/identity-migration-by-id.test.js`: 37 tests (36 run on macOS; one real cross-filesystem test runs on Linux).
-  31 of them fail on 0.14.2; five pin behaviour that did not change, and one runs only on Linux. The code is mutation-tested: seventeen
+- `tests/identity-migration-by-id.test.js`: 41 tests (40 run on macOS; one real cross-filesystem test runs on Linux).
+  33 of them fail on 0.14.2 (34 on Linux); seven pin behaviour that did not change. The code is mutation-tested: seventeen
   mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
 
 ## 0.14.2 — 2026-10-14

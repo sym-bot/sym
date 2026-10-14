@@ -428,13 +428,18 @@ describe('F6: rewriting identity.json is atomic', () => {
     const f = path.join(NODES_DIR, name, 'identity.json');
     const before = read(f);
     let injected = 0;
-    patchFs('writeSync', (orig) => function (fd, ...rest) {
-      injected++;
-      throw Object.assign(new Error('ENOSPC: no space left on device (injected)'), { code: 'ENOSPC' });
+    const tempFds = new Set(); // the fds of identity.json's temp file: the lock file's writes are left alone
+    patchFs('openSync', (open) => function (p, ...rest) {
+      const fd = open.call(fs, p, ...rest);
+      if (/identity\.json\.\d+\.tmp$/.test(String(p))) tempFds.add(fd);
+      return fd;
+    }, () => patchFs('writeSync', (write) => function (fd, ...rest) {
+      if (tempFds.has(fd)) { injected++; throw Object.assign(new Error('ENOSPC: no space left on device (injected)'), { code: 'ENOSPC' }); }
+      return write.call(fs, fd, ...rest);
     }, () => {
       assert.throws(() => cfg.loadIdentity({ name }), /ENOSPC/);
-    });
-    assert.ok(injected >= 1, 'the failure was reached');
+    }));
+    assert.ok(injected >= 1, 'the failure was reached, in the write of the key file');
     assert.strictEqual(read(f), before, 'the key file is byte-identical: it was never truncated');
     assert.deepStrictEqual(fs.readdirSync(path.join(NODES_DIR, name)).filter((n) => n.endsWith('.tmp')), []);
     assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey, 'and the next start succeeds with the same key');
@@ -579,49 +584,115 @@ describe('F11: the window between the move and the index is not a mint race', ()
   });
 });
 
-describe('F11: another process finishing the move underneath this one', () => {
-  it('a step that fails because the other process just did it is re-run against what it left, and reads as moved', () => {
-    const name = uniq('f11-other');
+describe('F11: one migrator at a time', () => {
+  /** A second process that holds the migration lock for `ms`, then moves the node itself and lets go. */
+  function holder(name, ms) {
+    return spawn(process.execPath, ['-e', `
+      const c = require(${JSON.stringify(path.resolve(__dirname, '../lib/config.js'))});
+      const release = c.acquireIdentityLock('migration', { dir: ${JSON.stringify(path.join(NODES_DIR, '.migrating'))} });
+      console.log('held');
+      setTimeout(() => { c.migrateNodeDir(${JSON.stringify(name)}); release(); console.log('released'); process.exit(0); }, ${ms});`],
+    { stdio: ['ignore', 'pipe', 'inherit'] });
+  }
+  const held = (child) => new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('exit', () => reject(new Error('the holder exited'))); });
+
+  it('a start waits for the process that is moving the node, then finds it moved', async () => {
+    const name = uniq('f11-wait');
     const id = legacyNode(name);
-    const legacy = path.join(NODES_DIR, name);
-    const dest = cfg.nodeDirById(id.nodeId);
-    let helped = false;
-    const result = patchFs('renameSync', (orig) => function (a, b) {
-      if (!helped && a === legacy) { // the other process gets there first: it moves the directory and leaves the link
-        helped = true;
-        orig.call(fs, a, b);
-        fs.symlinkSync(path.join('by-id', id.nodeId), legacy, 'dir');
-        throw Object.assign(new Error(`ENOENT: no such file or directory, rename '${a}' -> '${b}'`), { code: 'ENOENT' });
-      }
-      return orig.call(fs, a, b);
-    }, () => cfg.migrateNodeDir(name));
-    assert.ok(helped, 'the other process ran');
-    assert.strictEqual(result, 'already');
-    assert.strictEqual(JSON.parse(read(path.join(dest, 'identity.json'))).privateKey, id.privateKey);
+    husk(id.nodeId); // a merge, not a single rename
+    const child = holder(name, 400);
+    try {
+      await held(child);
+      const t0 = Date.now();
+      const loaded = cfg.loadIdentity({ name }); // blocks until the holder lets go
+      const waited = Date.now() - t0;
+      assert.ok(waited >= 250, `it waited for the holder (${waited} ms)`);
+      assert.strictEqual(loaded.nodeId, id.nodeId);
+      assert.strictEqual(loaded.privateKey, id.privateKey);
+      assert.strictEqual(identitiesNamed(name).length, 1);
+      assert.ok(isLink(path.join(NODES_DIR, name)), 'the holder finished the move');
+      assert.ok(!exists(path.join(NODES_DIR, '.migrating', 'lock.pid')), 'and the lock was let go');
+    } finally { child.kill(); }
+  });
+
+  it('the lock of a process that is gone is reclaimed, not waited for', () => {
+    const name = uniq('f11-stale');
+    const id = legacyNode(name);
+    put(path.join(NODES_DIR, '.migrating', 'lock.pid'), '2147483646\n', 0o644); // a pid that is not running
+    const t0 = Date.now();
+    assert.strictEqual(cfg.migrateNodeDir(name), 'moved');
+    assert.ok(Date.now() - t0 < 2000, 'no wait');
     assert.strictEqual(cfg.loadIdentity({ name, create: false }).privateKey, id.privateKey);
   });
 
-  it('a path that now leads through the other process\'s link to the destination is never "merged" onto itself (that would delete it)', () => {
+  it('a holder that never lets go makes the start fail loudly after the wait, and moves nothing', async () => {
+    const name = uniq('f11-timeout');
+    const id = legacyNode(name);
+    const child = holder(name, 60000);
+    try {
+      await held(child);
+      cfg._setMigrationLockWait(300);
+      assert.throws(() => cfg.migrateNodeDir(name), /has been moving 0\.13 nodes/);
+      assert.throws(() => cfg.loadIdentity({ name }), /has been moving 0\.13 nodes/, 'and a start does not make a new identity meanwhile');
+      assert.ok(exists(path.join(NODES_DIR, name, 'identity.json')), 'the node is where it was');
+      assert.strictEqual(identitiesNamed(name).length, 0);
+      assert.ok(id.privateKey);
+    } finally { cfg._setMigrationLockWait(30000); child.kill(); }
+  });
+
+  it('nothing to move: no lock is taken and nothing is written', () => {
+    const name = uniq('f11-nolock');
+    const id = cfg.loadIdentity({ name }); // a new agent: indexed, nodes/<name> is the link
+    const lockDir = path.join(NODES_DIR, '.migrating');
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    assert.strictEqual(cfg.migrateNodeDir(name), 'already');
+    assert.strictEqual(cfg.loadIdentity({ name, create: false }).nodeId, id.nodeId);
+    assert.ok(!exists(lockDir), 'the migration lock directory was not even made');
+  });
+
+  it('a path that leads through a link to the destination is never "merged" onto itself (that would delete the only copy)', () => {
     const name = uniq('f11-alias');
     const id = legacyNode(name);
     put(path.join(NODES_DIR, name, 'aaa.json'), '{"a":1}');
     const legacy = path.join(NODES_DIR, name);
     const dest = husk(id.nodeId); // forces an entry-by-entry merge
     let helped = false; let listings = 0;
-    const result = patchFs('readdirSync', (orig) => function (p, ...rest) {
+    // Something not holding the lock finishes the move while this merge holds a list of what to move (it cannot
+    // happen among cooperating processes; the check is a last guard on a key file).
+    patchFs('readdirSync', (orig) => function (p, ...rest) {
       const names = orig.call(fs, p, ...rest);
       if (!helped && p === legacy && ++listings === 2) { // the 2nd listing is the merge's own, after the conflict check's
-        helped = true; // the other process finishes the whole move while this one holds the list
+        helped = true;
         for (const n of names) fs.renameSync(path.join(legacy, n), path.join(dest, n));
         fs.rmdirSync(legacy);
         fs.symlinkSync(path.join('by-id', id.nodeId), legacy, 'dir');
       }
       return names;
-    }, () => cfg.migrateNodeDir(name));
-    assert.ok(helped, 'the other process ran');
-    assert.strictEqual(result, 'already');
+    }, () => { try { cfg.migrateNodeDir(name); } catch { /* the directory became a link under it: an error is fine, a deletion is not */ } });
+    assert.ok(helped, 'the other actor ran');
     for (const f of ['identity.json', 'aaa.json', path.join('cmbs', 'x.json')]) assert.ok(exists(path.join(dest, f)), `${f} survived`);
     assert.strictEqual(JSON.parse(read(path.join(dest, 'identity.json'))).privateKey, id.privateKey);
+  });
+});
+
+describe('F11: a starter that read the index too early', () => {
+  it('finds the agent by the index after migrating nothing, instead of making a new one', () => {
+    // The other process has moved everything and written the index, but not yet made the compat link: there is no
+    // 0.13 directory, so there is nothing to migrate, and this starter read the index (as missing) just before.
+    const name = uniq('f11-early');
+    const id = legacyNode(name);
+    assert.strictEqual(cfg.migrateNodeDir(name), 'moved');
+    fs.unlinkSync(path.join(NODES_DIR, name)); // the link not yet made
+    const index = path.join(NODES_DIR, 'by-name', `${encodeURIComponent(name)}.json`);
+    let fakedMissing = false;
+    const loaded = patchFs('readFileSync', (orig) => function (p, ...rest) {
+      if (!fakedMissing && String(p) === index) { fakedMissing = true; throw Object.assign(new Error('ENOENT (before the other process wrote it)'), { code: 'ENOENT' }); }
+      return orig.call(fs, p, ...rest);
+    }, () => cfg.loadIdentity({ name }));
+    assert.ok(fakedMissing, 'the early read happened');
+    assert.strictEqual(loaded.nodeId, id.nodeId);
+    assert.strictEqual(loaded.privateKey, id.privateKey);
+    assert.strictEqual(identitiesNamed(name).length, 1);
   });
 });
 
