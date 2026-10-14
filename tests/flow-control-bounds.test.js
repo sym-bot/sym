@@ -221,9 +221,10 @@ describe('flow control, the receiver: past its budget a record waits; past its q
   it('a session\'s records are admitted in arrival order: a small one never overtakes a large one waiting for the size budget', async () => {
     const N = mk('fo-n'); const E = mk('fo-e');
     asLegacySender(E);
+    // The order records are ADMITTED in: the hook is raised synchronously at admission, for a record and a
+    // message alike (a large record's cmb-accepted comes after its evaluation, which is asynchronous).
     const seen = [];
-    N.on('cmb-accepted', (e) => { const t = e.cmb.categories.focus.text || e.cmb.categories.focus; if (/^order /.test(t)) seen.push(t.slice(0, 12)); });
-    N.on('message', (_f, t) => { if (/^order /.test(t)) seen.push(t); });
+    N.on('verified-record', (e) => { const f = e.record.categories.focus; const t = (f && f.text) || f; if (/^order /.test(t)) seen.push(/^order big/.test(t) ? t.slice(0, 12) : t); });
     try {
       await N.start(); await E.start();
       await connectNodes(E, N);
