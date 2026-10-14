@@ -303,3 +303,46 @@ describe('R2-22: the delivery ledger is pruned', () => {
     assert.ok(fh._ledger.has('mallory|cmb-m-200099'), 'the flooder keeps its newest');
   });
 });
+
+describe('R2-9: earned key bindings age out, and new ones hold a share of the registry', () => {
+  const { settle } = require('./_settle');
+  const { RosterKeyRegistry } = require('../lib/roster-keys');
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('R2-9: identities that each sent one directed record hold at most a quarter and age out; an honest newcomer then earns a binding', async () => {
+    try {
+      const node = mk('r29', { maxKeyBindings: 8 });
+      if (typeof node._store.load === 'function') await node._store.load();
+      let clock = Date.now(); node._roster._now = () => clock;
+      const leave = (id, s) => { s.close(); node._sessionKeys.delete(id.nodeId); node._peers.delete(id.nodeId); };
+      for (let i = 0; i < 3; i++) {
+        const sybil = identity('sybil' + i);
+        const s = admitAs(node, sybil);
+        deliver(node, s, { type: 'cmb', cmb: signedRecord(sybil, { categories: { focus: 'hi ' + i }, room: 'sec', to: node.nodeId }) });
+        await settle(50);
+        leave(sybil, s);
+      }
+      assert.strictEqual(node._roster.size(), 2, 'one-shot bindings hold their share (8 / 4) and no more');
+      assert.ok(node._roster.refusedShareCount() >= 1);
+      clock += 31 * DAY;
+      assert.strictEqual(node._roster.expire(), 2, 'and age out after 30 days unseen, though each verified a record');
+      const honest = identity('honest');
+      const s = admitAs(node, honest);
+      deliver(node, s, { type: 'cmb', cmb: signedRecord(honest, { categories: { focus: 'real work' }, room: 'sec', to: node.nodeId }) });
+      await settle(50);
+      assert.strictEqual(node._roster.get(honest.nodeId), honest.publicKey, 'the honest newcomer earns a durable binding');
+    } finally { await stopAll(); }
+  });
+
+  it('R2-9: a binding established by records on two days ages out after EARNED_TTL_MS unseen', () => {
+    let t = 1_000_000;
+    const r = new RosterKeyRegistry({ now: () => t });
+    const k = 'A'.repeat(42) + 'A';
+    r.bind('peer', k, 'proven'); r.noteVerified('peer');
+    t += DAY + 1; r.noteVerified('peer');
+    t += 170 * DAY;
+    assert.strictEqual(r.expire(), 0);
+    t += 11 * DAY;
+    assert.strictEqual(r.expire(), 1, 'an earned binding no longer lives for ever');
+  });
+});
