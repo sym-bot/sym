@@ -51,8 +51,9 @@ describe('the key registry cannot be locked out by identity churn (roster-fill.j
     r.bind(honest.nodeId, honest.publicKey, 'proven'); r.noteSeen(honest.nodeId); // seen once, verified nothing
     let full = 0;
     for (let i = 0; i < 5000; i++) { t++; if (r.bind(`fill-${i}`, identity().publicKey, 'proven').reason === 'full') full++; }
-    assert.strictEqual(r.size(), 1000, 'bounded');
-    assert.strictEqual(full, 4001, 'past the bound a newcomer is refused a durable binding (held for its session only)');
+    // New bindings hold at most a quarter of the registry (R2-9, 0.14.3); past it a newcomer is refused.
+    assert.strictEqual(r.size(), 1000 / 4, 'bounded');
+    assert.strictEqual(full, 5000 - (1000 / 4 - 1), 'past the bound a newcomer is refused a durable binding (held for its session only)');
     assert.strictEqual(r.get(honest.nodeId), honest.publicKey, 'the honest binding was never displaced');
     assert.strictEqual(r.bind(honest.nodeId, identity('squatter').publicKey, 'proven').reason, 'conflict', 'and its nodeId cannot be squatted');
     assert.strictEqual(r.evictedCount(), 0, 'nothing is evicted before it expires');

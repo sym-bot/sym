@@ -242,13 +242,22 @@ subpaths it uses.
   are comparable only under one kernel id, so a cache keys on `kernelId()` and checks it again after the await.
 - `categoryKeyV1(category, text)` is the 64 hex characters of one category's content address (MMP §7.4); the
   category name is part of what is hashed and the text is NFC-normalised first.
-- `verifyCMB(record, publicKey)` returns `{ signed, valid, error? }`: whether the record's Ed25519 signature
-  (the one strict rule of MMP §18.3.2) verifies against `publicKey` (raw, base64url) and the signed address is
-  the address of the categories it carries. It does not decide whose key that is, and it is not the whole of
-  MMP §8.8.5: a node's session also checks the schema, the bounds, the audience and the author's key before it
-  delivers a record. Resolve the key from a binding you trust for the record's `createdByNodeId`, never from
-  the record. `cannot-verify...` errors (no readable container, a container still encrypted) mean "could not
-  check", which is not "forged".
+- `verifyCMB(record, publicKey, { coreSecure })` returns `{ signed, valid, error?, detail?, suite, coreSecure,
+  assertionId?, record? }`. For a v2.0 record (`suite: 'mmp-sig-v2.0'`) it runs MMP §8.8.5's checks on the
+  record's own bytes, in order: the closed schema and the §8.8.6 bounds (a member the signature does not cover
+  makes it invalid, `unsigned-member`; only mood `valence` and `arousal` and `lineage.method`, carried unsigned
+  by §8.8.4, and a top-level `payload` equal to the JSON of the signed application section, are allowed), the
+  `assertionId` recomputed (`assertion-id-mismatch`), the Ed25519 signature under the one strict rule of MMP
+  §18.3.2 against `publicKey` (raw, canonical base64url; `bad-signature`), and the content address
+  (`content-mismatch`). A valid one has `coreSecure: true`, its `assertionId`, and `record`, the frozen signed
+  projection: read the record from there and you read only what was signed. A record under sym 0.13's suite
+  (`suite: 'mmp-sig-v2'`) is `coreSecure: false`: its signature covers neither a node id nor an application
+  section, so one that carries either, or anything else a 0.13 node did not mint, is invalid; a genuine one
+  stays valid unless you pass `{ coreSecure: true }`, which refuses every record that is not v2.0
+  (`not-core-secure`). A host that acts on a record passes `{ coreSecure: true }`. It does not decide whose key
+  that is or check the audience: resolve the key from a binding you trust for the record's `createdByNodeId`,
+  never from the record. `cannot-verify...` errors (no readable container, a container still encrypted) mean
+  "could not check", which is not "forged".
 
 **`@sym-bot/sym/decision-log`** exports `DecisionLog`: `new DecisionLog(dir, { cap = 2000, enabled = true })`
 keeps an append-only, capped log of SVAF decisions in `<dir>/log.jsonl`; `record(entry)` appends one plain

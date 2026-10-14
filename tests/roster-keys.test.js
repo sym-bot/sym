@@ -69,7 +69,30 @@ describe('the conflict matrix, row by row', () => {
     assert.strictEqual(r.conflicts().length, 0);
   });
 
-  for (const [first, second] of [['grant', 'proven'], ['proven', 'grant'], ['pinned', 'proven'], ['proven', 'pinned'], ['proven', 'proven'], ['grant', 'pinned']]) {
+  for (const second of ['proven', 'pinned']) {
+    it(`only a grant view binds the nodeId, a DIFFERENT key from ${second} → bound at ${second}, the grant's disagreement recorded (R2-1)`, () => {
+      const k1 = key(); const k2 = key();
+      const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' ? k1 : undefined) });
+      assert.strictEqual(r.bind('N', k1, 'grant').source, 'grant');
+      const res = r.bind('N', k2, second);
+      assert.strictEqual(res.bound, true, 'a grant binds only a nodeId nothing else binds');
+      assert.strictEqual(res.conflict, 'grant');
+      assert.strictEqual(r.get('N'), k2);
+      assert.deepStrictEqual(r.conflicts().map((c) => [c.nodeId, c.had, c.got, c.hadSource, c.gotSource]), [['N', k1, k2, 'grant', second]]);
+    });
+  }
+
+  it('only a grant view binds the nodeId, a session proves the SAME key → nothing stored: the binding ends with the grant (R2-1)', () => {
+    const k = key(); let inEffect = true;
+    const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' && inEffect ? k : undefined) });
+    assert.deepStrictEqual(r.bind('N', k, 'proven'), { bound: true, source: 'grant' });
+    assert.strictEqual(r.size(), 0, 'never promoted to proven');
+    inEffect = false;
+    assert.strictEqual(r.get('N'), undefined);
+    assert.strictEqual(r.bind('N', key(), 'proven').created, true, 'after the revoke the nodeId is unbound');
+  });
+
+  for (const [first, second] of [['proven', 'grant'], ['pinned', 'proven'], ['proven', 'pinned'], ['proven', 'proven']]) {
     it(`nodeId bound (${first}), DIFFERENT key from ${second} → conflict: refused and recorded`, () => {
       const k1 = key(); const k2 = key();
       // A grant binding is a view over grants in effect (security review C): the first is one.

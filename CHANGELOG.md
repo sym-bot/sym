@@ -1,5 +1,189 @@
 # Changelog
 
+## 0.14.3 — 2026-10-14
+
+**An agent no longer loses its key to the 0.13 → by-id upgrade.** An XMesh review of `lib/config.js` 0.14.2 returned
+"do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
+or expose a key and the small ones beside them. The wire and the public surface are unchanged.
+
+### What was wrong
+
+- **A new identity could overwrite the old key.** Moving a 0.13 node (`nodes/<name>/`) to `nodes/by-id/<nodeId>/` was
+  refused when that directory already existed, even if it was empty or held only a `lock.pid` (something else made it:
+  a lock, an interrupted run). The refusal left the node unindexed, and the next start by name did not stop there:
+  it took "refused" for "no such agent", made a NEW identity, moved the old directory onto the new node's path and
+  wrote the new `identity.json` over the old one. The agent came back under the same name with a different nodeId and
+  key, and its peers read what it signed as forged. A start pinned by `nodeId` was stuck instead, refusing to start
+  every time.
+- **A 0.13 key file stayed world-readable.** 0.13 wrote `identity.json` and `e2e-keypair.json` without a mode (0644
+  under the usual umask). The migration only renames, so they kept it, in a directory at 0755. A new identity in 0.14 is
+  written 0600; a migrated one never was.
+- **A name whose identity file was missing made a replacement agent.** If the name index named a node and its
+  `identity.json` was not there (the `SYM_IDENTITY_DIR` volume not mounted at boot, the variable set by one embedder and
+  not another), a start by name made a new nodeId and key and re-pointed the name to it.
+- **A start pinned by nodeId never migrated.** `loadIdentity` ran the migration only for a start by name alone. mesh-channel
+  starts every node as `{ name, nodeId, create: false }`, so a node it pinned to the nodeId in its `node.json` and whose
+  files were still the 0.13 `nodes/<name>/` could not start at all (`EIDENTITYABSENT`) until something started it by name
+  once; with `create: true` (the default) 0.14.2 made a new identity and lost the key. 0.14.3 loads the agent.
+- Smaller, same family: a stray symlink at `nodes/<name>` was reported as already indexed when nothing was indexed;
+  switching `SYM_IDENTITY_DIR` on for a 0.13 node whose identity was in its node directory reported "not a node" and
+  went on to make a new identity (the old key survived, orphaned in the new node's directory); an identity with a public key
+  and no private key loaded, and failed later at its first signature; a cosmetic rewrite of `identity.json` (a bare
+  Windows hostname) truncated the live key file in place; a start in the moment between the directory move and the
+  index write found no agent and made one; the live-lock fallback skipped the tombstone check; and nothing moved
+  across file systems (`EXDEV`), so a node whose directories sit on different volumes could not be migrated.
+
+### Who is exposed
+
+- Anyone who upgraded a node from 0.13 to 0.14.0, 0.14.1 or 0.14.2 and whose state root had a `nodes/by-id/<nodeId>/`
+  directory for that node without an `identity.json` in it at the time the node was first started by name. Their key
+  was destroyed on that start; the symptom is a changed nodeId under the same name and peers rejecting its blocks.
+  0.14.3 cannot bring a destroyed key back. If you have the old `identity.json` (a backup, a durable
+  `SYM_IDENTITY_DIR` volume, a copy of `~/.sym`), put it back at `nodes/by-id/<old nodeId>/identity.json` and set the
+  nodeId in the name's file `nodes/by-name/<name>.json` to the old one.
+- Anyone who switched `SYM_IDENTITY_DIR` on for an existing 0.13 node: the old key is probably still on disk, in
+  `nodes/by-id/<new nodeId>/identity.json` (the node that was made in its place).
+- Every node migrated from 0.13 holds a private key readable by other local users until it is next loaded with 0.14.3.
+- A node started by its pinned nodeId (mesh-channel's start, `create: false`) on the first start after upgrading from 0.13:
+  no key was lost, but it could not start until something started it by name. A pinned start with `create: true` could lose it
+  as above.
+
+### Changed
+
+- **The duplicate check looks at the identity, not the directory.** A second claim on a nodeId is a DIFFERENT
+  `identity.json` (or other content that cannot be merged) already filed under it. A directory that is empty, or holds a
+  stale lock, claims nothing: the node is MERGED into it. The same identity on both sides is an interrupted move, and
+  the next start finishes it. A real duplicate is still refused: nothing is moved and nothing is overwritten.
+- **A start pinned to a nodeId migrates too.** `loadIdentity({ nodeId, name })` whose identity is not in place and for
+  which a 0.13 directory under `name` is still there runs the same locked, idempotent migration as a start by name, then
+  loads the pinned agent. It is one code path, not a copy, and it is not run when there is no 0.13 directory to move.
+  **A pin that is a different nodeId than the directory's does not migrate it:** the directory belongs to another agent,
+  so it is left exactly where it is, unindexed (nothing moved, nothing lost), the pinned identity stays absent, and the
+  start fails as it would have: `IdentityAbsentError` with `create: false`, and with `create: true` the halt that says a
+  0.13 identity sits under the name (naming the pin). That agent moves when it is started by name or by its own pin. A
+  0.13 process holding the pinned agent's directory still lets it load in place (tombstone checked), as for a start by name.
+- **The name is indexed before anything moves, and the identity moves last.** A crash in the middle leaves the name
+  pointing at the agent and the identity still where the next start will find it, so an interrupted move is re-entered
+  by the identity's absence instead of being mistaken for "no such agent".
+- **One process migrates at a time.** Moving a directory is many steps, and two processes interleaving them could each
+  delete what the other had just filed. Found by running four real processes at it with a stall injected into every
+  file call (about one round in 150 lost the identity file), after plain concurrent runs had passed. The migrator
+  now holds a lock (`nodes/.migrating/lock.pid`, the identity lock: reclaimed when its holder is gone) while it moves
+  something; the others wait (up to 30 s, then fail loudly), read the state again and find it done. It is taken only
+  when a 0.13 directory is there to move. Under that lock, in the same stall fuzzer: 1,200 starters in 300 rounds, 1,600
+  in 400 rounds without a by-id directory in place, and 3,600 in 600 rounds with six starters at once: every one loaded
+  the original agent, no errors, the key in place every round. A path that has
+  become an alias of its destination is never deleted as a "duplicate" of it. The same four-process run on 0.14.2
+  made a new identity in 14 of 100 starters, and destroyed the key in every round that had a by-id directory.
+- **A start never makes an identity where one exists.** Before it makes one it checks that no 0.13 `identity.json`
+  sits under the name (in `nodes/<name>/` or `SYM_IDENTITY_DIR/<name>/`); if one does and could not be migrated it
+  halts (`IdentityHaltError`) and says why. A name that indexes a node whose identity is missing halts too.
+  `create: false` still throws `IdentityAbsentError`. Behaviour change: a node whose `identity.json` was deleted by hand
+  to "start over" now halts instead of silently becoming a new agent; to start the name again as a different agent,
+  remove the two paths the message names (`nodes/by-name/<name>.json` and the link `nodes/<name>`).
+- **Key files are private.** After a migration `identity.json` and `e2e-keypair.json` are 0600 and the directories that
+  hold them 0700; loading an identity narrows an existing key file (and the E2E keypair beside it), so nodes already
+  migrated by 0.14.0 to 0.14.2 are healed on their next start. A new identity's directory is 0700. Best effort on a
+  file this process does not own, and a no-op on Windows.
+- **A rewrite of `identity.json` is atomic** (a private temp file, synced, renamed over it).
+- **A move across file systems copies, verifies byte for byte, then removes the source.** A failed copy is removed and
+  the source left as it was.
+- An identity with a public key and no private key halts. A live 0.13 directory's identity is checked against the
+  tombstone. A symlink at `nodes/<name>` that is not a by-id link is reported `not-a-node`.
+- `SYM_IDENTITY_DIR` switched on for a 0.13 node whose identity is still in `nodes/<name>/` halts and tells the
+  operator to copy it to `SYM_IDENTITY_DIR/<name>/identity.json`. It does not move it for them (see below).
+
+### Known, not fixed here
+
+- `migrateIdentities()` still counts and discards any error from a single node (including the halts above); only the
+  counters it returns. The node's own start (`loadIdentity`) raises them, so a start is loud. Whether the bulk call
+  should report them is open.
+- `loadIdentity({ nodeId, name })` still re-points a name that already indexes a different node.
+- `SYM_IDENTITY_DIR` switched on for an existing node does not move its key for you (it halts and says how).
+- `loadIdentity({ nodeId, name, create: true })` with a `nodeId` the name index does not hold, no identity file, and no 0.13
+  directory under the name still makes a new identity under a new nodeId (it does not use the one given). mesh-channel
+  passes `create: false`, so a pin is never ignored there.
+- A pinned start leaves another agent's 0.13 directory (same name, different nodeId) unmigrated, as above; with
+  `SYM_IDENTITY_DIR` set and that identity in the node directory it halts with the instructions given for that case.
+
+### Security
+
+An independent security review (R2) of the 0.14 core reproduced each finding below; each fix has a test in
+`tests/security-0.14.3*.test.js` that fails on 0.14.3's base (632b95d) and passes here.
+
+- **A grant binds a key only when it is mesh-wide and rooted in the anchor through admins (R2-1, high).** Any holder
+  of a delegating grant, even one scoped to one world, could bind any unbound nodeId to its own key at every node
+  holding the grant; the victim's own session was then refused as an identity conflict, and once the squatter
+  connected the binding was stored `proven` and outlived the revoke. Now only an unscoped grant whose chain is the
+  anchor and `admin` grants is a key-binding source; the grant view binds only a nodeId nothing else binds, so a
+  session proving another key is admitted on its own proof and the conflict recorded (never refused); a session
+  proving the key the grant names stores nothing (never promoted to `proven`), so a revoke removes what the grant
+  bound. This narrows MMP §6.6.9 (a spec erratum is proposed).
+- **A relay can no longer get an honest peer closed and banned as a forger (R2-2, high).** The `cmb-encrypted` AAD
+  binds the key, assertionId, author nodeId, room and to; the signature, `createdBy`, `createdTimestamp`, lineage
+  and the application descriptor travel in clear. The receiver now recomputes the AAD-bound assertionId before the
+  signature (§8.8.5 order): a mismatch is altered clear metadata, dropped and counted (`cmb-clear-metadata-altered`).
+  A bad record signature is never a penalty (the signature is outside the AEAD): dropped and counted
+  (`cmb-signature-unattributable`); one relayed in another's name keeps the relayed path. The forgery penalty stays
+  for attestations, checkpoints and witnesses, which travel wholly sealed.
+- **One admitted peer can no longer buy CPU, memory or disk without bound (R2-3, high).** The per-session
+  verification and record budgets are also charged by size (1 MiB/s burst 4 MiB before verification, 128 KiB/s
+  burst 1.5 MiB before SVAF); the SVAF kernel reads at most 16 KiB of a text; the local-state context reads at most
+  2 KiB of an entry and 16 KiB in all, and is re-encoded at most once a second; the store's entry cache is an LRU
+  (2,048 entries, 32 M characters); the inbox holds at most 32 M characters (read items make room, oldest first; an
+  unread one never goes, and a delivery that does not fit is refused and counted, `inbox-full-refused`). The review's
+  24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now. The store itself is still unbounded on disk by default
+  (retention is unlimited unless configured); the size budget bounds how fast one session can grow it.
+- Gossip signature checks are bounded whatever the number of sessions: every new attestation, checkpoint, witness or
+  authority statement takes one global token before verification, through the sending peer's fair share. The ceiling
+  after verification is gone (R2-4).
+- LAN client-hellos are rate-limited before any crypto: a token bucket per remote host (8/s, burst 32) and one over
+  all hosts (64/s, burst 256). A hello past either is closed unanswered (R2-5).
+- Actionable delivery is de-duplicated by assertion identity (§8.8.2, R2-6): two room records with the same
+  categories and different signed application sections are both delivered, and one memory de-duplicates is still
+  delivered (`remixed: false`); a replay of either is not. An actionable room record signed more than 30 days ago is
+  refused as stale (its delivery mark is kept that long).
+- Equivocation evidence and this node's own-witness memory are never evicted. When full, new attesters are refused
+  or not witnessed, and that is counted (R2-7).
+- `aggregateAttestations` weighs only attestations naming the held record's `assertionId`, or `opts.assertionId`. The
+  result carries `assertionId` (R2-8).
+- Earned key bindings age out (R2-9): a new one (everything it verified fell within a day) after 30 days unseen, and
+  new bindings hold at most a quarter of the registry; an established one after 180 days unseen. One directed record
+  from a fresh identity used to earn a binding that never expired.
+- A gated room now admits its grant-holders over a relay: a sealed frame goes to any confirmed session for its relay
+  `from`, so the room-join reaches the door, which still decides (R2-11).
+- Public `verifyCMB` (`@sym-bot/sym/core`) checks the record's own bytes: a member the signature does not cover, or a
+  wrong assertionId (checked before the signature), makes a record invalid. The result names the signing `suite` and
+  says `coreSecure`, and a valid v2.0 record comes with its frozen signed projection (`record`). A 0.13-suite record
+  whose sections carry an application, a node id or anything else 0.13 never minted is invalid. A genuine 0.13 record
+  stays valid unless the caller passes `{ coreSecure: true }` (R2-12). See docs/reference.md.
+- One signature verifies one string: a signed string with a lone surrogate is refused, and createCMB mints such text
+  as U+FFFD (R2-13).
+- Keys and signatures are accepted only in canonical unpadded base64url, one spelling each, in the strict verifier,
+  the record projection, the key registry, room-join grants, handshake proofs and attestations (R2-14).
+- A checkpoint that does not link to the chain held, next to a held checkpoint, is refused as `malformed-link` and is
+  never stored or witnessed (R2-15).
+- A second attestation at a held (attester, seq) is refused and kept as fork evidence, never a replacement (R2-16).
+- An honest witness of an equivocator's other checkpoint is not muted, and a mute is lifted once the attester's
+  equivocation is known (R2-17).
+- Peer-chosen text no longer reaches a log line or the terminal as given: control characters, line separators and
+  bidi overrides are written as escapes in every node log line, in mesh-agent output and in `sym listen` /
+  `sym peers` (R2-18).
+- The Bonjour reconnect cache is bounded: at most 512 entries, only advertisements the node dials, the least recently
+  announced dropped first (R2-20).
+- An invite parse error no longer repeats the URL, which can carry a relay token (R2-21).
+- The delivery ledger is pruned (R2-22): each mark carries its expiry (a directed one the replay window past its
+  signed time, others 30 days), expired marks drop at load, the file is rewritten when it doubles, and past 200,000
+  marks the author holding the most loses its oldest. A 0.14.2 ledger is read and rewritten with expiries.
+
+### Tests
+
+- `tests/identity-migration-by-id.test.js`: 51 tests (50 run on macOS; one real cross-filesystem test runs on Linux).
+  41 of them fail on 0.14.2 (42 on Linux); nine pin behaviour that did not change (two of them keep a pinned start from
+  migrating what is not its own). Of the 51, ten are for pinned starts, among them four real processes starting one 0.13
+  agent at once under injected stalls, with and without a by-id directory already in place. The code is mutation-tested:
+  twenty-one mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
+
 ## 0.14.2 — 2026-10-14
 
 **The daemon's start lock, hardened after review.** 0.14.1 replaced an unsound inode-number guard with a start lock

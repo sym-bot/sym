@@ -17,7 +17,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { RosterKeyRegistry, BINDING_TTL_MS, KEYS_FILE } = require('../lib/roster-keys');
+const { RosterKeyRegistry, BINDING_TTL_MS, EARNED_TTL_MS, KEYS_FILE } = require('../lib/roster-keys');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { identity, admitAs, deliver, signedRecord } = require('./_core-secure');
@@ -26,35 +26,43 @@ const DAY = 24 * 60 * 60 * 1000;
 const key = (i) => crypto.createHash('sha256').update(`k${i}`).digest().toString('base64url').slice(0, 43);
 
 describe('binding lifetime (D3)', () => {
-  it('a flood of 20,000 one-shot identities ages out; an honest long-lived peer\'s binding survives', () => {
+  it('a flood of one-shot identities ages out and holds at most its share; an honest long-lived peer\'s binding survives (R2-9)', () => {
     let t = 1_000_000;
     const r = new RosterKeyRegistry({ now: () => t });
     const honest = 'honest-peer';
     r.bind(honest, key('honest'), 'proven');
     t += DAY;
     r.bind(honest, key('honest'), 'proven'); r.noteVerified(honest); // a later session re-proved it
-    for (let i = 0; i < 20_000; i++) assert.strictEqual(r.bind(`churn-${i}`, key(i), 'proven').created, true);
-    assert.strictEqual(r.size(), 20_001);
+    t += DAY;
+    r.noteVerified(honest); // and it verified records on two days: established (R2-9)
+    let created = 0; let full = 0;
+    for (let i = 0; i < 20_000; i++) { const b = r.bind(`churn-${i}`, key(i), 'proven'); if (b.created) created++; else if (b.reason === 'full') full++; }
+    assert.strictEqual(created, 65536 / 4, 'new bindings hold a quarter of the registry at most (R2-9)');
+    assert.strictEqual(full, 20_000 - 65536 / 4, 'the rest are held for their sessions only');
+    assert.strictEqual(r.size(), 65536 / 4 + 1);
     t += BINDING_TTL_MS - DAY;
     assert.strictEqual(r.expire(), 0, 'nothing expires before 30 days unseen');
     t += 2 * DAY;
-    assert.strictEqual(r.expire(), 20_000, 'every one-shot identity expired');
+    assert.strictEqual(r.expire(), 65536 / 4, 'every one-shot identity expired');
     assert.strictEqual(r.size(), 1);
     assert.strictEqual(r.get(honest), key('honest'), 'the honest peer is still bound');
-    t += 365 * DAY;
-    assert.strictEqual(r.expire(), 0, 'and never expires: it verified something');
-    assert.strictEqual(r.expiredCount(), 20_000);
+    t += EARNED_TTL_MS - 40 * DAY;
+    assert.strictEqual(r.expire(), 0, 'an established binding lasts EARNED_TTL_MS unseen');
+    t += 20 * DAY;
+    assert.strictEqual(r.expire(), 1, 'and then ages out too (R2-9)');
   });
 
   it('pinned, grant-vouched (a view), grant, legacy-claim and live bindings never expire; one seen recently does not', () => {
     let t = 0;
     const live = new Set(['live']);
-    const view = new Map([['grant', key(2)], ['vouched', key(4)]]); // the grants in effect now
+    const view = new Map([['grant', key(2)]]); // the grants in effect now
     const r = new RosterKeyRegistry({ now: () => t, isLive: (id) => live.has(id), grantView: (id) => view.get(id) });
     r.bind('pinned', key(1), 'pinned');
     assert.strictEqual(r.bind('grant', key(2), 'grant').bound, true, 'a grant in effect binds as a view');
     r.bind('claim', key(3), 'legacy-claim');
-    r.bind('vouched', key(4), 'proven'); r.bind('vouched', key(4), 'grant');
+    // A proven binding a grant comes to vouch later (a session proving the key a grant already names
+    // stores nothing: R2-1, never promoted to proven).
+    r.bind('vouched', key(4), 'proven'); view.set('vouched', key(4)); r.bind('vouched', key(4), 'grant');
     r.bind('live', key(5), 'proven');
     r.bind('seen', key(6), 'proven');
     r.bind('record', key(7), 'proven');
@@ -79,7 +87,7 @@ describe('binding lifetime (D3)', () => {
 
   it('a full registry evicts nothing before it expires: a newcomer is refused a durable binding, and re-handshakes earn nothing', () => {
     let t = 0;
-    const r = new RosterKeyRegistry({ now: () => t, maxBindings: 4 });
+    const r = new RosterKeyRegistry({ now: () => t, maxBindings: 16 }); // new bindings: a share of 4 (R2-9)
     const H = 'honest-once-seen';
     r.bind(H, key('h'), 'proven');
     for (let i = 0; i < 3; i++) r.bind(`fill-${i}`, key(i), 'proven');
@@ -102,8 +110,10 @@ describe('binding lifetime (D3)', () => {
       const r = new RosterKeyRegistry({ dir, now: () => t });
       r.bind('honest', key('h'), 'proven');
       for (let i = 0; i < 2000; i++) r.bind(`churn-${i}`, key(i), 'proven');
-      // A record verified under the honest binding (frame-handler calls this on §8.8.5 success).
+      // Records verified under the honest binding on two days (frame-handler calls this on §8.8.5
+      // success): established (R2-9).
       t += 1000; r.noteVerified('honest');
+      t += DAY + 1; r.noteVerified('honest');
       t += 31 * DAY;
       const again = new RosterKeyRegistry({ dir, now: () => t });
       assert.strictEqual(again.size(), 1, 'the flood expired at load');
@@ -111,8 +121,10 @@ describe('binding lifetime (D3)', () => {
       assert.ok(again.entries()[0].verified, 'the verified fact survived the restart');
       const lines = fs.readFileSync(path.join(dir, KEYS_FILE), 'utf8').trim().split('\n');
       assert.strictEqual(lines.length, 2, 'compacted: the marker and the one binding');
-      t += 365 * DAY;
-      assert.strictEqual(new RosterKeyRegistry({ dir, now: () => t }).size(), 1, 'and it never expires');
+      t += 140 * DAY;
+      assert.strictEqual(new RosterKeyRegistry({ dir, now: () => t }).size(), 1, 'established: it lasts EARNED_TTL_MS unseen, across restarts');
+      t += 10 * DAY;
+      assert.strictEqual(new RosterKeyRegistry({ dir, now: () => t }).size(), 0, 'and then ages out (R2-9)');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
