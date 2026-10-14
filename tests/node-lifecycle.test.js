@@ -161,11 +161,22 @@ describe('node lifecycle: one state machine on one chain (R3-5, R3-9, R3-11)', (
     } finally { await cleanup(n); }
   });
 
-  it('a relay URL ws cannot parse is refused in the constructor and in an invite, never at start() (R3-11)', () => {
-    assert.throws(() => new SymNode({ name: uniq('bad-url'), silent: true, relay: 'relay.example.com', relayToken: 'x'.repeat(40), discovery: new NullDiscovery() }), { code: 'EBADRELAY' });
-    assert.throws(() => new SymNode({ name: uniq('bad-url'), silent: true, relay: 'https://relay.example.com', discovery: new NullDiscovery() }), { code: 'EBADRELAY' });
+  it('a relay setting ws cannot parse never fails the constructor or start(): the relay is disabled (R3-11, B1)', async () => {
+    // R3-11 found a URL ws could not parse throwing from start(), after the node had half started. The
+    // first fix threw EBADRELAY from the constructor instead, which stopped the daemon and mesh-channel
+    // at startup for an https:// URL (B1). The relay is an optional transport: a setting that is not a
+    // relay URL disables it, said in status(), and the node starts (tests/relay-url-setting.test.js).
+    const n = new SymNode({ name: uniq('bad-url'), silent: true, relay: 'relay.example.com', relayToken: 'x'.repeat(40), discovery: new NullDiscovery() });
+    try {
+      await n.start();
+      assert.strictEqual(n.status().running, true);
+      assert.strictEqual(n.status().relayState.phase, 'disabled');
+    } finally { await cleanup(n); }
+    const https = new SymNode({ name: uniq('https-url'), silent: true, relay: 'https://relay.example.com', discovery: new NullDiscovery() });
+    assert.strictEqual(https.status().relay, 'wss://relay.example.com', 'https:// is the same relay as wss://');
+    await cleanup(https);
     const bad = parseInvite('sym://team/r?relay=relay.example.com&token=t');
-    assert.ok(bad.error && /relay/.test(bad.error), `an invite naming a relay that is not a ws:// or wss:// URL is refused (${bad.error})`);
+    assert.ok(bad.error && /relay/.test(bad.error), `an invite naming a relay that is not a URL is refused (${bad.error})`);
     const good = parseInvite(`sym://team/r?relay=${encodeURIComponent('wss://relay.example.com')}&token=t`);
     assert.strictEqual(good.error, undefined);
     assert.strictEqual(good.relayUrl, 'wss://relay.example.com');
