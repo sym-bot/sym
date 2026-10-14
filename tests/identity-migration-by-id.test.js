@@ -543,7 +543,7 @@ describe('F9: a copy across filesystems: copies, verifies, commits; the source i
 describe('F9 on a real second filesystem (Linux: nodes/by-id lives on /dev/shm, a tmpfs)', () => {
   const shm = '/dev/shm';
   const second = process.platform === 'linux' && exists(shm) && fs.statSync(shm).dev !== fs.statSync(os.tmpdir()).dev;
-  (second ? it : it.skip)('rename fails with EXDEV for real, and the node still arrives whole, private, and unchanged', async () => {
+  (second ? it : it.skip)('by-id on another filesystem for real: the node arrives whole, private and unchanged, and no rename crosses the volumes', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-exdev-'));
     const far = fs.mkdtempSync(path.join(shm, 'sym-exdev-'));
     try {
