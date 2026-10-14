@@ -16,7 +16,7 @@ require('../_isolate-home'); // sandbox HOME/USERPROFILE: node state must never 
  * SVAF admit vs reject depends on the receiver's own memory drift, and the two
  * verdicts surface the CMB through different objects:
  *
- *   - directed REJECT  → _surfaceDirectedReject({...msg})        — raw wire CMB
+ *   - directed REJECT  → _surfaceUnstored({...msg})              — raw wire CMB
  *   - SVAF ADMIT       → receiveFromPeer → store entry → emit     — store copy
  *
  * This test wires two in-process nodes and asserts the payload survives to

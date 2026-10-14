@@ -3,6 +3,7 @@
 
 const { recordCreatedBy } = require('../lib/record');
 const { logSafe } = require('../lib/wire-identity'); // peer-chosen text on the terminal (R2-18)
+const { cutText } = require('../lib/core/text');
 
 /**
  * sym — CLI for the SYM mesh.
@@ -963,7 +964,7 @@ function gatherMeshMemory(question, limit) {
   const pool = matched.length > 0 ? matched : all.sort((a, b) => b.timestamp - a.timestamp);
   return pool.slice(0, limit).map((c) => ({
     ...c,
-    content: c.content.length > 400 ? c.content.slice(0, 400) + '…' : c.content,
+    content: c.content.length > 400 ? cutText(c.content, 400) + '…' : c.content,
   }));
 }
 

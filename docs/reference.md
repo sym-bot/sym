@@ -406,7 +406,7 @@ anything (a lifecycle change, an action): it refuses every record that is not v2
 | `error` | Meaning |
 |---|---|
 | `unsigned-member` | the record carries a member its signature does not cover (`detail` names it) |
-| `malformed-record` | it is not a well-formed v2.0 record: a type, a bound, NFC or well-formed Unicode (`detail`) |
+| `malformed-record` | it is not a well-formed v2.0 record: a type, a bound or NFC (`detail`). A lone surrogate is not one of these: the signed bytes are UTF-8, where it can only be U+FFFD, so the record is read, and its `record` given, in that spelling (0.14.3) |
 | `assertion-id-mismatch` | its `assertionId` is not the hash of its signed preimage |
 | `bad-signature` | the signature does not verify under the key given |
 | `content-mismatch` | a category key or the record's address is not that of its text |
