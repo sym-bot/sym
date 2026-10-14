@@ -240,7 +240,13 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   one sealed frame. This node mints nothing larger, and refuses a received record over any limit
   before anything validates, verifies or encodes it; a sealed frame longer than a 720 KiB record can
   produce (983,062 base64url characters) is refused before it is opened. At most 8 new records a
-  second per session are evaluated (burst 32).
+  second per session are evaluated (burst 32; and 128 KiB of record text a second, burst 1.5 MiB),
+  and at most 32 a second checked before verification (burst 128; 1 MiB/s, burst 4 MiB). Past either
+  a record waits in the session's queue, in order (0.14.3): at most 512 records or 8 Mi characters a
+  session, 4,096 records or 32 Mi characters in all. Past the queue it is refused unchecked and its
+  sender told (`cmb-refused`, at most one notice a second per peer, at most 256 records named in one);
+  a peer that, told, keeps sending more than 512 records past its own queue before that queue drains
+  is closed and not admitted again for 60 s.
 - **Wake channels**: at most 1,024, learned only from a confirmed session's own nodeId (a peer's
   word about another node is never stored), dropped after 30 days unseen; when the table is full a
   new first-hand channel displaces the least recently seen one of the weakest source, so many

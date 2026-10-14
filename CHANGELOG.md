@@ -5,8 +5,10 @@
 **An agent no longer loses its key to the 0.13 → by-id upgrade.** An XMesh review of `lib/config.js` 0.14.2 returned
 "do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
 or expose a key and the small ones beside them, by reading the state of an identity only from records committed in one
-atomic step (see "Identity and on-disk state"). The wire is unchanged; the public surface gains `relocation.abortExport`
-and `IdentityExportPendingError`.
+atomic step (see "Identity and on-disk state"). The wire gains two sealed control frames for flow control, `cmb-budget`
+and `cmb-refused`, which a 0.14.2 node ignores (see "Transport and node lifecycle", Flow control); the public surface
+gains `relocation.abortExport`, `IdentityExportPendingError`, `node.undelivered()`, `node.flowStatus()`, the
+`undelivered` event and `delivery.queued`.
 
 ### What was wrong
 
@@ -176,7 +178,9 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   (2,048 entries, 32 M characters); the inbox holds at most 32 M characters (read items make room, oldest first; an
   unread one never goes, and a delivery that does not fit is refused and counted, `inbox-full-refused`). The review's
   24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now. The store itself is still unbounded on disk by default
-  (retention is unlimited unless configured); the size budget bounds how fast one session can grow it.
+  (retention is unlimited unless configured); the size budget bounds how fast one session can grow it. Past either
+  budget a record now waits in the session's queue instead of being dropped (Flow control, under "Transport and node
+  lifecycle").
 - Gossip signature checks are bounded whatever the number of sessions: every new attestation, checkpoint, witness or
   authority statement takes one global token before verification, through the sending peer's fair share. The ceiling
   after verification is gone (R2-4).
@@ -331,10 +335,12 @@ is unchanged except where a line says so.
   delivered: `node.pendingDeliveries()` lists it, `status().pendingDeliveries` counts it, and metrics
   say each step (`cmb-requeued`, `cmb-redelivered`, and `cmb-undelivered` with reason
   `redelivery-overflow` or `node-stopped` when it is dropped). The list is bounded: 2048 records or
-  8 MiB a peer, 10,000 in all, the oldest dropped first. A receiver surfaces a record once for the life
+  8 Mi characters a peer, 10,000 in all; a record past it is not held (said undelivered, `held-full`) and nothing held
+  is pushed out for it (Flow control, below). A receiver surfaces a record once for the life
   of its store (the delivery ledger), so a record offered twice is not delivered twice. **The residual:**
   a frame a socket has written and the network, the relay or the relay's way to the peer then loses
-  is still lost and still reads as dispatched; only an end-to-end receipt closes that, which is
+  (or that is still unread in the receiver's socket when the receiver closes it) is still lost and
+  still reads as dispatched; only an end-to-end receipt closes that, which is
   protocol work. The held list is process memory: a stop drops it (said as undelivered); the record
   stays in the sender's store.
 - **The relay connection's ceiling is 8 MiB; the frame bound is per message (R3-1, R3-2).** A message
@@ -375,6 +381,80 @@ is unchanged except where a line says so.
 - `discovery.stop()` closes the connections it accepted and has not handed on, and its bounded wait
   no longer holds the process open.
 
+#### Flow control (directed and room records)
+
+**What was wrong.** A receiver bounds what one session's records cost it: a record budget per session by
+count (8 a second after a burst of 32, security review D) and, new in this release, by size (128 KiB of
+record text a second after 1.5 MiB, R2-3), behind a pre-verification lane (32 a second, burst 128; 1 MiB/s,
+burst 4 MiB). A record past either was DROPPED, unchecked or unevaluated, while its sender reported it
+dispatched, and nothing offered it again. Measured on the first 0.14.3 candidate (9f6847c), real nodes on one
+host: 49 directed messages sent in a burst, 32 delivered over the LAN and 38 over a relay (15 ms apart, the
+review's r-msgloss; 0.14.2 the same); 12 records of 200 KB, 7 (0.14.2 delivered 12: it had no size budget);
+40 of 50 KB, 30; 120 records held across a relay drop and re-offered by the new held-record path (the pacer
+back at 20/s burst 200; over the LAN every held record was written at once), 38, the sender reporting 115
+redelivered and nothing pending.
+
+**The design.** The budget exists to bound CPU and memory; it must not lose honest traffic (`lib/flow-control.js`).
+
+- **The receiver queues, it does not drop.** Every record a session brings is admitted (verified,
+  evaluated, surfaced) only once both lanes hold it and nothing of that session waits ahead of it;
+  otherwise it waits in the session's queue, in order, and is admitted as the lanes refill. What the
+  budget bounds is exactly as before. The queue holds at most 64 s of the budget per session (512
+  records, 8 Mi characters) and 4,096 records or 32 Mi characters in all. A record that arrived on a
+  session that has since closed is still admitted; one whose peer is no longer admitted (the door, a
+  penalty) is dropped and counted (`cmb-queue-dropped`). Counted: `cmb-queued`, and
+  `status().flowControl.receiver` (queued now, peaks, admitted late, refused, notices, cut).
+- **Past the queue a record is refused and its sender told.** A sealed control frame
+  `{ type: 'cmb-refused', assertionIds: [≤ 256], retryAfterMs }` names the refused records (by the
+  assertionId the record carries) and when to try again: the time the session's queue needs to drain
+  at its budget, or, when every session's queue together was full, the longest one's; 1 s to 64 s. At
+  most one notice a second per peer; refusals past what four notices carry are counted, not listed; a
+  notice owed to a peer with no open session waits a minute for its next one. Counted:
+  `cmb-queue-refused`, `cmb-refusal-sent`, `cmb-refusal-unsent`. A node stopping refuses what waits
+  in its queue and tells each sender, so the records are offered again to its next session.
+- **A peer that keeps on is cut.** One that, told, sends more than 512 records past its OWN queue
+  before that queue has drained (it sent more than 64 s of its budget ahead of it, and kept on) is
+  closed and not admitted again for 60 s, as a forgery is (`record-flood-cut`). A sender refused
+  because every session's queue together was full is not at fault and never counts toward it, and a
+  peer whose queue drains starts over. A paced sender never fills its own queue.
+- **The receiver advertises its budget.** Once a session is admitted each side sends
+  `{ type: 'cmb-budget', recordsPerSecond, recordsBurst, charsPerSecond, charsBurst, queueRecords,
+  queueChars }` (8, 32, 131072, 1572864, 512, 8388608), sealed, first in the greeting. A frame with a
+  member outside these, or a value that is not a finite number in range, is refused and counted
+  (`malformed`), as a malformed `cmb-refused` is.
+- **The sender paces every record to it.** Directed and room records, messages, a sleeping peer's
+  queued records, and the held records re-offered after a relay or LAN drop all go through the peer's
+  held list, oldest first, and are written to its session only within the budget that peer advertised
+  for it (each end starts a session with full buckets; anchors spend it too; an advertisement that
+  arrives late starts from the burst less what was already sent). A peer that advertises nothing
+  (0.14.2 and older) is paced to the 0.14.2 budget with a quarter kept as margin, 6 a second after 24,
+  and no size budget: 0.14.2 drops past 8/32, and a sender pacing exactly to it loses a record whenever
+  two arrive closer together than they were written. A record counts as dispatched only when it is
+  written: `delivery.dispatched` counts those, `delivery.queued` the copies held for the budget (a
+  directed send held is not undelivered), `pendingDeliveries()` lists every held record with its state
+  (`waiting`, `refused`, `written` to a relay pacer). A refused record goes back on the held list in
+  its place, nothing more goes to that session until the retry-after, and it is offered again (to that
+  peer only: a room record other peers took is not sent to them again); after 8 retries refused, or
+  once it is 23 h old by its signed timestamp (a receiver refuses a directed record older than 24 h),
+  it is given up: `cmb-undelivered`, the `undelivered` event, and `node.undelivered()` (the last 256).
+  A record past the held list's bound is refused at once (its send says `held-full`).
+- **Old peers both ways.** A 0.14.2 node ignores both frames (§7.3: an unknown type is ignored); run
+  against a `git archive` of 0.14.2 (fe285a3) it logs and counts nothing for them. A 0.14.3 sender to a
+  0.14.2 receiver: 49 messages, 12 × 200 KB, 40 × 50 KB and 120 records across a relay drop all
+  delivered, the receiver dropping none. A 0.14.2 sender (it paces nothing and hears nothing) to a
+  0.14.3 receiver: 49 messages, 12 × 200 KB and 40 × 50 KB all delivered from the queue; past the queue
+  its records are refused (it never offers them again) and past the cut it is closed, so a new receiver
+  still bounds an old sender.
+
+**Measured now** (the same runs, 0.14.3): 49 messages over the LAN and over the relay, 49; 12 × 200 KB,
+12; 40 × 50 KB, 40; 120 across a relay drop (the reviewer's script against sym-relay `origin/main` on
+127.0.0.1, the relay process killed and restarted), 120, the sender's counts true (nothing pending,
+nothing undelivered, every record it held then written), the receiver queueing at most one record at a
+time (timer jitter, admitted within milliseconds); 120 across a LAN drop, 120. Each exactly once. A flood
+of 2,300 records from a peer that ignores everything: at most 32 + 8/s evaluated, at most 512 waiting,
+the rest refused and the peer told (each notice ≤ 256 ids, retry-after 64 s), then cut. 40 records of
+400 K: at most 8 Mi characters waiting.
+
 #### Known, not fixed here
 
 - **R3-8, one identity in several rooms in one process** (what XMesh's observer does): the inbox is
@@ -382,10 +462,14 @@ is unchanged except where a line says so.
   design call; unchanged. Related: in a hot-swap the first node's stop() releases the identity lock
   file the second still relies on (an in-process re-acquisition gets a release that does nothing).
 - **End-to-end delivery receipts** (protocol work), and so the residual above.
-- **A receiver drops records past its own record budget** (8 a second, burst 32, per session: security
-  review D) unevaluated while the sender reports them dispatched. Of R3's 260 directed records sent at
-  once, 55 were accepted in one run with no relay drop at all; R3's "227 lost after a drop" counts
-  these too. The tests here stay under the budget.
+- (Was listed here in the first 0.14.3 candidate: a receiver dropped records past its own record budget,
+  unevaluated, while the sender reported them dispatched. Fixed, see Flow control above.)
+- **Order across a refusal is not kept.** A receiver refuses a record only past its queue; a record the
+  sender wrote before the refusal notice reached it can be taken once the queue frees a slot, ahead of
+  the refused one, which the sender offers again later in its place. Within the budget (what a paced
+  sender never leaves) a session's records are admitted in the order they arrived. MMP promises no
+  application-level order; keeping it across refusals would mean refusing records inside the bound,
+  which costs a 0.14.2 sender (it never offers a refused record again) records it would otherwise keep.
 - **mesh-channel exits on `identity-collision`** (server.js), so one spoofed 4004 still stops a channel
   host until it exits on `info.pingPong` only.
 - A token holder that keeps claiming a nodeId keeps that member off the relay most of the time; only a
@@ -403,6 +487,38 @@ is unchanged except where a line says so.
   and padded-roster attacks no longer close the victim's connection on 0.5.2 (the current relay already bounds
   both), and a member evicted by a spoofed 4004 is back on either relay after its retry.
 - `tests/relay-state.test.js`: the 4004 and 4006 cases now pin the long-backoff retry.
+- **Flow control:** `tests/flow-control.test.js` (8, real nodes: the LAN over TCP on the loopback, the relay over a
+  WebSocket relay): the bursts, both drops and both old-peer directions above, each delivered exactly once with the
+  sender's counts true; all 8 fail on 9f6847c (a `git archive` of it): 32 of 49 messages over the LAN, 31 of 40 ×
+  50 KB, 38 of 49 over the relay, 38 of 120 across the relay drop, 32 of 120 across the LAN drop, and with the old
+  peer at either end 32 of 49 messages and at most 1 of 12 × 200 KB.
+  `tests/flow-control-bounds.test.js` (27): the queue's bounds per session and in all, by count and by size; the door
+  and the penalties for what waits; arrival order; the cut and its episodes; the pre-verification lane for copies of
+  a delivered record; the notice's rate; a stopping receiver; the advertisement and malformed frames; the legacy
+  pacing and its margin; a late advertisement; anchors; refusals (held again in place, the back-off, on a new
+  session, given up after 8, a room record retried to one peer only, a refusal of nothing held, one refused while in
+  the relay pacer); the age bound; the held list's bounds; the buckets' clock. 26 of the 27 fail on 9f6847c (most
+  because what they check is new); the one that passes pins what must not change, a write the session refuses
+  outright reported at once as before. The R2-3 and record-flood
+  tests (`security-0.14.3`, `core-secure-review`) and the held-list bound (`relay-redelivery`) now pin waiting, and a
+  held record never pushed out, instead of dropping. **Mutation check:** 52 mutants of `lib/flow-control.js`,
+  `lib/frame-handler.js` and `lib/node.js`, one per guard the design adds (the queue's FIFO and budget gate, its four
+  bounds, the door and the two penalties at the drain, the drain's wait, the cut's threshold, episode, reset and
+  told-in-episode, the notice's schedule, rate, id cap and pending cap, the retry-after's clamp and others-full, the
+  stop notice, the clock, the legacy margin, the advertisement's lower bound, the back-off and size pacing, six frame
+  checks, the two lane spends and the gate, advertising and applying the budget, pacing, not-before, the refusal
+  limit, both age checks, the held list's two bounds, the sent window's age and per-peer key, placement in order, the
+  refused-in-pacer case, the back-off call, a fresh write failure, the anchor spend): every one is caught. Five
+  survived a first run: four were caught once the tests measured the right thing (the drain's wait and the record
+  lane's spend, which the flood's cut had masked; the notice timer's spin; the sent window's per-peer key, which only
+  shows when the refusing peer is not the last one written); the fifth was a guard no input could reach (an own-queue
+  reason beside the episode, which already implies it) and was removed, its mutant replaced by one on the episode.
+  **Runs:** full suite on macOS (Node 22, `--test-concurrency=2`): 1686 tests, 1682 pass, 0 fail, 4 skipped;
+  integration 6 of 6; `node scripts/gate-two-stock-nodes.mjs` passed; `npm audit` 0 vulnerabilities; the two
+  flow-control files with the four changed ones (95 tests) pass in `node:22-slim` (22.23.3) and `node:20-slim`
+  (20.20.2); CI (Linux, Node 20 and 22): 1686 tests, 1683 pass, 0 fail, 3 skipped. The bursts and drops above were
+  also run as scripts against a `git archive` of 0.14.2 (fe285a3) and of 9f6847c, both directions, over the LAN and
+  over sym-relay `origin/main` (2b23444) on 127.0.0.1.
 
 ## 0.14.2 — 2026-10-14
 

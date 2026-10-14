@@ -235,7 +235,7 @@ describe('D. no shared budget before verification; bounds (cs-review-B, cs-revie
     assert.ok(resMs < 500, `resolved in ${resMs.toFixed(0)} ms`);
   });
 
-  it('record-flood: one peer\'s distinct records are evaluated at most at the session budget', async () => {
+  it('record-flood: one peer\'s distinct records are evaluated at most at the session budget; the rest waits', async () => {
     const N = mk('rf-n', { room: 'g' }); const E = mk('rf-e', { room: 'g' });
     try {
       await N.start(); await E.start();
@@ -245,11 +245,11 @@ describe('D. no shared budget before verification; bounds (cs-review-B, cs-revie
       const author = { nodeId: E.nodeId, name: E.name, publicKey: E._identity.publicKey, privateKey: E._identity.privateKey };
       const s = E._peers.get(N.nodeId).transport;
       const metrics = [];
-      N.on('metric', (m) => { if (m.type === 'cmb-over-budget') metrics.push(m); });
+      N.on('metric', (m) => { if (m.type === 'cmb-queued') metrics.push(m); });
       for (let i = 0; i < 120; i++) s.send({ type: 'cmb', cmb: signedRecord(author, { room: 'g', categories: { focus: `distinct record ${i}` } }) });
       await until(() => metrics.length + evaluated >= 120, 4000);
       assert.ok(evaluated <= 32 + 8 * 4, `evaluated ${evaluated}: the burst (32) and 8 a second`);
-      assert.ok(metrics.length >= 50, 'the rest dropped unevaluated, and counted');
+      assert.ok(metrics.length >= 50, 'the rest waits in the session\'s queue (flow control, 0.14.3: it was dropped unevaluated), counted');
     } finally { await stopAll(N, E); }
   });
 
