@@ -154,14 +154,33 @@ patch for one of those cases made another. R1 proved eleven by running them. 0.1
 An independent security review (R2) of the 0.14 core reproduced each finding below; each fix has a test in
 `tests/security-0.14.3*.test.js` that fails on 0.14.3's base (632b95d) and passes here.
 
-- **A grant binds a key only when it is mesh-wide and rooted in the anchor through admins (R2-1, high).** Any holder
-  of a delegating grant, even one scoped to one world, could bind any unbound nodeId to its own key at every node
-  holding the grant; the victim's own session was then refused as an identity conflict, and once the squatter
-  connected the binding was stored `proven` and outlived the revoke. Now only an unscoped grant whose chain is the
-  anchor and `admin` grants is a key-binding source; the grant view binds only a nodeId nothing else binds, so a
-  session proving another key is admitted on its own proof and the conflict recorded (never refused); a session
-  proving the key the grant names stores nothing (never promoted to `proven`), so a revoke removes what the grant
-  bound. This narrows MMP §6.6.9 (a spec erratum is proposed).
+- **Only the anchor certifies which key is a nodeId's, and a certification outranks a session (R2-1, high).** Any
+  holder of a delegating grant, even one scoped to one world, could bind any unbound nodeId to its own key at every
+  node holding the grant; the victim's own session was then refused as an identity conflict, and once the squatter
+  connected the binding was stored `proven` and outlived the revoke. Now:
+  - Only an unscoped grant whose whole chain is unscoped `admin` grants up to the anchor is a key-binding source
+    (`AuthorityStore.bindsKey`): an anchor certification. A scoped grant, or one under an issuer or a validator,
+    confers its role inside its scope, binds no key and refuses no one.
+  - One precedence decides which key verifies a nodeId: the anchor pin and this node's own key, then an operator's
+    out-of-band pin, then an anchor certification, then trust on first proven use (a proven session, an earned
+    binding), then a legacy claim.
+  - While a certification of X -> K1 is in force, a session proving X with another key is refused (1009, recorded in
+    `roster-conflicts.jsonl`, shown in `sym status`, metric `identity-conflict`) and a live one is closed; a record
+    claiming X signed by another key is not verified; a stored binding of another key is superseded: kept on disk,
+    marked (`sym keys` lists it `superseded`), recorded, never used to verify, never expiring and outside the
+    new-binding share. A session proving K1 stores nothing on the grant's account.
+  - When the certification is revoked or expires, a nodeId nothing else binds is unbound again (the next session
+    binds it by first proven use); a superseded binding stays conflicted, failing closed (it verifies nothing and
+    every session for X is refused) until the operator resolves it (`sym keys resolve`) or a pin or a new
+    certification settles it. Certifications naming two keys for one nodeId certify neither.
+  - A pin outranks a certification, and their disagreement is recorded; a pin made while a session holds the nodeId
+    under another key closes that session. An invite still never repoints a stored binding the authority has not
+    superseded.
+  - A grant never binds this node's own nodeId, and gives its role only to what verifies under its subject key: an
+    attestation is weighed under the key that verified it. `grantRole` takes a certified key; `keyBindings()` lists
+    the key that decides each nodeId (the certified one, whatever is stored) and leaves a conflicted nodeId out.
+  This changes MMP §3.4 and §6.6.9, which say a binding is never replaced and a grant binds only an unbound nodeId;
+  the spec text follows once this is tested in release.
 - **A relay can no longer get an honest peer closed and banned as a forger (R2-2, high).** The `cmb-encrypted` AAD
   binds the key, assertionId, author nodeId, room and to; the signature, `createdBy`, `createdTimestamp`, lineage
   and the application descriptor travel in clear. The receiver now recomputes the AAD-bound assertionId before the
@@ -232,6 +251,19 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   identity; across volumes nothing is renamed and the source is kept aside; an interrupted migration leaves the 0.13
   directory as it was; the migration-lock tests are replaced by no-wait tests; a live 0.13 holder refuses; a pin whose
   identity is in the 0.13 directory halts instead of "absent".
+- `tests/security-0.14.3-cert.test.js` (new): 22 tests, one or more per rule of the key-binding precedence (R2-1, the
+  certification design); 16 fail on 9f6847c, where the certification was the weakest source; the 6 that pass there pin
+  what already held (a scoped grant binds nothing, a nodeId only a certification bound is unbound by the revoke, a pin
+  outranks a certification in either order, a grant gives its role only to its subject key, this node's own nodeId).
+  Updated, each with its reason in the test: the registry rows "only a grant view binds the nodeId, a different key from
+  proven / pinned" and "nodeId bound (proven), a different key from grant" (a certification now refuses a session and
+  supersedes a stored binding; a pin still binds), the persistence row (a grant not in force records nothing now),
+  `R2-1: a grant view never refuses a proving session` (it now refuses it), and the authority-node §6.6.9 row (the
+  conflicting certification supersedes the proven binding). Mutation check: 28 mutants, one per new guard of the design
+  (the order of the decision, fail closed, two certified keys, the refusal, supersession, settling by a certification
+  or a pin, the recorded conflicts, the share and expiry, the credit, persistence and replay, the start offer, the
+  session enforcement on entry, exit and pin, `keyBindings`, the attestation key, `grantRole`, `bindsKey` in the
+  index): every one is caught.
 - Mutation check: 27 mutants of `lib/config.js` and `lib/relocation.js`, one per guard of the new design (the verify
   before the commit, the exclusive claim, ENOENT-only, the mint gate, the adoption guard, the live 0.13 holder, the
   claim and the compare in the lock reclaim, the export order, the tombstone place, the import key place, junction
@@ -251,7 +283,9 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   the original agent with its whole store and the key on disk. Across volumes (disk image): 120 rounds, 60 killed
   mid-run, every one the same (632b95d on the same image: 4 of 10 rounds started with store files missing).
 - Full suite (`--test-concurrency=2`, macOS): 1568 tests, 1564 pass, 0 fail, 4 skipped; `npm run gate:stock-nodes` passed;
-  `npm audit`: 0 vulnerabilities. CI (Linux, Node 20 and 22) green, the real second-filesystem test included.
+  `npm audit`: 0 vulnerabilities. CI (Linux, Node 20 and 22) green, the real second-filesystem test included. With the
+  certification design (`--test-concurrency=1`, macOS, the machine shared): 1673 tests, 1669 pass, 0 fail, 4 skipped;
+  integration 6 of 6; the stock-nodes gate passed; `npm audit`: 0 vulnerabilities.
 
 ### Transport and node lifecycle
 

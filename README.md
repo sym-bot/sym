@@ -123,12 +123,16 @@ participant.
   roles — exists until both proofs validate. A discovery record or a relay roster entry only
   decides whom to dial.
 - **One key per nodeId, for life.** A session that proves a nodeId with a different key from the
-  one this node binds — durably, or for a session that is live — is a *conflict*: refused with
-  1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to resolve
-  (`sym keys <name> resolve`). No source overrides a different key. A handshake alone binds a
-  key only for its session; the binding becomes durable when it is earned (an admitted verified
-  record, a verified record its author signed to this node, a pin, an in-force grant), so
-  churning identities cannot fill the registry, and nothing is ever evicted to make room.
+  one this node binds — durably, by an anchor certification, or for a session that is live — is a
+  *conflict*: refused with 1009 IDENTITY_CONFLICT, recorded, and shown in `sym status` for you to
+  resolve (`sym keys <name> resolve`). One precedence decides which key verifies: the anchor and
+  this node's own key, then a pin you accepted, then an anchor certification (an unscoped grant
+  from the anchor or its admins), then the first proven session. Only a certification sets a
+  stored binding of another key aside: kept, recorded, and verifying nothing, also once the
+  certification goes, until you resolve it. A handshake alone binds a key only for its session;
+  the binding becomes durable when it is earned (an admitted verified record, a verified record
+  its author signed to this node, a pin), so churning identities cannot fill the registry, and
+  nothing is ever evicted to make room.
 - **Every record is signed, and verified by its author's node id.** A record is accepted only
   if it is a signed `mmp-sig-v2.0` record whose author key this node resolves by
   `createdByNodeId` — a key it proved, pinned from an invite, or holds from an in-force grant.
