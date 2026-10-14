@@ -49,12 +49,14 @@ describe('binding lifetime (D3)', () => {
   it('pinned, grant-vouched (a view), grant, legacy-claim and live bindings never expire; one seen recently does not', () => {
     let t = 0;
     const live = new Set(['live']);
-    const view = new Map([['grant', key(2)], ['vouched', key(4)]]); // the grants in effect now
+    const view = new Map([['grant', key(2)]]); // the grants in effect now
     const r = new RosterKeyRegistry({ now: () => t, isLive: (id) => live.has(id), grantView: (id) => view.get(id) });
     r.bind('pinned', key(1), 'pinned');
     assert.strictEqual(r.bind('grant', key(2), 'grant').bound, true, 'a grant in effect binds as a view');
     r.bind('claim', key(3), 'legacy-claim');
-    r.bind('vouched', key(4), 'proven'); r.bind('vouched', key(4), 'grant');
+    // A proven binding a grant comes to vouch later (a session proving the key a grant already names
+    // stores nothing: R2-1, never promoted to proven).
+    r.bind('vouched', key(4), 'proven'); view.set('vouched', key(4)); r.bind('vouched', key(4), 'grant');
     r.bind('live', key(5), 'proven');
     r.bind('seen', key(6), 'proven');
     r.bind('record', key(7), 'proven');
