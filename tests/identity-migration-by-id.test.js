@@ -591,22 +591,28 @@ describe('F11: one migrator at a time', () => {
       const c = require(${JSON.stringify(path.resolve(__dirname, '../lib/config.js'))});
       const release = c.acquireIdentityLock('migration', { dir: ${JSON.stringify(path.join(NODES_DIR, '.migrating'))} });
       console.log('held');
-      setTimeout(() => { c.migrateNodeDir(${JSON.stringify(name)}); release(); console.log('released'); process.exit(0); }, ${ms});`],
+      setTimeout(() => { c.migrateNodeDir(${JSON.stringify(name)}); release(); console.log('released:' + Date.now()); process.exit(0); }, ${ms});`],
     { stdio: ['ignore', 'pipe', 'inherit'] });
   }
   const held = (child) => new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('exit', () => reject(new Error('the holder exited'))); });
+  /** When the holder let go (its clock, ms), read after the fact. */
+  const releasedAt = (child) => new Promise((resolve, reject) => {
+    let buf = '';
+    child.stdout.on('data', (d) => { buf += d; const m = /released:(\d+)/.exec(buf); if (m) resolve(Number(m[1])); });
+    child.once('exit', () => { const m = /released:(\d+)/.exec(buf); if (m) resolve(Number(m[1])); else reject(new Error('the holder never released')); });
+  });
 
   it('a start waits for the process that is moving the node, then finds it moved', async () => {
     const name = uniq('f11-wait');
     const id = legacyNode(name);
     husk(id.nodeId); // a merge, not a single rename
-    const child = holder(name, 400);
+    const child = holder(name, 1000);
     try {
       await held(child);
-      const t0 = Date.now();
       const loaded = cfg.loadIdentity({ name }); // blocks until the holder lets go
-      const waited = Date.now() - t0;
-      assert.ok(waited >= 250, `it waited for the holder (${waited} ms)`);
+      const returnedAt = Date.now();
+      const released = await releasedAt(child);
+      assert.ok(returnedAt >= released, `it returned (${returnedAt}) only after the holder let go (${released}): it waited, it did not move the node alongside it`);
       assert.strictEqual(loaded.nodeId, id.nodeId);
       assert.strictEqual(loaded.privateKey, id.privateKey);
       assert.strictEqual(identitiesNamed(name).length, 1);
