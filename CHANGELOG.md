@@ -59,7 +59,7 @@ or expose a key and the small ones beside them. The wire and the public surface 
   halts (`IdentityHaltError`) and says why. A name that indexes a node whose identity is missing halts too.
   `create: false` still throws `IdentityAbsentError`. Behaviour change: a node whose `identity.json` was deleted by hand
   to "start over" now halts instead of silently becoming a new agent; to start the name again as a different agent,
-  remove the file the message names (`nodes/by-name/<name>.json`).
+  remove the two paths the message names (`nodes/by-name/<name>.json` and the link `nodes/<name>`).
 - **Key files are private.** After a migration `identity.json` and `e2e-keypair.json` are 0600 and the directories that
   hold them 0700; loading an identity narrows an existing key file (and the E2E keypair beside it), so nodes already
   migrated by 0.14.0 to 0.14.2 are healed on their next start. A new identity's directory is 0700. Best effort on a
@@ -84,8 +84,8 @@ or expose a key and the small ones beside them. The wire and the public surface 
 
 ### Tests
 
-- `tests/identity-migration-by-id.test.js`: 36 tests (35 run on macOS; one real cross-filesystem test runs on Linux).
-  30 of them fail on 0.14.2; five pin behaviour that did not change, and one runs only on Linux. The code is mutation-tested: seventeen
+- `tests/identity-migration-by-id.test.js`: 37 tests (36 run on macOS; one real cross-filesystem test runs on Linux).
+  31 of them fail on 0.14.2; five pin behaviour that did not change, and one runs only on Linux. The code is mutation-tested: seventeen
   mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
 
 ## 0.14.2 — 2026-10-14

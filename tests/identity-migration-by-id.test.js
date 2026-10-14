@@ -322,6 +322,24 @@ describe('F4: a name that indexes a node whose identity is missing halts', () =>
     assert.strictEqual(fs.readdirSync(path.join(NODES_DIR, 'by-id')).length, dirsBefore, 'nothing was minted');
   });
 
+  it('the halt names what to remove, and removing exactly that lets the name start again as a different agent', () => {
+    const name = uniq('f4reset');
+    const first = cfg.loadIdentity({ name });
+    fs.rmSync(path.join(cfg.nodeDirById(first.nodeId), 'identity.json'));
+    let halt = null;
+    try { cfg.loadIdentity({ name }); } catch (e) { halt = e; }
+    assert.ok(halt instanceof IdentityHaltError);
+    const index = path.join(NODES_DIR, 'by-name', `${encodeURIComponent(name)}.json`);
+    const link = path.join(NODES_DIR, name);
+    assert.ok(halt.reason.includes(index) && halt.reason.includes(link), 'the message names the index file and the link');
+    fs.unlinkSync(index);
+    assert.throws(() => cfg.loadIdentity({ name }), IdentityHaltError, 'the index alone is not enough: the link re-indexes the name');
+    assert.ok(exists(index), '(and it has: the index is back)');
+    fs.unlinkSync(index); fs.unlinkSync(link);
+    const again = cfg.loadIdentity({ name });
+    assert.notStrictEqual(again.nodeId, first.nodeId, 'a different agent, as the message says');
+  });
+
   it('create: false is still IdentityAbsentError (EIDENTITYABSENT)', () => {
     const name = uniq('f4b');
     const first = cfg.loadIdentity({ name });
