@@ -240,7 +240,8 @@ is unchanged except where a line says so.
 - **End-to-end delivery receipts** (protocol work), and so the residual above.
 - **A receiver drops records past its own record budget** (8 a second, burst 32, per session: security
   review D) unevaluated while the sender reports them dispatched. Of R3's 260 directed records sent at
-  once, about 205 are dropped this way even with no relay drop; the tests here stay under it.
+  once, 55 were accepted in one run with no relay drop at all; R3's "227 lost after a drop" counts
+  these too. The tests here stay under the budget.
 - **mesh-channel exits on `identity-collision`** (server.js), so one spoofed 4004 still stops a channel
   host until it exits on `info.pingPong` only.
 - A token holder that keeps claiming a nodeId keeps that member off the relay most of the time; only a
