@@ -455,6 +455,8 @@ describe('M1: recall is matched in memory and reads only what it returns', () =>
       for (const q of ['', 'entry 1', 'ENTRY 29', 'tagged', 'recall perf', 'calm (v:0', 'neutral', limited[0].key.slice(4, 20), 'focus: entry 2999']) {
         assert.deepStrictEqual(store.recall(q).map((e) => e.key), reference(store, q), `the same entries for ${JSON.stringify(q)}`);
       }
+      assert.throws(() => store.recall(123), TypeError, 'a query that is not text is refused, never read as "no query"');
+      assert.strictEqual(store.recall(null).length, N);
       reads.n = 0;
       const where = store.recall('', { limit: 3, where: (e) => e.tags.includes('Tagged') });
       assert.ok(where.length === 3 && where.every((e) => e.tags.includes('Tagged')));
