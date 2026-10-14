@@ -519,8 +519,10 @@ function handleIPCMessage(socketId, socket, msg) {
       break;
 
     case 'recall': {
-      let results = node.recall(msg.query || '');
-      if (msg.limit && msg.limit > 0) results = results.slice(0, msg.limit);
+      // Only the entries returned are read (review M1).
+      const limit = Number.isSafeInteger(msg.limit) && msg.limit > 0 ? msg.limit : undefined;
+      let results = node.recall(msg.query || '', limit ? { limit } : undefined);
+      if (limit) results = results.slice(0, limit);
       sendIPC(socket, { type: 'result', action: 'recall', results });
       break;
     }

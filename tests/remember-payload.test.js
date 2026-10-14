@@ -111,7 +111,7 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
     });
   });
 
-  it('payload does not affect cmbKey — same CAT7 + different payloads dedupe', async () => {
+  it('payload does not affect cmbKey — same CAT7 + different payloads share one memory; each is its own action', async () => {
     await withNode('payload-not-in-key', async (node) => {
       const entry1 = node.remember({
         focus: 'identical-cat7',
@@ -135,13 +135,20 @@ describe('remember({payload}) — opaque payload riding CMBs alongside CAT7', ()
 
       assert.ok(entry1, 'first emit should land');
 
-      // The payload is NOT addressed: identical CAT7 with a different payload is the same
-      // content and therefore the same address. This used to assert `null` — "nothing came
-      // back" — which the collapse contract replaced with something stronger: the second call
-      // returns a CITATION of the address that already says it, so a caller can tell
-      // "already held" apart from "refused", which `null` conflated.
-      assert.ok(entry2?.collapsed, 'the second emit collapses rather than minting a sibling');
+      // The payload is NOT addressed: identical CAT7 with a different payload is the same cognition and
+      // therefore the same address, and memory holds it once: nothing is minted, HEAD does not move. But
+      // the payload is a signed action (§8.8.2, security review S3): the second record is another
+      // assertion, and it is SENT, not deduplicated away as the collapse used to (the collapse result
+      // `collapsed: true` read as "already said" to mesh-channel). The result says so: the same key,
+      // this record's own assertion, `cognitionHeld`, and a delivery report.
+      assert.ok(entry2 && entry2.cognitionHeld === true, 'memory already held the cognition');
+      assert.ok(!entry2.collapsed && !entry2.duplicate, 'and the action is not a duplicate: it is sent');
       assert.strictEqual(entry2.key, entry1.key, 'and cites the address the payload did not change');
+      assert.notStrictEqual(entry2.cmb.metadata.assertionId, entry1.cmb.metadata.assertionId, 'its own assertion');
+      assert.deepStrictEqual(entry2.cmb.payload, { v: 2 });
+      assert.ok(entry2.delivery && entry2.delivery.directed === false, 'with the delivery a room send carries');
+      assert.strictEqual(node._store.count(), 1, 'one memory');
+      assert.deepStrictEqual(node._store.get(entry1.key).cmb.payload, { v: 1 }, 'memory keeps the record it holds');
       // The assertion that actually distinguishes a mint-level refusal from a store-level dedup:
       // a dedup writes nothing while HEAD has already moved.
       assert.strictEqual(node._head, entry1.key, 'HEAD MUST NOT advance — nothing new was said');

@@ -8,7 +8,8 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
  *
  *   R2-12  the public verifyCMB reported a record carrying unsigned members, a wrong assertionId, or a
  *          0.13-suite record with an attached application, as valid:true
- *   R2-13  a lone surrogate encodes as U+FFFD, so one signature verified two strings
+ *   R2-13  a lone surrogate encodes as U+FFFD, so one signature verified two strings (and, review M2,
+ *          refusing it dropped a 0.14.2 author's record cut inside a surrogate pair: it is held as U+FFFD)
  *   R2-14  non-canonical base64url spellings of one key or signature were accepted
  *   R2-21  an invite parse error echoed the URL, relay token included
  */
@@ -135,32 +136,40 @@ describe('R2-12: the public verifyCMB checks the record\'s own bytes, and says w
   });
 });
 
-describe('R2-13: one signature verifies one string', () => {
-  it('R2-13: a text re-spelt with a lone surrogate does not verify under the signature of its U+FFFD spelling', () => {
-    const rec = signedRecord(alice, { categories: { focus: 'build � ok' } });
+describe('R2-13 (review M2): one signature, one string; a lone surrogate is held as U+FFFD, never refused', () => {
+  // The signed object is UTF-8 bytes, where a lone surrogate can only be U+FFFD: "\ud800" and "\ufffd" are
+  // one signed text. 0.14.3 first refused the lone-surrogate spelling, which dropped a 0.14.2 author's
+  // record whose text was cut inside a surrogate pair; it now holds it as the U+FFFD spelling, so the
+  // record verifies as signed and two different strings are never held under one signature.
+  it('R2-13: a text re-spelt with a lone surrogate is the same record: it verifies, and is held as its U+FFFD spelling', () => {
+    const rec = signedRecord(alice, { categories: { focus: 'build \ufffd ok' } });
     assert.strictEqual(pub.verifyCMB(copy(rec), alice.publicKey).valid, true);
-    const forged = JSON.parse(JSON.stringify(rec).replace('�', '\\ud800'));
-    assert.notStrictEqual(forged.categories.focus.text, rec.categories.focus.text, 'the scene: two different strings');
-    assert.throws(() => canonicalRecordV2_0(forged), (e) => e.code === 'ERECORDSHAPE' && /well-formed/.test(e.reason));
-    assert.strictEqual(pub.verifyCMB(forged, alice.publicKey).valid, false);
-    assert.strictEqual(core.verifyCMB(forged, alice.publicKey).valid, false, 'core\'s signature step refuses it too');
+    const respelt = JSON.parse(JSON.stringify(rec).replace('\ufffd', '\\ud800'));
+    assert.notStrictEqual(respelt.categories.focus.text, rec.categories.focus.text, 'the scene: two different strings');
+    assert.deepStrictEqual(canonicalRecordV2_0(respelt), canonicalRecordV2_0(copy(rec)), 'one projection: one string');
+    const v = pub.verifyCMB(respelt, alice.publicKey);
+    assert.strictEqual(v.valid, true, JSON.stringify(v));
+    assert.strictEqual(v.record.categories.focus.text, 'build \ufffd ok', 'what verifies is the U+FFFD spelling');
+    assert.strictEqual(core.verifyCMB(respelt, alice.publicKey).valid, false, 'core\'s signature step refuses an object no boundary brought to its well-formed spelling (fail closed)');
+    assert.strictEqual(core.verifyCMB(canonicalRecordV2_0(respelt), alice.publicKey).valid, true, 'and verifies the projection');
   });
 
-  it('R2-13: a signed label re-spelt with a lone surrogate does not verify', () => {
-    const rec = signedRecord({ ...alice, name: 'ali�ce' });
-    const forged = JSON.parse(JSON.stringify(rec).replace('�', '\\udfff'));
-    assert.throws(() => canonicalRecordV2_0(forged), (e) => e.code === 'ERECORDSHAPE');
-    assert.strictEqual(core.verifyCMB(forged, alice.publicKey).valid, false);
-    assert.strictEqual(pub.verifyCMB(forged, alice.publicKey).valid, false);
-    const legacy = legacyRecord({ ...alice, name: 'ali�ce' });
-    const legacyForged = JSON.parse(JSON.stringify(legacy).replace('�', '\\udfff'));
-    assert.strictEqual(core.verifyCMB(legacyForged, alice.publicKey).valid, false, 'the 0.13 suite too');
+  it('R2-13: a signed label re-spelt with a lone surrogate is the same label, in both suites', () => {
+    const rec = signedRecord({ ...alice, name: 'ali\ufffdce' });
+    const respelt = JSON.parse(JSON.stringify(rec).replace('\ufffd', '\\udfff'));
+    assert.strictEqual(canonicalRecordV2_0(respelt).metadata.createdBy, 'ali\ufffdce');
+    assert.strictEqual(core.verifyCMB(respelt, alice.publicKey).valid, false, 'unprojected: refused');
+    assert.strictEqual(pub.verifyCMB(respelt, alice.publicKey).valid, true);
+    const legacy = legacyRecord({ ...alice, name: 'ali\ufffdce' });
+    const legacyRespelt = JSON.parse(JSON.stringify(legacy).replace('\ufffd', '\\udfff'));
+    assert.strictEqual(core.verifyCMB(legacyRespelt, alice.publicKey).valid, false, 'the 0.13 suite: core\'s step refuses the unnormalised object');
+    assert.strictEqual(pub.verifyCMB(legacyRespelt, alice.publicKey).valid, true, 'the public verifier reads it as its bytes say');
   });
 
   it('R2-13: a record is minted well formed: a lone surrogate a host passes is minted as U+FFFD, and verifies', () => {
     const r = core.createCMB({ categories: { focus: 'cut inside a pair \ud83d' }, createdBy: 'ag\udc00ent', createdByNodeId: alice.nodeId, emitV2: true, room: 'default' });
-    assert.strictEqual(r.categories.focus.text, 'cut inside a pair �');
-    assert.strictEqual(r.metadata.createdBy, 'ag�ent');
+    assert.strictEqual(r.categories.focus.text, 'cut inside a pair \ufffd');
+    assert.strictEqual(r.metadata.createdBy, 'ag\ufffdent');
     r.metadata.assertionId = core.assertionIdV2_0(r);
     core.signCMB(r, alice.privateKey);
     assert.strictEqual(pub.verifyCMB(copy(r), alice.publicKey).valid, true);
