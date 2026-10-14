@@ -65,7 +65,7 @@ require('../lib/core/state-root').assertTestSandbox();
 // ~/.sym. Building it from the home dir sent a rooted daemon's room, tasks and relay.env to the
 // user's real ~/.sym.
 const SYM_DIR = require('../lib/core/state-root').SYM_STATE_DIR;
-const { getSocketPath, getLogDir, listenExclusive, socketAnswers } = require('../lib/platform');
+const { getSocketPath, getLogDir, listenExclusive, socketAnswers, socketIdentity, socketIsStill } = require('../lib/platform');
 const SOCKET_PATH = getSocketPath();
 // Stable name: use SYM_NODE_NAME env, or platform-scoped default
 // (not hostname — macOS appends random suffixes to hostname on WiFi,
@@ -229,11 +229,12 @@ function socketServed() {
   return socketAnswers(SOCKET_PATH);
 }
 
-/** The socket file this daemon created (its inode), so it never removes another daemon's. */
-let ownSocketIno = null;
+/** The socket file this daemon created (its identity: inode, device, creation time), so it never removes
+ *  another daemon's. An inode number alone would not do: Linux hands a removed file's number to the next file. */
+let ownSocket = null;
 function socketIsOurs() {
-  if (process.platform === 'win32' || ownSocketIno === null) return false;
-  try { return fs.statSync(SOCKET_PATH).ino === ownSocketIno; } catch { return false; }
+  if (process.platform === 'win32' || ownSocket === null) return false;
+  return socketIsStill(SOCKET_PATH, ownSocket);
 }
 
 /** The server listening on SOCKET_PATH now. Closing a Unix-socket server removes its path, whoever
@@ -278,7 +279,7 @@ function onListening() {
   // chmod not applicable on Windows named pipes
   if (process.platform !== 'win32') {
     try { fs.chmodSync(SOCKET_PATH, 0o700); } catch {}
-    try { ownSocketIno = fs.statSync(SOCKET_PATH).ino; } catch { ownSocketIno = null; }
+    ownSocket = socketIdentity(SOCKET_PATH);
   }
   log(`IPC server listening: ${SOCKET_PATH}`);
 }
@@ -312,14 +313,14 @@ async function startIPCServer() {
   if (process.platform !== 'win32') {
     let relistening = false;
     setInterval(async () => {
-      if (relistening || ownSocketIno === null || socketIsOurs()) return;
+      if (relistening || ownSocket === null || socketIsOurs()) return;
       if (fs.existsSync(SOCKET_PATH)) return; // another process's socket now: leave it alone
       relistening = true;
       try {
         log(`IPC socket ${SOCKET_PATH} was removed while this daemon was serving; listening again`);
         // The old listener goes first: closing it removes the path, which is still empty now.
         if (listeningServer) { listeningServer.close(); listeningServer = null; }
-        ownSocketIno = null;
+        ownSocket = null;
         const fresh = newIPCServer();
         if (await listenExclusive(fresh, SOCKET_PATH) === 'served') {
           log(`Another sym-daemon now serves ${SOCKET_PATH}; this one keeps the clients it has`);
