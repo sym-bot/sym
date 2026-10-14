@@ -339,7 +339,8 @@ is unchanged except where a line says so.
   is pushed out for it (Flow control, below). A receiver surfaces a record once for the life
   of its store (the delivery ledger), so a record offered twice is not delivered twice. **The residual:**
   a frame a socket has written and the network, the relay or the relay's way to the peer then loses
-  is still lost and still reads as dispatched; only an end-to-end receipt closes that, which is
+  (or that is still unread in the receiver's socket when the receiver closes it) is still lost and
+  still reads as dispatched; only an end-to-end receipt closes that, which is
   protocol work. The held list is process memory: a stop drops it (said as undelivered); the record
   stays in the sender's store.
 - **The relay connection's ceiling is 8 MiB; the frame bound is per message (R3-1, R3-2).** A message

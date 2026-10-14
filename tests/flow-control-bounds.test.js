@@ -329,7 +329,10 @@ describe('flow control, the receiver: past its budget a record waits; past its q
       assert.ok(await until(() => s._peers.has(r.nodeId) && r._peers.has(s.nodeId), 20000));
       assert.ok(await until(() => s._peers.get(r.nodeId).transport._outFlow && s._peers.get(r.nodeId).transport._outFlow.advertised, 5000));
       for (let i = 0; i < 100; i++) s.remember(CATS(`stop ${i}`), { to: r.nodeId });
-      assert.ok(await until(() => flowOf(r).queuedRecords > 20, 5000), `r has records waiting (${flowOf(r).queuedRecords})`);
+      // Every record has reached r (surfaced or waiting): what is still unread in a socket when it closes
+      // is the residual (lost with the socket, said nowhere), not what this test is about.
+      assert.ok(await until(() => seen.length + flowOf(r).queuedRecords === 100, 10000), `r holds all 100 (${seen.length} surfaced, ${flowOf(r).queuedRecords} waiting)`);
+      assert.ok(flowOf(r).queuedRecords > 20, `r has records waiting (${flowOf(r).queuedRecords})`);
       await r.stop();
       assert.ok(await until(() => sm.count('cmb-refused-by-peer') > 0, 5000), 'the stopping receiver told the sender what it had not taken');
       assert.ok(s.pendingDeliveries().some((p) => p.state === 'refused'), 'held again, waiting for the retry-after');

@@ -108,7 +108,7 @@ describe('C: the interior read side is scoped to the mind\'s mission (Finding 6)
 });
 
 describe('3: relayed forgeries cost bounded work, and nobody is blamed (Finding 3)', () => {
-  it('Q1: 400 forged 200 KiB records relayed in another\'s name are mostly dropped before any work, with bounded logs and decisions', async () => {
+  it('Q1: 400 forged 200 KiB records relayed in another\'s name: most wait or are refused before any work, with bounded logs and decisions', async () => {
     const b = mk('q1', {});
     try {
       await b.start();
@@ -126,7 +126,9 @@ describe('3: relayed forgeries cost bounded work, and nobody is blamed (Finding 
       }
       assert.strictEqual(sM.closed, false, 'the relayer is not blamed');
       assert.ok((metrics['relayed-signature-unverified'] || 0) <= 8, `verified and failed at most 8: ${metrics['relayed-signature-unverified']}`);
-      assert.ok((metrics['relayed-signer-muted'] || 0) + (metrics['cmb-over-verify-budget'] || 0) >= 380, 'the rest dropped before any work');
+      // Past the pre-verification lane a record waits in the session's queue (flow control, 0.14.3: it
+      // was dropped), and past the queue it is refused unchecked: either way no work is done on it now.
+      assert.ok((metrics['relayed-signer-muted'] || 0) + (metrics['cmb-queued'] || 0) + (metrics['cmb-queue-refused'] || 0) >= 380, 'the rest waits or is refused before any work');
       assert.ok(logs.length <= 10, `log lines: ${logs.length}`);
       assert.ok(b._decisionLog.count() - before <= 2, 'decision-log entries bounded');
     } finally { await stopAll(b); }
@@ -134,7 +136,7 @@ describe('3: relayed forgeries cost bounded work, and nobody is blamed (Finding 
 });
 
 describe('3b: the verification lane bounds work on records naming many signers', () => {
-  it('400 records naming 400 unknown authors: most are dropped before any schema, hash or signature work', async () => {
+  it('400 records naming 400 unknown authors: most wait (or are refused) before any schema, hash or signature work', async () => {
     const b = mk('lane', {});
     try {
       await b.start();
@@ -148,7 +150,10 @@ describe('3b: the verification lane bounds work on records naming many signers',
         rec.metadata.createdByNodeId = crypto.randomUUID();
         deliver(b, sM, { type: 'cmb', cmb: rec });
       }
-      assert.ok((metrics['cmb-over-verify-budget'] || 0) >= 200, `dropped before any work: ${metrics['cmb-over-verify-budget']}`);
+      // They wait in the session's queue and are checked at the lane's rate (flow control, 0.14.3: they were dropped).
+      const waiting = (metrics['cmb-queued'] || 0) + (metrics['cmb-queue-refused'] || 0);
+      assert.ok(waiting >= 200, `waiting or refused before any work: ${waiting}`);
+      assert.ok((metrics['cmb-author-unresolvable'] || 0) <= 128 + 8, `and only the lane's burst was checked now (${metrics['cmb-author-unresolvable']})`);
     } finally { await stopAll(b); }
   });
 });
