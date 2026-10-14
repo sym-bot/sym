@@ -287,6 +287,27 @@ describe('the staged commit: what it checks before the one rename', () => {
     } finally { child.kill('SIGKILL'); await new Promise((r) => child.once('exit', r)); }
   });
 
+  it('a husk replaced by another start\'s commit while this start looks at it is never set aside (found by the multi-process fuzz)', () => {
+    const name = uniq('husk-race');
+    const id = legacyNode(name);
+    const target = cfg.nodeDirById(id.nodeId);
+    put(path.join(target, 'lock.pid'), '2147483646\n'); // the 0.14.0-0.14.2 husk: a stale lock
+    let other = false;
+    patchFs('readdirSync', (orig) => function (p, ...rest) {
+      // After this start removed the stale lock and before it reads what is left, another start commits its copy.
+      if (!other && String(p) === target && !exists(path.join(target, 'lock.pid')) && !exists(path.join(target, cfg.COMMIT_MARK))) {
+        other = true;
+        cfg.migrateNodeDir(name);
+      }
+      return orig.call(fs, p, ...rest);
+    }, () => { cfg.migrateNodeDir(name); });
+    assert.ok(other, 'the other start ran in between');
+    assert.ok(!exists(path.join(path.dirname(target), `.${id.nodeId}.husk`)), 'no installed directory was set aside');
+    assert.strictEqual(JSON.parse(read(path.join(target, 'identity.json'))).privateKey, id.privateKey);
+    assert.deepStrictEqual(identitiesNamed(name), [id.nodeId]);
+    assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey);
+  });
+
   it('a staging directory of a live process is left alone; one of a process that is gone is cleared', () => {
     const name = uniq('partials');
     const id = legacyNode(name);
