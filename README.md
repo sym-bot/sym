@@ -168,7 +168,8 @@ What this does not solve, said plainly:
   ones; [docs/AUTHORITY-OPERATOR.md](docs/AUTHORITY-OPERATOR.md) says how, and how to pin and re-pin).
 - **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
   replace another node's connection (close 4004). A squatter gets no Core Secure session — it
-  cannot prove the key — and an evicted node re-handshakes, but the relay path can be interrupted.
+  cannot prove the key — and an evicted node retries on a long backoff and re-handshakes, but the
+  relay path can be interrupted (SECURITY.md has the detail).
 - **Key compromise.** There is no key rotation: a node whose private key leaks must be
   replaced, under a new nodeId.
 - **Your own machine.** Another process running as the same user can read the identity file.

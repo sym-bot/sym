@@ -170,7 +170,13 @@ of it; on the LAN the transport itself closes and nothing is sent. What sym choo
   case-insensitively, the first occurrence winning. The daemon also browses `_<room>._tcp` where
   that is a valid RFC 6335 name (the §5.1 migration browse), and never advertises it.
 - The relay client reconnects with backoff after every close but 4004 and 4006 (4005, 4008, 1001,
-  1009, 1011, 1013, and 4007); forgets a relay's `features` with its socket; and sends relay-auth's
+  1009, 1011, 1013, and 4007). Since 0.14.3 the backoff starts over only when the relay has taken the
+  auth (relay-peers), not when the socket opens; 4004 and 4006 are retried too, on a long backoff
+  (1 min, doubling to 30 min, every 30 min after a ping-pong: three identity closes in 30 min), which
+  departs from §4.4.7's "MUST NOT automatically reconnect" (`relayIdentityRetry: false` keeps it); and
+  a message over the per-message bound (MAX_FRAME_SIZE + 4096) is dropped on its own instead of
+  closing the connection (the ws ceiling is 8 MiB, and the roster is read up to it). It forgets a
+  relay's `features` with its socket; and sends relay-auth's
   nodeId lowercase, with `room` (when not default) and `engine`. It paces at 20 frames a second,
   burst 200, under the update's floors (§19.1: 25 a second, burst 300), counting relay-auth and
   relay-pong inside the same bucket, ahead of every other frame.

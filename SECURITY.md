@@ -308,9 +308,16 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no
-  session without the key. The client stops for good on 4004 and 4006 (the existing holder is the
-  legitimate one), and says so in status, so an eviction is visible rather than a reconnect loop.
-  Every other close is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
+  session without the key. Until 0.14.3 the client stopped for good on 4004 and 4006, so one
+  claim switched a member off until it restarted. Since 0.14.3 it retries on a long backoff (1 min,
+  doubling to 30 min), says each close loudly in its log and status, and detects a ping-pong (three
+  identity closes in 30 min: two live processes replacing each other), which it reports as that and
+  retries only every 30 min. A token holder that keeps claiming the nodeId still keeps the member
+  off the relay for most of the time, and a host that exits on `identity-collision` still exits on
+  the first claim: exit on `info.pingPong` instead. Only a relay-side key proof ends this; it needs
+  a spec ruling (MMP §4.4.7 says a client MUST NOT reconnect after 4004, which this departs from)
+  and is not implemented. `relayIdentityRetry: false` keeps §4.4.7 as written. Every other close
+  is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
   meshcognition-website#20) is deferred past 0.14.0, and its review found that never reconnecting
   after 4007 makes a lockout.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.

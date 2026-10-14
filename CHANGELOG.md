@@ -1,5 +1,270 @@
 # Changelog
 
+## 0.14.3 — 2026-10-14
+
+**An agent no longer loses its key to the 0.13 → by-id upgrade.** An XMesh review of `lib/config.js` 0.14.2 returned
+"do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
+or expose a key and the small ones beside them. The wire and the public surface are unchanged.
+
+### What was wrong
+
+- **A new identity could overwrite the old key.** Moving a 0.13 node (`nodes/<name>/`) to `nodes/by-id/<nodeId>/` was
+  refused when that directory already existed, even if it was empty or held only a `lock.pid` (something else made it:
+  a lock, an interrupted run). The refusal left the node unindexed, and the next start by name did not stop there:
+  it took "refused" for "no such agent", made a NEW identity, moved the old directory onto the new node's path and
+  wrote the new `identity.json` over the old one. The agent came back under the same name with a different nodeId and
+  key, and its peers read what it signed as forged. A start pinned by `nodeId` was stuck instead, refusing to start
+  every time.
+- **A 0.13 key file stayed world-readable.** 0.13 wrote `identity.json` and `e2e-keypair.json` without a mode (0644
+  under the usual umask). The migration only renames, so they kept it, in a directory at 0755. A new identity in 0.14 is
+  written 0600; a migrated one never was.
+- **A name whose identity file was missing made a replacement agent.** If the name index named a node and its
+  `identity.json` was not there (the `SYM_IDENTITY_DIR` volume not mounted at boot, the variable set by one embedder and
+  not another), a start by name made a new nodeId and key and re-pointed the name to it.
+- **A start pinned by nodeId never migrated.** `loadIdentity` ran the migration only for a start by name alone. mesh-channel
+  starts every node as `{ name, nodeId, create: false }`, so a node it pinned to the nodeId in its `node.json` and whose
+  files were still the 0.13 `nodes/<name>/` could not start at all (`EIDENTITYABSENT`) until something started it by name
+  once; with `create: true` (the default) 0.14.2 made a new identity and lost the key. 0.14.3 loads the agent.
+- Smaller, same family: a stray symlink at `nodes/<name>` was reported as already indexed when nothing was indexed;
+  switching `SYM_IDENTITY_DIR` on for a 0.13 node whose identity was in its node directory reported "not a node" and
+  went on to make a new identity (the old key survived, orphaned in the new node's directory); an identity with a public key
+  and no private key loaded, and failed later at its first signature; a cosmetic rewrite of `identity.json` (a bare
+  Windows hostname) truncated the live key file in place; a start in the moment between the directory move and the
+  index write found no agent and made one; the live-lock fallback skipped the tombstone check; and nothing moved
+  across file systems (`EXDEV`), so a node whose directories sit on different volumes could not be migrated.
+
+### Who is exposed
+
+- Anyone who upgraded a node from 0.13 to 0.14.0, 0.14.1 or 0.14.2 and whose state root had a `nodes/by-id/<nodeId>/`
+  directory for that node without an `identity.json` in it at the time the node was first started by name. Their key
+  was destroyed on that start; the symptom is a changed nodeId under the same name and peers rejecting its blocks.
+  0.14.3 cannot bring a destroyed key back. If you have the old `identity.json` (a backup, a durable
+  `SYM_IDENTITY_DIR` volume, a copy of `~/.sym`), put it back at `nodes/by-id/<old nodeId>/identity.json` and set the
+  nodeId in the name's file `nodes/by-name/<name>.json` to the old one.
+- Anyone who switched `SYM_IDENTITY_DIR` on for an existing 0.13 node: the old key is probably still on disk, in
+  `nodes/by-id/<new nodeId>/identity.json` (the node that was made in its place).
+- Every node migrated from 0.13 holds a private key readable by other local users until it is next loaded with 0.14.3.
+- A node started by its pinned nodeId (mesh-channel's start, `create: false`) on the first start after upgrading from 0.13:
+  no key was lost, but it could not start until something started it by name. A pinned start with `create: true` could lose it
+  as above.
+
+### Changed
+
+- **The duplicate check looks at the identity, not the directory.** A second claim on a nodeId is a DIFFERENT
+  `identity.json` (or other content that cannot be merged) already filed under it. A directory that is empty, or holds a
+  stale lock, claims nothing: the node is MERGED into it. The same identity on both sides is an interrupted move, and
+  the next start finishes it. A real duplicate is still refused: nothing is moved and nothing is overwritten.
+- **A start pinned to a nodeId migrates too.** `loadIdentity({ nodeId, name })` whose identity is not in place and for
+  which a 0.13 directory under `name` is still there runs the same locked, idempotent migration as a start by name, then
+  loads the pinned agent. It is one code path, not a copy, and it is not run when there is no 0.13 directory to move.
+  **A pin that is a different nodeId than the directory's does not migrate it:** the directory belongs to another agent,
+  so it is left exactly where it is, unindexed (nothing moved, nothing lost), the pinned identity stays absent, and the
+  start fails as it would have: `IdentityAbsentError` with `create: false`, and with `create: true` the halt that says a
+  0.13 identity sits under the name (naming the pin). That agent moves when it is started by name or by its own pin. A
+  0.13 process holding the pinned agent's directory still lets it load in place (tombstone checked), as for a start by name.
+- **The name is indexed before anything moves, and the identity moves last.** A crash in the middle leaves the name
+  pointing at the agent and the identity still where the next start will find it, so an interrupted move is re-entered
+  by the identity's absence instead of being mistaken for "no such agent".
+- **One process migrates at a time.** Moving a directory is many steps, and two processes interleaving them could each
+  delete what the other had just filed. Found by running four real processes at it with a stall injected into every
+  file call (about one round in 150 lost the identity file), after plain concurrent runs had passed. The migrator
+  now holds a lock (`nodes/.migrating/lock.pid`, the identity lock: reclaimed when its holder is gone) while it moves
+  something; the others wait (up to 30 s, then fail loudly), read the state again and find it done. It is taken only
+  when a 0.13 directory is there to move. Under that lock, in the same stall fuzzer: 1,200 starters in 300 rounds, 1,600
+  in 400 rounds without a by-id directory in place, and 3,600 in 600 rounds with six starters at once: every one loaded
+  the original agent, no errors, the key in place every round. A path that has
+  become an alias of its destination is never deleted as a "duplicate" of it. The same four-process run on 0.14.2
+  made a new identity in 14 of 100 starters, and destroyed the key in every round that had a by-id directory.
+- **A start never makes an identity where one exists.** Before it makes one it checks that no 0.13 `identity.json`
+  sits under the name (in `nodes/<name>/` or `SYM_IDENTITY_DIR/<name>/`); if one does and could not be migrated it
+  halts (`IdentityHaltError`) and says why. A name that indexes a node whose identity is missing halts too.
+  `create: false` still throws `IdentityAbsentError`. Behaviour change: a node whose `identity.json` was deleted by hand
+  to "start over" now halts instead of silently becoming a new agent; to start the name again as a different agent,
+  remove the two paths the message names (`nodes/by-name/<name>.json` and the link `nodes/<name>`).
+- **Key files are private.** After a migration `identity.json` and `e2e-keypair.json` are 0600 and the directories that
+  hold them 0700; loading an identity narrows an existing key file (and the E2E keypair beside it), so nodes already
+  migrated by 0.14.0 to 0.14.2 are healed on their next start. A new identity's directory is 0700. Best effort on a
+  file this process does not own, and a no-op on Windows.
+- **A rewrite of `identity.json` is atomic** (a private temp file, synced, renamed over it).
+- **A move across file systems copies, verifies byte for byte, then removes the source.** A failed copy is removed and
+  the source left as it was.
+- An identity with a public key and no private key halts. A live 0.13 directory's identity is checked against the
+  tombstone. A symlink at `nodes/<name>` that is not a by-id link is reported `not-a-node`.
+- `SYM_IDENTITY_DIR` switched on for a 0.13 node whose identity is still in `nodes/<name>/` halts and tells the
+  operator to copy it to `SYM_IDENTITY_DIR/<name>/identity.json`. It does not move it for them (see below).
+
+### Known, not fixed here
+
+- `migrateIdentities()` still counts and discards any error from a single node (including the halts above); only the
+  counters it returns. The node's own start (`loadIdentity`) raises them, so a start is loud. Whether the bulk call
+  should report them is open.
+- `loadIdentity({ nodeId, name })` still re-points a name that already indexes a different node.
+- `SYM_IDENTITY_DIR` switched on for an existing node does not move its key for you (it halts and says how).
+- `loadIdentity({ nodeId, name, create: true })` with a `nodeId` the name index does not hold, no identity file, and no 0.13
+  directory under the name still makes a new identity under a new nodeId (it does not use the one given). mesh-channel
+  passes `create: false`, so a pin is never ignored there.
+- A pinned start leaves another agent's 0.13 directory (same name, different nodeId) unmigrated, as above; with
+  `SYM_IDENTITY_DIR` set and that identity in the node directory it halts with the instructions given for that case.
+
+### Tests
+
+- `tests/identity-migration-by-id.test.js`: 51 tests (50 run on macOS; one real cross-filesystem test runs on Linux).
+  41 of them fail on 0.14.2 (42 on Linux); nine pin behaviour that did not change (two of them keep a pinned start from
+  migrating what is not its own). Of the 51, ten are for pinned starts, among them four real processes starting one 0.13
+  agent at once under injected stalls, with and without a by-id directory already in place. The code is mutation-tested:
+  twenty-one mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
+
+### Transport and node lifecycle
+
+An independent review (R3) ran the transport and the node lifecycle against a local relay and found
+the defects below; each is fixed here with a test that fails on 0.14.2 and passes on 0.14.3. The wire
+is unchanged except where a line says so.
+
+#### What was wrong
+
+- **start() and stop() raced (R3-5, R3-9, R3-11).** start() set `_running` before it awaited the
+  store and the listener, and nothing ordered a stop after the start it raced. `start(); await stop()`
+  returned with the TCP listener up, four timers set, the process held open and the listener still
+  taking handshakes. `stop(); start()` let the stop's tail run after the new start: the discovery set
+  its server reference to null after its await and dropped the new listener, which nothing could
+  close. A start that threw (a relay URL ws could not parse) left a half-started node that a second
+  start() took for a running one. A node stopped and started again ran without its identity lock and
+  without its inbox (deliveries got no inbox id), because stop() gave both up and only the constructor
+  took them.
+- **Directed records were lost on a relay drop while reported dispatched (R3-4).** `dispatched`
+  counts records a session took; on a relay session a record then waits in the pacer (20 frames a
+  second), and the pacer was emptied when the connection closed. R3 measured 260 dispatched and 227
+  never arriving. Records sealed for a relay session that ended while the connection stayed up (the
+  peer's own link dropped) were sent anyway, to nobody.
+- **One oversized relay message closed the whole connection (R3-1, R3-2, client side).** The
+  per-message bound (MAX_FRAME_SIZE + 4096) was the connection's ws `maxPayload`, so one longer
+  message (a payload sym-relay before 0.6.1 re-serialised longer than it arrived, or a roster padded
+  with long names) closed the shared connection, and the sender could do it on every reconnect.
+- **4004 and 4006 stopped the client for good (R3-3).** relay-auth carries no key proof, so any
+  holder of the channel token could claim a member's nodeId once, leave, and the member never came
+  back to the relay until it restarted.
+- **The backoff started over when the socket opened (R3-10)**, not when the relay took the auth, so a
+  relay that accepted the socket and then closed it (1013, 4008, 1009) was dialled every second.
+- **Text split across two reads was corrupted, and the interior signed it (R3-7).** Every line reader
+  decoded each chunk on its own (`buf += chunk.toString()`): a multi-byte character split across two
+  reads became U+FFFD. The interior signed and published the damaged text (`决定：周五发布` signed as
+  `决定：��五发布`), the daemon stored task titles the same way, and the CLI, SymDaemonClient and the
+  LLM child-process readers had the same bug. The bounds were in UTF-16 code units, not bytes.
+- **A daemon socket path of 104 bytes or more could not restart (R3-6).** bind() truncates a Unix
+  socket path longer than `sun_path` (104 bytes on macOS, 108 on Linux); the daemon's own checks
+  looked at the full path, never removed the truncated socket, and the next start could not listen.
+- Smaller: FrameParser concatenated its whole buffer with every chunk (O(n²): 67 ms on the event loop
+  for one 1 MiB frame in 1 KiB reads, before the peer authenticated) (R3-12); stop() destroyed the
+  relay before closing the sessions, so the sealed 1010 SESSION_CLOSED a relay session promises its
+  peer was never sent (R3-13); the relay liveness timeout closed politely (`ws.close()`), which waits
+  for a closing handshake a dead connection never sends (R3-15); and a socket file's identity used
+  `birthtimeMs`, which is 0 on a Linux file system without btime, so two files at a reused inode
+  compared equal (R3-14).
+
+#### Changed
+
+- **The node lifecycle is one state machine on one promise chain.** `node.lifecycle` is `idle`,
+  `starting`, `running` or `stopping`; every start() and stop() is a step queued in the order called,
+  so neither runs against the other, awaited or not (XMesh calls both without awaiting). With nothing
+  queued, a step starts at once, synchronously up to its first await, as before: a host that calls
+  stop() and exits in the same turn still has its inbox written and its timers cleared. start() while
+  running, or while a start is the last step queued, is that start. stop() while a start runs makes it
+  abandon at its next step and undo what it set up. A start that fails undoes everything (listener,
+  listeners, timers, relay, the lock and the inbox it held), its promise rejects, and `status()`
+  carries `lifecycle` and `lastStartError`; an un-awaited failed start is logged and counted
+  (`metric` `start-failed`), never an unhandled rejection. **start() after stop() is a restart:** it
+  takes the identity lock again (EIDENTITYLOCK if another process took it meanwhile) and the inbox,
+  when no other node in this process owns it, read again from disk with the delivery ledger.
+  `_running` is true only while running.
+- **A relay URL is checked where it comes in.** `new SymNode({ relay })` throws `EBADRELAY` unless it
+  is an absolute ws:// or wss:// URL, and so does `new RelayConnection`; `parseInvite` returns an
+  error for an invite whose `relay` is not one.
+- **Records the pacer never wrote are held and offered again (R3-4).** When the relay connection
+  closes, or a relay session ends while the connection stays up, the records the node dispatched that
+  its pacer still holds come back to the node and are held for that peer, for the identity key they
+  were sealed to. The next session proving that key (relay or LAN) is offered them, sealed afresh,
+  oldest first, at most 4 MiB or 512 of them waiting in its pacer at once and only while the pacer has
+  half of each of its bounds to spare (a sealed frame the pacer refuses ends the session); a pass the
+  pacer's room stopped tries again by itself. A relay client session still waiting to supersede is
+  offered them once it does. A session that sent its peer the sealed 1010 keeps what was queued
+  before it (the notice continues their sequence, and the peer can still open them). A record counts as written
+  when the socket's write callback says so, not when ws took it. Until then it is reported as not
+  delivered: `node.pendingDeliveries()` lists it, `status().pendingDeliveries` counts it, and metrics
+  say each step (`cmb-requeued`, `cmb-redelivered`, and `cmb-undelivered` with reason
+  `redelivery-overflow` or `node-stopped` when it is dropped). The list is bounded: 2048 records or
+  8 MiB a peer, 10,000 in all, the oldest dropped first. A receiver surfaces a record once for the life
+  of its store (the delivery ledger), so a record offered twice is not delivered twice. **The residual:**
+  a frame a socket has written and the network, the relay or the relay's way to the peer then loses
+  is still lost and still reads as dispatched; only an end-to-end receipt closes that, which is
+  protocol work. The held list is process memory: a stop drops it (said as undelivered); the record
+  stays in the sender's store.
+- **The relay connection's ceiling is 8 MiB; the frame bound is per message (R3-1, R3-2).** A message
+  over MAX_FRAME_SIZE + 4096 is dropped on its own, counted in `relayState.oversizeDropped` and said
+  once a minute, and the connection stays up. The relay's roster (`relay-peers`) is the one message
+  read past the bound, up to the ceiling, so a padded roster cannot keep a node from knowing its room.
+  The current relay (sym-relay `origin/main`, package 0.7.0; the bound landed in 0.6.1) already builds
+  every delivered frame and the roster within MAX_DELIVERED_BYTES, so this is defence in depth there;
+  against 0.5.2 it is the fix.
+- **4004 and 4006 are retried on a long backoff, loudly, with a ping-pong detector (R3-3).** The first
+  retry is after 1 min, doubling to 30 min. Each close is logged (`IDENTITY CLOSE: …`) and shown in
+  `relayStatus`. Three identity closes inside 30 min are a ping-pong — two live processes holding
+  this identity and replacing each other — said as that (`PING-PONG: … Stop one of them.`), told to
+  the host and retried only every 30 min, until a connection stays up 70 min (the other process has
+  gone). `identity-collision` fires at the first close in 30 min and when a ping-pong is found, now
+  with `pingPong` and `retryInMs`; a single close proves no second
+  process, so a host that exits on it should exit on `pingPong` instead. The metric is
+  `relay-identity-close` (was `relay-hard-stop`). `relayState.stopped` holds the last identity close
+  until an auth succeeds. **This departs from MMP §4.4.7** ("MUST NOT automatically reconnect" after
+  4004, "SHOULD NOT" after 4006) and needs a spec ruling; `relayIdentityRetry: false` keeps §4.4.7 as
+  written. A relay-side key proof would end the impostor case; it needs a spec ruling and is not
+  implemented.
+- **The backoff starts over when the relay takes the auth (R3-10)**, in the relay-peers handler, not
+  when the socket opens: 1 s, 2 s, 4 s, … 30 s for a relay that keeps closing after the open.
+- **Lines are cut on bytes and decoded whole (R3-7)** (`lib/line-reader.js`): the interior socket and
+  the daemon's IPC refuse a line that is not UTF-8 (`not-utf8`) and bound a line in bytes (1 MiB and
+  8 MiB); the CLI, SymDaemonClient, the daemon's status client, the LLM CLI and the SVAF/XMesh child
+  readers and the APNs response reader decode with `setEncoding('utf8')`.
+- **A Unix socket path too long for `sun_path` is mapped (R3-6)**, the same way in the daemon and in
+  every client, to `/tmp/sym-<uid>/<digest of the path>.sock`, in a directory the daemon makes 0700 and
+  every client refuses to dial (`EIPCDIR`) if it is a link, another user's, or open to others.
+- **FrameParser keeps the chunks it is given** and copies a frame's bytes once, when the frame is
+  whole (R3-12). **stop() closes the sessions before the relay**, and the relay's last flush sends the
+  1010 notices (inside the pacer's bucket) before the socket closes (R3-13). **The liveness timeout
+  terminates** the connection (R3-15). **A socket file's identity** treats a creation time of 0 as
+  unknown and adds the inode's change time and a token the daemon writes into the socket's times
+  (`stampSocket`) (R3-14).
+- `discovery.stop()` closes the connections it accepted and has not handed on, and its bounded wait
+  no longer holds the process open.
+
+#### Known, not fixed here
+
+- **R3-8, one identity in several rooms in one process** (what XMesh's observer does): the inbox is
+  owned by the node built last, one loopback registration file is shared, and the mDNS names clash. A
+  design call; unchanged. Related: in a hot-swap the first node's stop() releases the identity lock
+  file the second still relies on (an in-process re-acquisition gets a release that does nothing).
+- **End-to-end delivery receipts** (protocol work), and so the residual above.
+- **A receiver drops records past its own record budget** (8 a second, burst 32, per session: security
+  review D) unevaluated while the sender reports them dispatched. Of R3's 260 directed records sent at
+  once, 55 were accepted in one run with no relay drop at all; R3's "227 lost after a drop" counts
+  these too. The tests here stay under the budget.
+- **mesh-channel exits on `identity-collision`** (server.js), so one spoofed 4004 still stops a channel
+  host until it exits on `info.pingPong` only.
+- A token holder that keeps claiming a nodeId keeps that member off the relay most of the time; only a
+  relay-side key proof ends it.
+
+#### Tests
+
+- `tests/node-lifecycle.test.js` (8), `tests/relay-redelivery.test.js` (5), `tests/relay-resilience.test.js` (10),
+  `tests/ipc-utf8.test.js` (3), `tests/daemon-long-socket-path.test.js` (1), `tests/frame-parser-linear.test.js` (2),
+  `tests/socket-identity.test.js` (2): 31 tests, of which 30 fail on 0.14.2 (run on a `git archive` of 632b95d) and
+  one pins parsing that did not change. A few of the 30 fail there only because what they check is new (the
+  held-record list, `identityRetry: false`, `stampSocket`, the line reader); the rest fail on the behaviour R3
+  reported. They pass on macOS (Node 22) and on Linux in `node:22-slim` and `node:20-slim`. The relay runs R3 made
+  were repeated against sym-relay 0.5.2 and the current `origin/main` (0.7.0) on localhost: the oversized-envelope
+  and padded-roster attacks no longer close the victim's connection on 0.5.2 (the current relay already bounds
+  both), and a member evicted by a spoofed 4004 is back on either relay after its retry.
+- `tests/relay-state.test.js`: the 4004 and 4006 cases now pin the long-backoff retry.
+
 ## 0.14.2 — 2026-10-14
 
 **The daemon's start lock, hardened after review.** 0.14.1 replaced an unsound inode-number guard with a start lock
