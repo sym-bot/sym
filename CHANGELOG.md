@@ -513,6 +513,12 @@ the rest refused and the peer told (each notice ≤ 256 ids, retry-after 64 s), 
   lane's spend, which the flood's cut had masked; the notice timer's spin; the sent window's per-peer key, which only
   shows when the refusing peer is not the last one written); the fifth was a guard no input could reach (an own-queue
   reason beside the episode, which already implies it) and was removed, its mutant replaced by one on the episode.
+  **Runs:** full suite on macOS (Node 22, `--test-concurrency=2`): 1686 tests, 1682 pass, 0 fail, 4 skipped;
+  integration 6 of 6; `node scripts/gate-two-stock-nodes.mjs` passed; `npm audit` 0 vulnerabilities; the two
+  flow-control files with the four changed ones (95 tests) pass in `node:22-slim` (22.23.3) and `node:20-slim`
+  (20.20.2); CI (Linux, Node 20 and 22): 1686 tests, 1683 pass, 0 fail, 3 skipped. The bursts and drops above were
+  also run as scripts against a `git archive` of 0.14.2 (fe285a3) and of 9f6847c, both directions, over the LAN and
+  over sym-relay `origin/main` (2b23444) on 127.0.0.1.
 
 ## 0.14.2 — 2026-10-14
 
