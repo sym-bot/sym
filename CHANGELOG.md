@@ -151,7 +151,37 @@ patch for one of those cases made another. R1 proved eleven by running them. 0.1
 
 ### Tests
 
-FUZZ_NUMBERS
+- `tests/identity-commit.test.js` (new): 33 tests, one or more per R1 finding (R1-1 to R1-11), R4-9, the error texts
+  and the guards of the staged commit; 32 fail on 632b95d (the one that passes there checks that a pinned start still
+  claims a name nobody has). R1-1 crashes the migration at every one of its 70 steps (78 over a lock-only husk), one
+  start per step, and checks the 0.13 directory is byte-identical, a 0.13 reader still finds the key, and the next start
+  loads the same agent with its whole store. The race the multi-process fuzz found (below) is a deterministic test.
+- `tests/identity-migration-by-id.test.js`: 53 tests (was 51), 14 of them fail on 632b95d. Updated, each with the reason in
+  the test: a husk's stale lock is no longer kept; a halt writes no index back; a non-compat link at `nodes/<name>` is
+  followed and copied; a node directory with files and no identity halts; the atomic rewrite is tested on an installed
+  identity; across volumes nothing is renamed and the source is kept aside; an interrupted migration leaves the 0.13
+  directory as it was; the migration-lock tests are replaced by no-wait tests; a live 0.13 holder refuses; a pin whose
+  identity is in the 0.13 directory halts instead of "absent".
+- Mutation check: 27 mutants of `lib/config.js` and `lib/relocation.js`, one per guard of the new design (the verify
+  before the commit, the exclusive claim, ENOENT-only, the mint gate, the adoption guard, the live 0.13 holder, the
+  claim and the compare in the lock reclaim, the export order, the tombstone place, the import key place, junction
+  compare, the Windows names, the set-aside, the link-before-aside, a pinned start taking a name, the husk re-look, and
+  others): every one is caught.
+- Multi-process fuzz (real processes, every file call stalled 0 - 4 ms at random): four starters at a 0.13 agent,
+  plain / over a lock-only husk / pinned / pinned over a husk / with SYM_IDENTITY_DIR / with both: 40 rounds each, 0
+  failed (960 starters, all loaded the original; one identity, the key installed, the whole store, the 0.13 data kept,
+  every round); six starters, 30 rounds each plain and over a husk, 0 failed. This fuzz found one race in the first
+  version of this design (a committed directory set aside as a husk, 9 of 40 rounds over a husk; same identity, nothing
+  lost), fixed before release. Six starters at a SIGKILLed holder's stale lock: 0 of 20 rounds with two holders, with
+  and without stalls (632b95d: 3 of 8). Three first starts of one new name: 0 of 10 rounds with two agents, 0 of 6 with
+  SymNode (632b95d: 6 of 6). Across a real second volume (an HFS+ disk image, EXDEV) with a stale migration lock:
+  4 and 6 starters, 50 rounds, every starter the original.
+- kill -9 crash fuzz: the first start is killed at a random moment, a second start follows. Same volume (over a husk,
+  plain, with SYM_IDENTITY_DIR; pinned and not): 360 rounds, 180 of them killed within 60 ms (all mid-run), every one
+  the original agent with its whole store and the key on disk. Across volumes (disk image): 120 rounds, 60 killed
+  mid-run, every one the same (632b95d on the same image: 4 of 10 rounds started with store files missing).
+- Full suite (`--test-concurrency=2`, macOS): 1568 tests, 1564 pass, 0 fail, 4 skipped; `npm run gate:stock-nodes` passed;
+  `npm audit`: 0 vulnerabilities. CI (Linux, Node 20 and 22) green, the real second-filesystem test included.
 
 ## 0.14.2 — 2026-10-14
 
