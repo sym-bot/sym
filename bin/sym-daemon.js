@@ -45,6 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { SymNode, migrateStores } = require('../lib/node');
+const { normalizeRelayUrl } = require('../lib/relay');
 
 // ── Global error handlers ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
@@ -91,7 +92,12 @@ if (!process.env.SYM_RELAY_URL) {
   }
 }
 
-const relayUrl = process.env.SYM_RELAY_URL || null;
+// The relay setting never stops the daemon (B1): http:// and https:// are the same relay as ws:// and
+// wss://, and a setting that is no relay URL is handed to the node as it is, which disables its relay
+// and says why (status, log, 'relay-disabled'); the daemon runs on the LAN. It crash-looped under
+// KeepAlive on a 0.14.3 candidate that threw EBADRELAY for an https:// URL.
+const RELAY_SETTING = process.env.SYM_RELAY_URL || null;
+const relayUrl = RELAY_SETTING ? normalizeRelayUrl(RELAY_SETTING) : null;
 const relayToken = process.env.SYM_RELAY_TOKEN || null;
 
 // ── CLI Commands ───────────────────────────────────────────────
@@ -165,7 +171,7 @@ try { const n = migrateStores(); if (n) log(`Migrated ${n} node store(s): meshme
 // Bonjour. `SYM_RELAY_ONLY=1` (also persisted by `sym start --relay-only`). Without it the
 // node advertises and browses on the LAN as before.
 const RELAY_ONLY = /^(1|true|yes)$/i.test(String(process.env.SYM_RELAY_ONLY || ''));   // relay.env is folded into process.env above
-if (RELAY_ONLY) log(`relay-only: LAN discovery off (SYM_RELAY_ONLY); ${relayUrl ? `joining ${relayUrl}` : 'WARNING — no SYM_RELAY_URL, so this node will have no peers at all'}`);
+if (RELAY_ONLY) log(`relay-only: LAN discovery off (SYM_RELAY_ONLY); ${relayUrl ? `joining ${relayUrl}` : RELAY_SETTING ? 'WARNING — SYM_RELAY_URL is not a relay URL, so the relay is disabled and this node will have no peers at all' : 'WARNING — no SYM_RELAY_URL, so this node will have no peers at all'}`);
 
 const node = new SymNode({
   name: NODE_NAME,
@@ -175,7 +181,7 @@ const node = new SymNode({
   room: ROOM,
   discoveryServiceType: '_sym._tcp',
   discoveryBrowseTypes: LEGACY_BROWSE ? [LEGACY_BROWSE] : [],
-  relay: relayUrl,
+  relay: RELAY_SETTING,
   relayToken: relayToken,
   silent: false,
 });
@@ -881,7 +887,7 @@ function stopRoomBeacon() {
 
 async function main() {
   log(`sym-daemon starting: ${NODE_NAME}`);
-  log(`  relay: ${relayUrl || 'none'}`);
+  log(`  relay: ${relayUrl || (RELAY_SETTING ? 'disabled (SYM_RELAY_URL is not a relay URL)' : 'none')}`);
   log(`  socket: ${SOCKET_PATH}`);
 
   // A socket another daemon answers on is its: this start stops before its node joins anything.

@@ -321,21 +321,35 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   authored the CMB naming it; a record carries no signed field saying which, so sym does not. It
   weighs the author's authority on each parent (the feedback flag) and leaves validation to the
   node's own `validateCMB`, gated on its own authority over that CMB.
-- **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
-  connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
-  can therefore interrupt another node's relay path. It cannot impersonate it: it gets no
-  session without the key. Until 0.14.3 the client stopped for good on 4004 and 4006, so one
-  claim switched a member off until it restarted. Since 0.14.3 it retries on a long backoff (1 min,
-  doubling to 30 min), says each close loudly in its log and status, and detects a ping-pong (three
-  identity closes in 30 min: two live processes replacing each other), which it reports as that and
-  retries only every 30 min. A token holder that keeps claiming the nodeId still keeps the member
-  off the relay for most of the time, and a host that exits on `identity-collision` still exits on
-  the first claim: exit on `info.pingPong` instead. Only a relay-side key proof ends this; it needs
-  a spec ruling (MMP §4.4.7 says a client MUST NOT reconnect after 4004, which this departs from)
-  and is not implemented. `relayIdentityRetry: false` keeps §4.4.7 as written. Every other close
-  is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
-  meshcognition-website#20) is deferred past 0.14.0, and its review found that never reconnecting
-  after 4007 makes a lockout.
+- **Relay identity: key proof (0.14.3, sym-relay 0.8.0).** Until 0.14.3 a relay keyed this node's
+  slot by a nodeId it only claimed, so any holder of the channel token could claim it and have the
+  node closed (4004) or refused (4006); the client stopped for good on either (MMP §4.4.7), so one
+  claim switched a member off until it restarted. Now the node proves its identity key to a relay
+  that asks (relay-auth `keyProof`, relay-challenge, an Ed25519 proof over the nonce, room, nodeId
+  and the origin it dialed; lib/core/relay-auth-proof.js), and a relay that verifies keys keys the
+  slot by the key: a token holder that claims the nodeId under another key, or with no proof, gets
+  a slot of its own and can neither evict nor block the member. A 4004 on a proven connection can
+  then only come from another process holding this node's key, and the client still stops for good,
+  saying so ("another process proved this identity's key on this relay; this one stopped"); the
+  newest proof of a key wins, once, so two processes holding one key never flap.
+  **What this covers, and its edges.** (1) A relay that does not verify keys (sym-relay before 0.8.0)
+  takes the auth without a proof; the client records `relayVerifiesKeys: false`, says once that any
+  token holder can claim its nodeId there, and on a 4004 or 4006 stops with "this relay does not
+  verify keys … upgrade the relay". (2) A relay that verifies keys stamps `fromKey` on every frame it
+  delivers from a proven slot (the slot's key). When this node binds a key for a nodeId, it drops a
+  relay frame stamped with a different key before any session or bucket sees it (counted,
+  `relay-frame-wrong-key`), and it lanes relay sessions and the per-sender hello budget by
+  (nodeId, fromKey), so a slot proven for another key under a member's nodeId can neither open a
+  session the node takes for the member's nor spend the member's hello budget. Re-measured: an
+  impostor flooding client-hellos at 25 a second no longer keeps a restarted member (whose peer binds
+  it) from re-handshaking. (3) A nodeId a relay presents under several proven keys, none bound here,
+  is an identity ambiguity: the node binds none and starts no session for it (no trust-on-first-use by
+  who answered first), reports it (`identity-ambiguity`, `status().coreSecure.identityAmbiguities`),
+  and resolves it only by a pin, an anchor certification, or one proven key remaining; a lone proven
+  key is first proven use as before. (4) The relay's origin binding is only as strong as its
+  `SYM_RELAY_ORIGINS` setting, or, without it, its edge's routing by Host; an origin mismatch is a
+  non-retryable refusal here, never a downgrade to unproven auth. Every other close is reconnected
+  with backoff, 4002 and 4007 included.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.
 - **A stopped identity's store is files.** `openStore` (`@sym-bot/sym/store`, 0.14.1) records a verdict in
   the store of an identity whose process has stopped, on the lifecycle authority its caller states

@@ -166,10 +166,13 @@ What this does not solve, said plainly:
 - **Upgrading from 0.13 is a flag day for authority.** Old role grants confer nothing under §6.6;
   the anchor and each grantor re-issue what should stand (`node.legacyRoleGrants()` lists the old
   ones; [docs/AUTHORITY-OPERATOR.md](docs/AUTHORITY-OPERATOR.md) says how, and how to pin and re-pin).
-- **Relay eviction.** `relay-auth` is not proven, and a relay token holder can make the relay
-  replace another node's connection (close 4004). A squatter gets no Core Secure session — it
-  cannot prove the key — and an evicted node retries on a long backoff and re-handshakes, but the
-  relay path can be interrupted (SECURITY.md has the detail).
+- **Relay identity.** A node proves its key in `relay-auth` to a relay that asks (sym-relay 0.8.0),
+  and such a relay keys the node's slot by that key and stamps the proving key on every frame it
+  delivers: a token holder claiming the nodeId cannot evict, block, or impersonate it, and a node
+  drops relay frames stamped with any key but the one it binds for that nodeId. A relay that does not
+  verify keys still lets a token holder close a node's relay connection (4004), and the node says so
+  in status and stops. Several proven keys for a nodeId no peer has bound are an ambiguity an operator
+  resolves, never guessed (SECURITY.md has the detail).
 - **Key compromise.** There is no key rotation: a node whose private key leaks must be
   replaced, under a new nodeId.
 - **Your own machine.** Another process running as the same user can read the identity file.

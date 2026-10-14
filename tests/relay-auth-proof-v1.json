@@ -1,0 +1,27 @@
+{
+  "scheme": "mmp-relay-auth-v1",
+  "description": "relay-auth key proof (sym-relay 0.8.0, sym 0.14.3). transcript = lp(\"mmp-relay-auth-v1\") || lp(nonce) || lp(room) || lp(nodeId) || lp(origin), lp(x) = 4-byte big-endian length || x; room is the room the relay keys the slot by (default when relay-auth names none); origin is the WHATWG URL origin of the URL the client dialed. proof = Ed25519 (RFC 8032, pure) over the transcript by the identity key, canonical unpadded base64url. The same file is in both repositories.",
+  "seedHex": "eb40d030716aea1147e3ce220aafce4812400611820a8bd611ac730a0fb33eed",
+  "publicKey": "THlVSk-UL9bK5MsBDG4O4a_wO005JePE1_Ez-vsai70",
+  "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "cases": [
+    {
+      "label": "default room, wss origin with the default port elided",
+      "dialed": "wss://Relay.Example.org:443/mesh?x=1",
+      "room": "default",
+      "nodeId": "01900000-0000-7000-8000-000000000001",
+      "origin": "wss://relay.example.org",
+      "transcriptHex": "000000116d6d702d72656c61792d617574682d763100000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0000000764656661756c740000002430313930303030302d303030302d373030302d383030302d303030303030303030303031000000177773733a2f2f72656c61792e6578616d706c652e6f7267",
+      "proof": "gecL8RRGpuy06p5BKKKkDSe4BPQSIGiCD0g2X0N7zLQViSiUC0FuWEotrc81S8H58G5uJxtS_WnRlLukS8vIBg"
+    },
+    {
+      "label": "a named room, ws origin with a port",
+      "dialed": "ws://127.0.0.1:8787",
+      "room": "team-alpha",
+      "nodeId": "01900000-0000-7000-8000-000000000002",
+      "origin": "ws://127.0.0.1:8787",
+      "transcriptHex": "000000116d6d702d72656c61792d617574682d763100000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0000000a7465616d2d616c7068610000002430313930303030302d303030302d373030302d383030302d3030303030303030303030320000001377733a2f2f3132372e302e302e313a38373837",
+      "proof": "huIMqmedYAYs46gKZ2DK1Kdmm-ZPDOjV7T0ZJ_oA9EVih1C8FCqygZf9ky2jnxzU8IRu4S1rBlGz3hXo9jtyDQ"
+    }
+  ]
+}

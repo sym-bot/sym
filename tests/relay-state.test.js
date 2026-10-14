@@ -74,7 +74,9 @@ test('admitted: awaitOutcome resolves on relay-peers with phase connected and th
     assert.equal(s.attempts, 0, 'a successful auth resets the attempt count');
     assert.equal(s.refused, null);
     assert.equal(s.peers, 0);
-    assert.match(c.rc.describe(), /^connected to ws:\/\/127\.0\.0\.1:\d+ for \d+s, 0 relay peer\(s\)$/);
+    // The relay's proof state is part of the line (sym 0.14.3): this fake relay never challenges.
+    assert.match(c.rc.describe(), /^connected to ws:\/\/127\.0\.0\.1:\d+ for \d+s, 0 relay peer\(s\); this relay does not verify keys/);
+    assert.equal(s.relayVerifiesKeys, false);
   } finally { c.stop(); await relay.close(); }
 });
 
@@ -120,21 +122,18 @@ test('refused: a retry DIAL inside the episode keeps the phase refused', async (
   } finally { c.stop(); await relay.close(); }
 });
 
-// 0.14.3 (R3-3): an identity close is no longer a permanent stop: it is retried on a long backoff (1 min,
-// doubling), said loudly, with a ping-pong detector (tests/relay-resilience.test.js has the retries).
-test('identity collision: awaitOutcome resolves on 4004 with phase collision; describe says it retries on the long backoff', async () => {
+test('identity collision: awaitOutcome resolves on 4004 with phase collision; describe says it will not reconnect, and why', async () => {
   const relay = fakeRelay((ws) => ws.close(4004, 'Duplicate identity'));
   const c = client(relay.url);
   try {
     c.rc.connect();
     const s = await c.rc.awaitOutcome(5000);
     assert.equal(s.phase, 'collision');
-    await wait(50);
-    const t = c.rc.state().nextRetryAt - Date.now();
-    assert.ok(t > 55_000 && t <= 66_000, `the retry is a minute away (${t} ms)`);
-    assert.match(c.rc.describe(), /^IDENTITY CLOSE: .*\(4004\)\..*Retrying in \d+s\.$/);
+    assert.equal(s.nextRetryAt, null, 'nothing scheduled');
+    // This client proves no key and the fake relay verifies none: the cause is said as that.
+    assert.match(c.rc.describe(), /^STOPPED: .*\(4004\): this relay does not verify keys, so any holder of the token can cause this; upgrade the relay\. Not reconnecting/);
     await wait(300);
-    assert.equal(relay.state.attempts, 1, 'no second knock before the long backoff');
+    assert.equal(relay.state.attempts, 1, 'no second knock');
   } finally { c.stop(); await relay.close(); }
 });
 
@@ -171,10 +170,11 @@ test('destroy() returns the state to idle, never leaves a stale connected/refuse
   } finally { c.stop(); await relay.close(); }
 });
 
-// MMP §4.4.7 / §4.4.9: 4006 (the existing holder is younger than 5 s) is an identity close like 4004:
-// said once per episode, kept in state().stopped, and retried on the long backoff (0.14.3, R3-3).
-for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*Retrying in \d+s\.$/]]) {
-  test(`${code}: awaitOutcome resolves with phase ${phase}; retried only on the long backoff; said once; kept in state().stopped`, async () => {
+// MMP §4.4.7 / §4.4.9: 4006 (a relay that does not verify keys found another live claim of this nodeId)
+// is a hard stop like 4004: not retried, said once and kept in state(). (4007, draft PR #20, is an
+// ordinary close: see the test below.)
+for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\): this relay does not verify keys.*Not reconnecting/]]) {
+  test(`${code}: awaitOutcome resolves with phase ${phase}; no reconnect; said once; kept in state().stopped`, async () => {
     const relay = fakeRelay((ws) => ws.close(code, 'Duplicate rejected'));
     const told = [];
     const c = client(relay.url, { onIdentityCollision: (info) => told.push(info) });
@@ -182,19 +182,20 @@ for (const [code, phase, words] of [[4006, 'duplicate-rejected', /\(4006\).*Retr
       c.rc.connect();
       const s = await c.rc.awaitOutcome(5000);
       assert.equal(s.phase, phase);
+      assert.equal(s.nextRetryAt, null, 'nothing scheduled');
       assert.equal(s.stopped.code, code);
-      await wait(50);
-      assert.ok(c.rc.state().nextRetryAt - Date.now() > 55_000, 'the retry is a minute away');
       assert.match(c.rc.describe(), words);
-      await wait(1500); // past the ordinary first backoff (1 s)
-      assert.equal(relay.state.attempts, 1, 'no second knock before the long backoff');
+      await wait(1500); // past the first backoff (1 s)
+      assert.equal(relay.state.attempts, 1, 'no second knock');
       assert.equal(told.length, 1, 'the host is told once');
       assert.equal(told[0].code, code);
-      assert.equal(told[0].pingPong, false);
-      assert.equal(c.logs.filter((l) => l.startsWith('IDENTITY CLOSE')).length, 1, 'said once, loudly');
+      assert.equal(told[0].relayVerifiesKeys, false);
+      assert.equal(c.logs.filter((l) => l.startsWith('FATAL')).length, 1, 'said once, loudly');
+      c.rc.connect();
+      await wait(200);
+      assert.equal(relay.state.attempts, 1, 'a later connect() does not dial either');
       c.rc.destroy();
-      assert.equal(c.rc.state().phase, 'idle', 'destroy() leaves nothing pending');
-      assert.equal(c.rc.state().stopped.code, code, 'and keeps the last identity close in state()');
+      assert.equal(c.rc.state().phase, phase, 'destroy() does not hide the stop');
     } finally { c.stop(); await relay.close(); }
   });
 }
