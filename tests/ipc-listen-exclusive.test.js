@@ -3,8 +3,12 @@
 /**
  * 0.14.0 release review B-F9: the daemon probed the socket path and then removed whatever file was
  * there, so two daemons starting together could each take the path from the other. It now binds
- * first, probes only a path that is taken, and removes a stale file only while it is still the file
- * it probed (lib/platform listenExclusive).
+ * first, probes only a path that is taken, and removes a stale file holding a start lock, so the
+ * starters decide one at a time (lib/platform listenExclusive).
+ *
+ * 0.14.1: the removal was first guarded by comparing the file's inode number with the one probed. Linux
+ * gives a removed file's inode number to the next file at once, so the guard passed for a socket another
+ * server had just bound, and CI (Linux) failed where a Mac (APFS) did not. The lock does not rest on it.
  */
 
 const { describe, it } = require('node:test');
@@ -50,25 +54,74 @@ describe('listening on an IPC path without taking it from another server', { ski
     await closeAll(other);
   });
 
-  it('a socket another server binds between the probe and the removal is never removed', async () => {
+  it('starters that meet a stale file decide one at a time: one binds, the rest serve it', async () => {
     const p = path.join(tmpdir('ipc-ex-'), 's.sock');
-    fs.writeFileSync(p, '');   // stale when probed...
-    const other = net.createServer();
-    let probes = 0;
+    fs.writeFileSync(p, '');   // stale
+    let inFlight = 0;
+    let maxInFlight = 0;
     const probe = async (addr) => {
-      probes++;
-      if (probes === 1) {
-        // ...and in the window after the probe, another daemon removes it and binds the path.
-        fs.unlinkSync(addr);
-        await listen(other, addr);
-        return false;
-      }
-      return socketAnswers(addr);
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 20));   // the window another starter could use
+      try { return await socketAnswers(addr); } finally { inFlight--; }
     };
+    const servers = Array.from({ length: 8 }, () => net.createServer());
+    const outcomes = await Promise.all(servers.map((s) => listenExclusive(s, p, { probe })));
+    assert.equal(outcomes.filter((o) => o === 'listening').length, 1, 'exactly one starter binds');
+    assert.equal(outcomes.filter((o) => o === 'served').length, 7, 'the rest find it answering and serve it');
+    assert.equal(maxInFlight, 1, 'no two starters decide about the stale file at once');
+    assert.equal(await socketAnswers(p), true, 'the path answers');
+    assert.equal(fs.existsSync(`${p}.lock`), false, 'the lock is released');
+    await closeAll(...servers);
+  });
+
+  it('a file is not removed while a live starter holds the lock', async () => {
+    const p = path.join(tmpdir('ipc-ex-'), 's.sock');
+    fs.writeFileSync(p, '');
+    fs.mkdirSync(`${p}.lock`);
+    fs.writeFileSync(path.join(`${p}.lock`, 'pid'), String(process.pid));   // alive: this process
     const s = net.createServer();
-    assert.equal(await listenExclusive(s, p, { probe }), 'served', 'the other server keeps the path');
-    assert.equal(s.listening, false);
-    assert.equal(await socketAnswers(p), true, 'and still answers on it');
+    await assert.rejects(listenExclusive(s, p, { lockWaitMs: 80, tries: 2 }), (e) => e.code === 'EADDRINUSE');
+    assert.equal(fs.existsSync(p), true, 'the file stays: the lock was not ours to pass');
+    assert.equal(fs.existsSync(`${p}.lock`), true, 'and the other starter keeps its lock');
+  });
+
+  it('a lock whose owner is gone is broken', async () => {
+    const p = path.join(tmpdir('ipc-ex-'), 's.sock');
+    fs.writeFileSync(p, '');
+    const dead = require('child_process').spawnSync(process.execPath, ['-e', '0']).pid;   // exited: not a process now
+    fs.mkdirSync(`${p}.lock`);
+    fs.writeFileSync(path.join(`${p}.lock`, 'pid'), String(dead));
+    const s = net.createServer();
+    assert.equal(await listenExclusive(s, p, { lockWaitMs: 2000 }), 'listening');
+    assert.equal(await socketAnswers(p), true);
+    assert.equal(fs.existsSync(`${p}.lock`), false);
+    await closeAll(s);
+  });
+
+  it('a lock that is old is broken even if its pid is a live process', async () => {
+    const p = path.join(tmpdir('ipc-ex-'), 's.sock');
+    fs.writeFileSync(p, '');
+    fs.mkdirSync(`${p}.lock`);
+    fs.writeFileSync(path.join(`${p}.lock`, 'pid'), String(process.pid));   // a pid that was reused
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(`${p}.lock`, old, old);
+    const s = net.createServer();
+    assert.equal(await listenExclusive(s, p, { lockWaitMs: 2000 }), 'listening');
+    assert.equal(fs.existsSync(`${p}.lock`), false);
+    await closeAll(s);
+  });
+
+  it('a socket that answers is never removed, whoever asks', async () => {
+    const p = path.join(tmpdir('ipc-ex-'), 's.sock');
+    const other = net.createServer();
+    await listen(other, p);
+    const ino = fs.statSync(p).ino;
+    const starters = Array.from({ length: 4 }, () => net.createServer());
+    const outcomes = await Promise.all(starters.map((s) => listenExclusive(s, p)));
+    assert.deepEqual(outcomes, ['served', 'served', 'served', 'served']);
+    assert.equal(fs.statSync(p).ino, ino, 'its socket file is untouched');
+    assert.equal(fs.existsSync(`${p}.lock`), false);
     await closeAll(other);
   });
 });

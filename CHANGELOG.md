@@ -46,6 +46,19 @@ away was never supported (below). The wire is unchanged: a 0.14.1 node meshes wi
 - The stock-nodes gate driver (scripts/two-stock-nodes-driver.cjs) reaches `NullDiscovery` by its place on disk,
   not by a package path, and the gate now also asserts the public surface on the installed tarball.
 
+### Fixed
+
+- **The daemon could remove a live daemon's socket on Linux.** `sym-daemon` guards a stale socket file against two
+  daemons starting together. 0.14.0 removed the file only if its inode number was still the one it had probed, but
+  Linux gives a removed file's inode number to the next file at once, so the guard passed for a socket another
+  daemon had just bound (a Mac's APFS does not, which is why only Linux CI showed it, as a red
+  `ipc-listen-exclusive` test on `main` from 7 October). The removal and the bind that follows it now hold a start
+  lock beside the socket (`<socket>.lock`, a directory naming its owner's pid; a lock left by a dead owner, or
+  older than 10 s, is broken), so of several starters one at a time decides, and the next finds a socket that
+  answers and serves it. A starter that cannot get the lock does not remove anything. The lock binds sym
+  daemons; a process that removes the socket without it is not held to it. The test now runs eight starters at
+  one stale file.
+
 ### Removed
 
 - **Deep imports.** With an `exports` map, a package path into anything else (`@sym-bot/sym/lib/node.js`,
