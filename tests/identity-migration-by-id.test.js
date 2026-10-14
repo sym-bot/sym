@@ -704,7 +704,7 @@ describe('F11: a starter that read the index too early', () => {
 
 describe('F11 with real processes: several starters at once never make a second identity', () => {
   /** Four processes call loadIdentity({ name }) at the same moment on a 0.13 node, in a state root of their own. */
-  async function race({ withHusk }) {
+  async function race({ withHusk, pinned = false, stall = false }) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-race-'));
     try {
       const state = path.join(root, 'state');
@@ -715,10 +715,20 @@ describe('F11 with real processes: several starters at once never make a second 
       for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(nodes, name, 'cmbs', `c${i}.json`), '{}');
       fs.writeFileSync(path.join(nodes, name, 'identity.json'), JSON.stringify(id, null, 2));
       if (withHusk) { fs.mkdirSync(path.join(nodes, 'by-id', id.nodeId), { recursive: true }); fs.writeFileSync(path.join(nodes, 'by-id', id.nodeId, 'lock.pid'), '999999\n'); }
+      // `stall`: every file call may pause a few ms first, which spreads the four processes' steps through each other.
+      const stalls = stall ? `
+        const sab = new Int32Array(new SharedArrayBuffer(4));
+        for (const k of ['renameSync', 'lstatSync', 'statSync', 'readdirSync', 'mkdirSync', 'existsSync', 'readFileSync', 'writeFileSync', 'rmdirSync', 'rmSync',
+          'symlinkSync', 'unlinkSync', 'realpathSync', 'readlinkSync', 'chmodSync', 'openSync', 'copyFileSync']) {
+          const orig = fs[k]; fs[k] = function (...a) { if (Math.random() < 0.35) Atomics.wait(sab, 0, 0, Math.random() * 4); return orig.apply(fs, a); };
+        }` : '';
+      // `pinned`: the start mesh-channel makes, { name, nodeId, create: false }.
+      const options = pinned ? `{ name: ${JSON.stringify(name)}, nodeId: ${JSON.stringify(id.nodeId)}, create: false }` : `{ name: ${JSON.stringify(name)} }`;
       const code = `
+        const fs = require('fs');${stalls}
         const c = require(${JSON.stringify(path.resolve(__dirname, '../lib/config.js'))});
         process.stdin.once('data', () => {
-          try { const i = c.loadIdentity({ name: ${JSON.stringify(name)} }); console.log(JSON.stringify({ id: i.nodeId, key: i.privateKey })); }
+          try { const i = c.loadIdentity(${options}); console.log(JSON.stringify({ id: i.nodeId, key: i.privateKey })); }
           catch (e) { console.log(JSON.stringify({ error: e.name + ': ' + String(e.message).split('\\n')[0].slice(0, 200) })); }
           process.exit(0);
         });
@@ -733,11 +743,11 @@ describe('F11 with real processes: several starters at once never make a second 
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }
 
-  for (const withHusk of [false, true]) {
-    it(`${withHusk ? 'with a by-id dir that already exists' : 'plain'}: every starter that loads gets the original agent, and the key survives`, async () => {
+  for (const [withHusk, pinned, stall] of [[false, false, false], [true, false, false], [false, true, true], [true, true, true]]) {
+    it(`${pinned ? 'pinned starts (nodeId + name, create: false), stalled' : 'starts by name'}, ${withHusk ? 'with a by-id dir that already exists' : 'plain'}: every starter that loads gets the original agent, and the key survives`, async () => {
       let loaded = 0;
       for (let round = 0; round < 5; round++) {
-        const { id, outcomes, kept } = await race({ withHusk });
+        const { id, outcomes, kept } = await race({ withHusk, pinned, stall });
         assert.strictEqual(kept.privateKey, id.privateKey, 'the original private key is still the one on disk');
         for (const o of outcomes) {
           if (o.error) continue; // a starter may be told to start again; it must not become somebody else
@@ -766,6 +776,118 @@ describe('F13: the live-lock fallback checks the tombstone', () => {
       assert.strictEqual(cfg.loadIdentity({ name }).nodeId, id.nodeId, 'not tombstoned: it loads in place');
       put(path.join(cfg.nodeDirById(id.nodeId), cfg.TOMBSTONE), JSON.stringify({ movedAt: Date.now() }));
       assert.throws(() => cfg.loadIdentity({ name }), (e) => e instanceof IdentityTombstonedError);
+    } finally { child.kill(); }
+  });
+});
+
+describe('a start pinned to a nodeId migrates too (mesh-channel starts every node as { name, nodeId, create: false })', () => {
+  it('create: false, a plain 0.13 dir: the pinned agent loads, moved, with its key files private', () => {
+    const name = uniq('pin-plain');
+    const id = legacyNode(name, { e2e: true });
+    const loaded = cfg.loadIdentity({ name, nodeId: id.nodeId, create: false });
+    assert.strictEqual(loaded.nodeId, id.nodeId);
+    assert.strictEqual(loaded.privateKey, id.privateKey);
+    const dir = cfg.nodeDirById(id.nodeId);
+    assert.ok(exists(path.join(dir, 'cmbs', 'x.json')), 'the store moved with it');
+    assert.ok(isLink(path.join(NODES_DIR, name)), 'nodes/<name> is the compat link');
+    assert.strictEqual(cfg.nodeIdForName(name), id.nodeId);
+    if (posix) {
+      assert.strictEqual(modeOf(path.join(dir, 'identity.json')), 0o600);
+      assert.strictEqual(modeOf(path.join(dir, 'e2e-keypair.json')), 0o600);
+      assert.strictEqual(modeOf(dir), 0o700);
+    }
+    assert.strictEqual(cfg.loadIdentity({ name, nodeId: id.nodeId, create: false }).privateKey, id.privateKey, 'and the second start is the same');
+    assert.strictEqual(identitiesNamed(name).length, 1);
+  });
+
+  it('create: false, a by-id/<pin> dir that already exists (empty, or holding only a lock): the pinned agent loads', () => {
+    for (const lock of [false, true]) {
+      const name = uniq(`pin-husk${lock ? '-lock' : ''}`);
+      const id = legacyNode(name);
+      husk(id.nodeId, { lock });
+      const loaded = cfg.loadIdentity({ name, nodeId: id.nodeId, create: false });
+      assert.strictEqual(loaded.privateKey, id.privateKey);
+      assert.strictEqual(identitiesNamed(name).length, 1);
+    }
+  });
+
+  it('the default create: true loads the original and does not mint (0.14.2 made a new nodeId and lost the key)', () => {
+    for (const withHusk of [false, true]) {
+      const name = uniq(`pin-create${withHusk ? '-husk' : ''}`);
+      const id = legacyNode(name);
+      if (withHusk) husk(id.nodeId);
+      const loaded = cfg.loadIdentity({ name, nodeId: id.nodeId });
+      assert.strictEqual(loaded.nodeId, id.nodeId);
+      assert.strictEqual(loaded.privateKey, id.privateKey);
+      assert.strictEqual(identitiesNamed(name).length, 1, 'no second identity answers to the name');
+    }
+  });
+
+  it('with SYM_IDENTITY_DIR: the identity under SYM_IDENTITY_DIR/<name> moves and loads for the pin', () => {
+    withIdentityDir((idRoot) => {
+      const name = uniq('pin-idroot');
+      const id = makeIdentity(name);
+      put(path.join(idRoot, name, 'identity.json'), JSON.stringify(id, null, 2), 0o644);
+      put(path.join(NODES_DIR, name, 'cmbs', 'x.json'), '{}');
+      const loaded = cfg.loadIdentity({ name, nodeId: id.nodeId, create: false });
+      assert.strictEqual(loaded.privateKey, id.privateKey);
+      assert.ok(exists(path.join(idRoot, 'by-id', id.nodeId, 'identity.json')));
+      if (posix) assert.strictEqual(modeOf(path.join(idRoot, 'by-id', id.nodeId, 'identity.json')), 0o600);
+    });
+  });
+
+  it('a pin that is a DIFFERENT nodeId than the 0.13 directory\'s: the pin stays absent, the directory is left exactly as it is, nothing is made', () => {
+    const name = uniq('pin-other');
+    const other = legacyNode(name); // the agent whose directory this is
+    const pin = cfg.uuidv7();       // the start asks for another
+    const identityBefore = read(path.join(NODES_DIR, name, 'identity.json'));
+    const byIdBefore = fs.readdirSync(path.join(NODES_DIR, 'by-id')).length;
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: pin, create: false }), (e) => e.code === 'EIDENTITYABSENT');
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: pin }), (e) => e instanceof IdentityHaltError && /pinned to/.test(e.reason), 'create: true halts; it does not mint under the name');
+    assert.strictEqual(read(path.join(NODES_DIR, name, 'identity.json')), identityBefore, 'the other agent\'s key is byte-unchanged');
+    assert.ok(!isLink(path.join(NODES_DIR, name)) && exists(path.join(NODES_DIR, name, 'cmbs', 'x.json')), 'and its directory is where it was, unmoved');
+    assert.strictEqual(cfg.nodeIdForName(name), null, 'the name was not indexed to either');
+    assert.ok(!exists(cfg.nodeDirById(other.nodeId)) && !exists(cfg.nodeDirById(pin)), 'no directory was made for either');
+    assert.strictEqual(fs.readdirSync(path.join(NODES_DIR, 'by-id')).length, byIdBefore);
+    assert.strictEqual(identitiesNamed(name).length, 0);
+    // the unpinned start still moves it, as before
+    assert.strictEqual(cfg.loadIdentity({ name }).nodeId, other.nodeId);
+  });
+
+  it('nothing 0.13 to move (only a link to another agent): a pinned start does not index the name from it', () => {
+    const name = uniq('pin-link');
+    const owner = cfg.loadIdentity({ name: uniq('pin-link-owner') }); // some other agent, filed by id
+    fs.symlinkSync(path.join('by-id', owner.nodeId), path.join(NODES_DIR, name), 'dir'); // a link under this name, name unindexed
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: cfg.uuidv7(), create: false }), (e) => e.code === 'EIDENTITYABSENT');
+    assert.strictEqual(cfg.nodeIdForName(name), null, 'the pinned start wrote no index entry for the name');
+  });
+
+  it('the name is indexed to another agent and the pin\'s 0.13 directory sits under it: the pin stays absent, and the start does not answer with the indexed agent', () => {
+    const name = uniq('pin-held');
+    const indexed = cfg.loadIdentity({ name }); // N -> indexed
+    fs.unlinkSync(path.join(NODES_DIR, name));  // the link out of the way: a real directory for the pin
+    const pin = legacyNode(name);
+    const before = read(path.join(NODES_DIR, name, 'identity.json'));
+    assert.throws(() => cfg.loadIdentity({ name, nodeId: pin.nodeId, create: false }), (e) => e.code === 'EIDENTITYABSENT');
+    assert.strictEqual(read(path.join(NODES_DIR, name, 'identity.json')), before, 'the pin\'s key is where it was');
+    assert.strictEqual(cfg.nodeIdForName(name), indexed.nodeId, 'and the index still says what it said');
+  });
+
+  it('a 0.13 process holds the pinned agent\'s directory: it loads in place, and a tombstone still refuses it', async () => {
+    const name = uniq('pin-live');
+    const id = legacyNode(name);
+    const dir = path.join(NODES_DIR, name);
+    const child = spawn(process.execPath, ['-e', `
+      const c = require(${JSON.stringify(path.resolve(__dirname, '../lib/config.js'))});
+      c.acquireIdentityLock(${JSON.stringify(name)}, { dir: ${JSON.stringify(dir)} });
+      console.log('held'); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'inherit'] });
+    try {
+      await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('exit', () => reject(new Error('lock holder exited'))); });
+      assert.strictEqual(cfg.loadIdentity({ name, nodeId: id.nodeId, create: false }).privateKey, id.privateKey);
+      assert.ok(exists(path.join(dir, 'cmbs', 'x.json')) && !isLink(dir), 'unmoved: its process is running there');
+      assert.throws(() => cfg.loadIdentity({ name, nodeId: cfg.uuidv7(), create: false }), (e) => e.code === 'EIDENTITYABSENT', 'a different pin does not get it');
+      put(path.join(cfg.nodeDirById(id.nodeId), cfg.TOMBSTONE), JSON.stringify({ movedAt: Date.now() }));
+      assert.throws(() => cfg.loadIdentity({ name, nodeId: id.nodeId, create: false }), (e) => e instanceof IdentityTombstonedError);
     } finally { child.kill(); }
   });
 });

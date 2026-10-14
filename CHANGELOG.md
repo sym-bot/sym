@@ -21,6 +21,10 @@ or expose a key and the small ones beside them. The wire and the public surface 
 - **A name whose identity file was missing made a replacement agent.** If the name index named a node and its
   `identity.json` was not there (the `SYM_IDENTITY_DIR` volume not mounted at boot, the variable set by one embedder and
   not another), a start by name made a new nodeId and key and re-pointed the name to it.
+- **A start pinned by nodeId never migrated.** `loadIdentity` ran the migration only for a start by name alone. mesh-channel
+  starts every node as `{ name, nodeId, create: false }`, so a node it pinned to the nodeId in its `node.json` and whose
+  files were still the 0.13 `nodes/<name>/` could not start at all (`EIDENTITYABSENT`) until something started it by name
+  once; with `create: true` (the default) 0.14.2 made a new identity and lost the key. 0.14.3 loads the agent.
 - Smaller, same family: a stray symlink at `nodes/<name>` was reported as already indexed when nothing was indexed;
   switching `SYM_IDENTITY_DIR` on for a 0.13 node whose identity was in its node directory reported "not a node" and
   went on to make a new identity (the old key survived, orphaned in the new node's directory); an identity with a public key
@@ -40,6 +44,9 @@ or expose a key and the small ones beside them. The wire and the public surface 
 - Anyone who switched `SYM_IDENTITY_DIR` on for an existing 0.13 node: the old key is probably still on disk, in
   `nodes/by-id/<new nodeId>/identity.json` (the node that was made in its place).
 - Every node migrated from 0.13 holds a private key readable by other local users until it is next loaded with 0.14.3.
+- A node started by its pinned nodeId (mesh-channel's start, `create: false`) on the first start after upgrading from 0.13:
+  no key was lost, but it could not start until something started it by name. A pinned start with `create: true` could lose it
+  as above.
 
 ### Changed
 
@@ -47,6 +54,14 @@ or expose a key and the small ones beside them. The wire and the public surface 
   `identity.json` (or other content that cannot be merged) already filed under it. A directory that is empty, or holds a
   stale lock, claims nothing: the node is MERGED into it. The same identity on both sides is an interrupted move, and
   the next start finishes it. A real duplicate is still refused: nothing is moved and nothing is overwritten.
+- **A start pinned to a nodeId migrates too.** `loadIdentity({ nodeId, name })` whose identity is not in place and for
+  which a 0.13 directory under `name` is still there runs the same locked, idempotent migration as a start by name, then
+  loads the pinned agent. It is one code path, not a copy, and it is not run when there is no 0.13 directory to move.
+  **A pin that is a different nodeId than the directory's does not migrate it:** the directory belongs to another agent,
+  so it is left exactly where it is, unindexed (nothing moved, nothing lost), the pinned identity stays absent, and the
+  start fails as it would have: `IdentityAbsentError` with `create: false`, and with `create: true` the halt that says a
+  0.13 identity sits under the name (naming the pin). That agent moves when it is started by name or by its own pin. A
+  0.13 process holding the pinned agent's directory still lets it load in place (tombstone checked), as for a start by name.
 - **The name is indexed before anything moves, and the identity moves last.** A crash in the middle leaves the name
   pointing at the agent and the identity still where the next start will find it, so an interrupted move is re-entered
   by the identity's absence instead of being mistaken for "no such agent".
@@ -85,14 +100,19 @@ or expose a key and the small ones beside them. The wire and the public surface 
   should report them is open.
 - `loadIdentity({ nodeId, name })` still re-points a name that already indexes a different node.
 - `SYM_IDENTITY_DIR` switched on for an existing node does not move its key for you (it halts and says how).
-- `loadIdentity({ nodeId, name, create: true })` with a `nodeId` the name index does not hold and no identity file still
-  makes a new identity under a new nodeId (it does not use the one given).
+- `loadIdentity({ nodeId, name, create: true })` with a `nodeId` the name index does not hold, no identity file, and no 0.13
+  directory under the name still makes a new identity under a new nodeId (it does not use the one given). mesh-channel
+  passes `create: false`, so a pin is never ignored there.
+- A pinned start leaves another agent's 0.13 directory (same name, different nodeId) unmigrated, as above; with
+  `SYM_IDENTITY_DIR` set and that identity in the node directory it halts with the instructions given for that case.
 
 ### Tests
 
-- `tests/identity-migration-by-id.test.js`: 41 tests (40 run on macOS; one real cross-filesystem test runs on Linux).
-  33 of them fail on 0.14.2 (34 on Linux); seven pin behaviour that did not change. The code is mutation-tested: seventeen
-  mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
+- `tests/identity-migration-by-id.test.js`: 51 tests (50 run on macOS; one real cross-filesystem test runs on Linux).
+  41 of them fail on 0.14.2 (42 on Linux); nine pin behaviour that did not change (two of them keep a pinned start from
+  migrating what is not its own). Of the 51, ten are for pinned starts, among them four real processes starting one 0.13
+  agent at once under injected stalls, with and without a by-id directory already in place. The code is mutation-tested:
+  twenty-one mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
 
 ## 0.14.2 — 2026-10-14
 
