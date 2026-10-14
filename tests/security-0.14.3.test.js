@@ -346,3 +346,25 @@ describe('R2-9: earned key bindings age out, and new ones hold a share of the re
     assert.strictEqual(r.expire(), 1, 'an earned binding no longer lives for ever');
   });
 });
+
+describe('R2-3 (inbox): the inbox is bounded by size, never by dropping an unread delivery', () => {
+  const big = (n, seed) => { let t = ''; let j = 0; while (t.length < n) t += `inbox ${seed}_${j++} `; return t.slice(0, n); };
+
+  it('R2-3: large deliveries fill the inbox only up to its size; read ones make room, unread ones are kept', async () => {
+    try {
+      const node = mk('r23-inbox');
+      const metrics = []; node.on('metric', (m) => { if (m.type === 'inbox-full-refused') metrics.push(m); });
+      const text = big(700 * 1024, 'x');
+      const deliver1 = (i) => node.emit('cmb-accepted', { key: `cmb-${String(i).padStart(64, '0')}`, content: text, cmb: { categories: { focus: { text } }, metadata: {} }, verified: false });
+      for (let i = 0; i < 40; i++) deliver1(i);
+      const chars = node._inbox.reduce((n, m) => n + (m.content || '').length + JSON.stringify(m.categories || '').length, 0);
+      assert.ok(chars <= 34 * 1024 * 1024, `the inbox holds a bounded amount (${Math.round(chars / 1048576)} M)`);
+      assert.ok(metrics.length > 0, 'a delivery that does not fit is refused, counted');
+      const unread = node._inbox.length;
+      node.inbox({ limit: 500 }); // read them all
+      deliver1(1000);
+      assert.ok(node._inbox.some((m) => m.key === `cmb-${String(1000).padStart(64, '0')}`), 'read items make room for a new delivery');
+      assert.ok(node._inbox.length <= unread, 'what was read went');
+    } finally { await stopAll(); }
+  });
+});
