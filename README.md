@@ -167,11 +167,12 @@ What this does not solve, said plainly:
   the anchor and each grantor re-issue what should stand (`node.legacyRoleGrants()` lists the old
   ones; [docs/AUTHORITY-OPERATOR.md](docs/AUTHORITY-OPERATOR.md) says how, and how to pin and re-pin).
 - **Relay identity.** A node proves its key in `relay-auth` to a relay that asks (sym-relay 0.8.0),
-  and such a relay keys the node's slot by that key: a token holder claiming the nodeId cannot evict
-  or block it. A relay that does not verify keys still lets a token holder close a node's relay
-  connection (4004), and the node says so in status and stops. A slot proven under a member's
-  nodeId with another key can still send frames named as the member's, which cannot forge a
-  session but can delay a re-handshake (SECURITY.md has the detail).
+  and such a relay keys the node's slot by that key and stamps the proving key on every frame it
+  delivers: a token holder claiming the nodeId cannot evict, block, or impersonate it, and a node
+  drops relay frames stamped with any key but the one it binds for that nodeId. A relay that does not
+  verify keys still lets a token holder close a node's relay connection (4004), and the node says so
+  in status and stops. Several proven keys for a nodeId no peer has bound are an ambiguity an operator
+  resolves, never guessed (SECURITY.md has the detail).
 - **Key compromise.** There is no key rotation: a node whose private key leaks must be
   replaced, under a new nodeId.
 - **Your own machine.** Another process running as the same user can read the identity file.

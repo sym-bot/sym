@@ -425,13 +425,21 @@ is unchanged except where a line says so (relay-auth key proof is the one change
 - **mesh-channel exits on `identity-collision`** (server.js). On a relay that verifies keys only another
   process holding the key causes one; on a relay that does not, a token holder still can, and
   `info.relayVerifiesKeys` says which.
-- **A delivered relay frame names its sender's nodeId, not the key that proved it.** A slot proven for
-  another key under a member's nodeId can send frames "from" the member. They cannot open or forge a
-  session (the handshake binds the key), but a flood of client-hellos from it at the relay's rate holds
-  the member's per-sender hello budget at a peer, and a member that restarts cannot re-handshake with
-  that peer while the flood lasts (measured on localhost: 25 a second kept it out for the 40 s
-  watched; 4 a second did not). A `fromKey` on frames from proven slots, and per-(nodeId, key) state
-  at the receiver, would end it; that is a wire addition for sym-relay and the spec, not made here.
+- **`fromKey`: a receiver tells the slots of one nodeId apart.** A relay that verifies keys stamps
+  `fromKey` (the key the sender's slot proved, sym-relay 0.8.0) on every frame it delivers from a
+  proven slot. The node drops a relay frame whose `fromKey` is not the key it binds for that nodeId,
+  before any session or bucket, never charging the bound peer (`relay-frame-wrong-key`); and it lanes
+  relay server sessions and the per-sender hello budget by (nodeId, `fromKey`). So a slot proven for
+  another key under a member's nodeId can neither supersede the member's handshake nor spend its hello
+  budget. Re-measured on localhost: an impostor flooding client-hellos at 25 a second no longer keeps
+  a restarted member (whose peer binds it) from re-handshaking (it did before `fromKey`).
+- **Several proven keys for an unbound nodeId are an identity ambiguity, not first-come.** When a relay
+  presents a nodeId under more than one proven key and this node binds none of them, the node starts no
+  session for it and binds none — it does not trust-on-first-use by who announced first. It reports the
+  ambiguity (`identity-ambiguity` event, `relay-identity-ambiguous` metric,
+  `status().coreSecure.identityAmbiguities`, `relayState.identityAmbiguous`, a log line) and resolves it
+  only by a pin, an anchor certification, or one proven key remaining. A single proven key is first
+  proven use as before.
 - A relay setting that is no relay URL is said in status and the log; mesh-channel's own relay store
   passes what it holds to SymNode unchanged, so it shows the setting as written.
 
