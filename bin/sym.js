@@ -34,6 +34,7 @@ const { logSafe } = require('../lib/wire-identity'); // peer-chosen text on the 
  *   sym keys <name> resolve <nodeId> <key>    # Operator: bind nodeId to key (pinned), clearing its conflicts
  *   sym keys <name> reset-floor <nodeId>      # Operator: let a Legacy Import route be used again
  *   sym node export <name> --out <file> (--to-host <x25519 pub> | --passphrase-env VAR --allow-copies)
+ *   sym node abort-export (<name> | --node-id <id>)   abandon an export that produced no complete bundle
  *   sym node import <file> --expect-node <id> [--expect-key <k> | --expect-fingerprint sha256:…] [--passphrase-env VAR]
  *   sym node host-key                 # This host's X25519 key for receiving node bundles
  *   sym logs                          # Tail daemon logs
@@ -176,7 +177,17 @@ function cmdNode() {
       // Sealed to the target host by default; a passphrase bundle opens on any host with the passphrase,
       // so it is a copy, and needs --allow-copies (final re-review, Finding 7b).
       const r = relocation.exportNode({ name: args[2], out: flagValue('--out'), passphrase: passphrase(), toHostKey: flagValue('--to-host') || undefined, copyable: args.includes('--allow-copies') });
-      console.log(`exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.${flagValue('--to-host') ? '' : ' The bundle is a passphrase bundle: any host with the passphrase can import it.'}`);
+      console.log(r.resumed
+        ? `finished the export of ${r.name} (${r.nodeId}) to ${r.out}: its bundle was complete; the key is removed from this host.`
+        : `exported ${r.name} (${r.nodeId}, ${r.fingerprint}) to ${r.out}: ${r.files} file(s). It is tombstoned here and will not start on this host again.${flagValue('--to-host') ? '' : ' The bundle is a passphrase bundle: any host with the passphrase can import it.'}`);
+      return;
+    }
+    if (sub === 'abort-export') {
+      // Abandon an export that began and produced no complete bundle: the tombstone goes and the node starts here again.
+      const r = relocation.abortExport({ name: args[2] && !args[2].startsWith('--') ? args[2] : undefined, nodeId: flagValue('--node-id') || undefined });
+      console.log(r.aborted
+        ? `the export of ${r.nodeId}${r.bundle ? ` to ${r.bundle}` : ''} is abandoned: no complete bundle was produced, and the node starts on this host again${r.partialRemoved ? ` (${r.partialRemoved} half-written bundle file(s) removed)` : ''}.`
+        : `no export of ${r.nodeId} is under way; nothing was changed.`);
       return;
     }
     if (sub === 'import') {
@@ -189,7 +200,7 @@ function cmdNode() {
     console.error(err.message);
     process.exit(1);
   }
-  console.error('usage: sym node (export <name> --out <file> (--to-host <pub> | --passphrase-env VAR --allow-copies) | import <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…) [--passphrase-env VAR] | host-key)');
+  console.error('usage: sym node (export <name> --out <file> (--to-host <pub> | --passphrase-env VAR --allow-copies) | abort-export (<name> | --node-id <id>) | import <file> --expect-node <id> (--expect-key <k> | --expect-fingerprint sha256:…) [--passphrase-env VAR] | host-key)');
   process.exit(1);
 }
 

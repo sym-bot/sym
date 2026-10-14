@@ -9,9 +9,9 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * An independent review (R1) of the 0.14.3 candidate (632b95d) proved, by running them, that a partial
  * destination, an unreadable index, a node directory without identity.json and a stale lock's content were
  * each read as a state of the identity, and that each patch for one of them had made another. The design that
- * replaces them (lib/config.js):
- *   - a 0.13 directory is COPIED to a staging directory beside its by-id destination, identity.json last,
- *     synced, verified, and installed by ONE rename; the 0.13 directory is then set aside, never deleted;
+ * replaces them (lib/config.js; v2, after the re-review of the copy):
+ *   - a 0.13 directory is MOVED in by ONE rename of the whole directory (or, behind a link, on a mount point or
+ *     another volume, linked to from by-id); the identity in place is the commit;
  *   - a name is claimed by an exclusive create of its index entry, after the identity is installed;
  *   - an index entry is "absent" only on ENOENT; a mint happens only when nothing on the host is a trace of
  *     the name; a stale lock is removed only by the one process holding the right to remove that lock.
@@ -164,10 +164,10 @@ describe('R1-1: a migration interrupted at any step changes nothing in the 0.13 
         if (withHusk) put(path.join(cfg.nodeDirById(id.nodeId), 'lock.pid'), '2147483646\n');
         const before = treeOf(path.join(NODES_DIR, name));
         failAt(k, () => cfg.migrateNodeDir(name));
-        // The 0.13 directory: in place and byte-identical, or set aside byte-identical with the link in its place.
+        // The 0.13 directory: in place and byte-identical, or (v2) moved in whole, byte-identical, with the link in its place.
         const legacy = path.join(NODES_DIR, name);
-        const where = isLink(legacy) ? path.join(NODES_DIR, ASIDE, name) : legacy;
-        if (!exists(where)) assert.fail(`step ${k}: the 0.13 directory is no longer at nodes/${name} and was not set aside (moved or deleted, not kept)`);
+        const where = isLink(legacy) ? cfg.nodeDirById(id.nodeId) : legacy;
+        if (!exists(where)) assert.fail(`step ${k}: the 0.13 directory is no longer at nodes/${name} and was not moved in whole (moved or deleted, not kept)`);
         assert.deepStrictEqual(treeOf(where), before, `step ${k}: the 0.13 directory (${path.relative(NODES_DIR, where)}) is byte-identical`);
         // What a 0.13 rollback reads: nodes/<name>/identity.json is the original key.
         assert.strictEqual(JSON.parse(read(path.join(legacy, 'identity.json'))).privateKey, id.privateKey, `step ${k}: a 0.13 reader still finds the key at nodes/<name>`);
@@ -227,7 +227,9 @@ describe('R1-3: what a 0.13 node kept behind a link is followed and copied', () 
     assert.deepStrictEqual(identitiesNamed(name), [id.nodeId]);
   });
 
-  it('identity.json a RELATIVE link to a key file elsewhere: the original loads, and the installed identity is a file, not a link that now leads nowhere', () => {
+  it('identity.json a RELATIVE link to a key file elsewhere: the original loads, and the installed identity leads to that key file, never nowhere', () => {
+    // (v2: a 0.13 directory holding a relative link that leads out of it is linked to from by-id, not moved: moved one
+    // level deeper, the link would lead elsewhere.)
     const name = uniq('r13-rel');
     const id = makeIdentity(name);
     put(path.join(cfg.SYM_DIR, 'keys', `${name}.json`), JSON.stringify(id), 0o600);
@@ -236,29 +238,38 @@ describe('R1-3: what a 0.13 node kept behind a link is followed and copied', () 
     const loaded = cfg.loadIdentity({ name });
     assert.strictEqual(loaded.privateKey, id.privateKey);
     const installed = path.join(cfg.nodeDirById(id.nodeId), 'identity.json');
-    assert.ok(!isLink(installed), 'a file');
+    assert.ok(isLink(cfg.nodeDirById(id.nodeId)), 'by-id/<id> links to the 0.13 directory');
+    assert.strictEqual(fs.realpathSync(installed), fs.realpathSync(path.join(cfg.SYM_DIR, 'keys', `${name}.json`)), 'the identity leads to the key file');
     assert.strictEqual(JSON.parse(read(installed)).privateKey, id.privateKey);
     assert.strictEqual(JSON.parse(read(path.join(cfg.SYM_DIR, 'keys', `${name}.json`))).privateKey, id.privateKey, 'the key file it led to is untouched');
   });
 });
 
 describe('the staged commit: what it checks before the one rename', () => {
-  it('a copy that does not read back as its source is not installed, and the source is untouched', () => {
-    const name = uniq('verify');
-    const id = legacyNode(name);
-    const before = treeOf(path.join(NODES_DIR, name));
-    assert.throws(() => patchFs('copyFileSync', (o) => function (a, b, ...r) {
-      const out = o.call(fs, a, b, ...r);
-      if (String(b).endsWith('c3.json')) fs.appendFileSync(b, ' '); // a copy that came out different
-      return out;
-    }, () => cfg.migrateNodeDir(name)), /does not match/);
-    assert.ok(!exists(cfg.nodeDirById(id.nodeId)), 'nothing installed');
-    assert.deepStrictEqual(treeOf(path.join(NODES_DIR, name)), before, 'the source is untouched');
-    assert.strictEqual(cfg.nodeIdForName(name), null);
-    assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey, 'the next start copies it right');
+  it('an identity copied across volumes that does not read back as its source is not installed, and the source is untouched', () => {
+    // (v2: only the identity files are ever copied, and only across volumes; EXDEV is simulated here.)
+    withIdentityDir((idRoot) => {
+      const name = uniq('verify');
+      const id = makeIdentity(name);
+      put(path.join(idRoot, name, 'identity.json'), JSON.stringify(id, null, 2), 0o600);
+      put(path.join(NODES_DIR, name, 'cmbs', 'x.json'), '{}');
+      const src = read(path.join(idRoot, name, 'identity.json'));
+      const exdev = (o) => function (a, b) {
+        if (String(a) === path.join(idRoot, name)) throw Object.assign(new Error('EXDEV: simulated'), { code: 'EXDEV' });
+        return o.call(fs, a, b);
+      };
+      assert.throws(() => patchMany({
+        renameSync: exdev,
+        readFileSync: (o) => function (p, ...a) { const r = o.call(fs, p, ...a); return String(p).includes('.stage-') && Buffer.isBuffer(r) ? Buffer.concat([r, Buffer.from(' ')]) : r; },
+      }, () => cfg.migrateNodeDir(name)), /does not read back/);
+      assert.ok(!exists(path.join(idRoot, 'by-id', id.nodeId)), 'nothing installed');
+      assert.strictEqual(read(path.join(idRoot, name, 'identity.json')), src, 'the source is untouched');
+      assert.ok(!cfg.isCommitted(id.nodeId));
+      assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey, 'the next start moves it right');
+    });
   });
 
-  it('a directory inside the 0.13 node that is a relative link is copied as the directory it leads to', () => {
+  it('a directory inside the 0.13 node that is a relative link leading out of it still leads there (v2: linked to, not moved)', () => {
     const name = uniq('sublink');
     const id = makeIdentity(name);
     put(path.join(NODES_DIR, name, 'identity.json'), JSON.stringify(id));
@@ -266,7 +277,8 @@ describe('the staged commit: what it checks before the one rename', () => {
     fs.symlinkSync(`../${name}-store`, path.join(NODES_DIR, name, 'cmbs'), 'dir');
     cfg.loadIdentity({ name });
     const cmbs = path.join(cfg.nodeDirById(id.nodeId), 'cmbs');
-    assert.ok(!isLink(cmbs) && read(path.join(cmbs, 'x.json')) === '{"x":1}', 'a real directory holding the files');
+    assert.ok(isLink(cfg.nodeDirById(id.nodeId)), 'by-id/<id> links to the 0.13 directory, which was not moved');
+    assert.ok(read(path.join(cmbs, 'x.json')) === '{"x":1}', 'the relative link leads to the same files');
   });
 
   it('a by-id husk whose lock a live process holds is not replaced: EIDENTITYLOCK, nothing changed', async () => {
@@ -426,33 +438,50 @@ describe('R1-7: an index entry is "absent" only when there is none', () => {
     assert.deepStrictEqual(identitiesNamed(name), [orig.nodeId]);
   });
 
+  // v2 (design point 1): the index is a cache of the committed identities' names. One that is empty, not JSON or another
+  // name's is re-derived (the identity named so loads, and the entry is written again); one that cannot be read for an
+  // I/O error (EACCES, EMFILE) is re-derived for the start and left as it is. Nothing is minted either way.
   for (const how of ['empty', 'not json', 'another name']) {
-    it(`${how}, and no compat link: the start halts, naming where the identity is; nothing is minted`, () => {
+    it(`${how}, and no compat link: the identity named so loads (re-derived), the entry is written again, nothing is minted`, () => {
       const { name, orig, idx, link } = made();
       fs.writeFileSync(idx, how === 'empty' ? '' : how === 'not json' ? '{"nodeId":' : JSON.stringify({ name: 'someone-else', nodeId: orig.nodeId }));
       fs.unlinkSync(link);
-      assert.throws(() => cfg.loadIdentity({ name }), (e) => e instanceof IdentityHaltError && e.message.includes(orig.nodeId) && !/remove .*by-name/.test(e.message));
-      assert.throws(() => cfg.loadIdentity({ name, create: false }), IdentityHaltError);
+      assert.strictEqual(cfg.loadIdentity({ name }).privateKey, orig.privateKey);
+      assert.strictEqual(cfg.loadIdentity({ name, create: false }).nodeId, orig.nodeId);
+      assert.deepStrictEqual(JSON.parse(read(idx)), { ...JSON.parse(read(idx)), name, nodeId: orig.nodeId }, 'the entry is an entry again');
       assert.deepStrictEqual(identitiesNamed(name), [orig.nodeId], 'no second identity');
     });
   }
 
-  (posix && process.getuid && process.getuid() !== 0 ? it : it.skip)('unreadable (mode 000): halts, nothing minted', () => {
+  it('empty, and the identity it named is not here (no committed identity of the name): halts, says not to delete it, mints nothing', () => {
+    const { name, orig, idx, link } = made();
+    fs.writeFileSync(idx, '');
+    fs.unlinkSync(link);
+    const away = path.join(NODES_DIR, 'by-id', `.away-${orig.nodeId}`);
+    fs.renameSync(cfg.nodeDirById(orig.nodeId), away);
+    try {
+      assert.throws(() => cfg.loadIdentity({ name }), (e) => e instanceof IdentityHaltError && /Do not delete it/.test(e.message) && !/remove .*by-name/.test(e.message));
+      assert.deepStrictEqual(identitiesNamed(name), [], 'nothing minted');
+    } finally { fs.renameSync(away, cfg.nodeDirById(orig.nodeId)); }
+  });
+
+  (posix && process.getuid && process.getuid() !== 0 ? it : it.skip)('unreadable (mode 000): the identity named so loads, the entry is left as it is, nothing minted', () => {
     const { name, orig, idx, link } = made();
     fs.chmodSync(idx, 0); fs.unlinkSync(link);
     try {
-      assert.throws(() => cfg.loadIdentity({ name }), IdentityHaltError);
+      assert.strictEqual(cfg.loadIdentity({ name }).nodeId, orig.nodeId);
+      assert.strictEqual(fs.statSync(idx).mode & 0o777, 0, 'not replaced');
       assert.deepStrictEqual(identitiesNamed(name), [orig.nodeId]);
     } finally { fs.chmodSync(idx, 0o644); }
   });
 
-  it('a read error that is not ENOENT (EMFILE): halts, nothing minted', () => {
+  it('a read error that is not ENOENT (EMFILE): the identity named so loads, nothing minted', () => {
     const { name, orig, idx, link } = made();
     fs.unlinkSync(link);
     patchFs('readFileSync', (o) => function (p, ...a) {
       if (String(p) === idx) throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
       return o.call(fs, p, ...a);
-    }, () => { assert.throws(() => cfg.loadIdentity({ name }), IdentityHaltError); });
+    }, () => { assert.strictEqual(cfg.loadIdentity({ name }).nodeId, orig.nodeId); });
     assert.deepStrictEqual(identitiesNamed(name), [orig.nodeId]);
     assert.strictEqual(cfg.loadIdentity({ name }).nodeId, orig.nodeId, 'once it reads, the same agent');
   });
@@ -479,7 +508,8 @@ describe('R1-8: an export interrupted before its bundle is durable is resumable 
   }
   const out = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sym-bundle-')), 'node.bundle');
 
-  it('the start is refused saying the export did not finish (not "exported to another host"), and running the export again finishes it', async () => {
+  it('a crash after the tombstone and before a complete bundle: refused saying the export did not finish, and running the export again finishes it', async () => {
+    // v2 (design point 4): the tombstone comes BEFORE the bundle, so no bundle ever exists beside a live source.
     const name = uniq('r18');
     const id = await made(name);
     const file = out();
@@ -490,31 +520,44 @@ describe('R1-8: an export interrupted before its bundle is durable is resumable 
     }, () => relocation.exportNode({ name, out: file, toHostKey })), /EIO/);
     assert.ok(!exists(file), 'no bundle');
     assert.throws(() => cfg.loadIdentity({ name }), (e) => e.code === 'EIDENTITYEXPORTING' && !/exported to another host/.test(e.message));
-    assert.strictEqual(cfg.readTombstone(id.nodeId), null, 'not tombstoned: nothing was moved');
+    assert.ok(cfg.readTombstone(id.nodeId), 'tombstoned: the source stopped using the key before any bundle could exist');
+    assert.throws(() => relocation.exportNode({ name, out: file + '.other', toHostKey }), /may have written a complete bundle/, 'another out is refused');
     const r = relocation.exportNode({ name, out: file, toHostKey });
     assert.strictEqual(r.nodeId, id.nodeId);
     assert.ok(exists(file), 'the bundle');
-    assert.ok(cfg.readTombstone(id.nodeId), 'tombstoned now');
+    assert.ok(cfg.readTombstone(id.nodeId), 'tombstoned');
+    assert.strictEqual(cfg.readExportIntent(id.nodeId), null, 'finished');
     assert.strictEqual(JSON.parse(read(path.join(cfg.identityDirById(id.nodeId), 'identity.json'))).privateKey, null, 'the source lost the key');
   });
 
-  it('abortExport removes the bundle it wrote and the intent: the node starts here again', async () => {
+  it('abortExport reverts an export that produced no complete bundle, and refuses one that did', async () => {
     const name = uniq('r18-abort');
     const id = await made(name);
     const file = out();
     const toHostKey = relocation.hostKey().publicKey;
-    // interrupted after the bundle is durable and before the tombstone
+    // interrupted at the tombstone: no bundle can exist yet (v2: the tombstone precedes it)
     assert.throws(() => patchFs('openSync', (o) => function (p, ...a) {
-      if (String(p).includes(cfg.TOMBSTONE)) throw Object.assign(new Error('EIO: crash before the tombstone'), { code: 'EIO' });
+      if (String(p).includes(cfg.TOMBSTONE)) throw Object.assign(new Error('EIO: crash at the tombstone'), { code: 'EIO' });
       return o.call(fs, p, ...a);
     }, () => relocation.exportNode({ name, out: file, toHostKey })), /EIO/);
-    assert.ok(exists(file), 'the bundle is durable');
+    assert.ok(!exists(file), 'no bundle');
     assert.throws(() => cfg.loadIdentity({ name }), (e) => e.code === 'EIDENTITYEXPORTING');
     const a = relocation.abortExport({ name });
     assert.strictEqual(a.aborted, true);
-    assert.strictEqual(a.bundleRemoved, true);
-    assert.ok(!exists(file), 'the bundle is gone');
+    assert.strictEqual(cfg.readTombstone(id.nodeId), null);
     assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey, 'the node starts again, with its key');
+    // interrupted after the bundle is complete and before the scrub: the bundle is the node now
+    const file2 = out();
+    assert.throws(() => patchFs('openSync', (o) => function (p, ...a) {
+      if (/identity\.json\.\d+\.tmp$/.test(String(p))) throw Object.assign(new Error('EIO: crash before the scrub'), { code: 'EIO' });
+      return o.call(fs, p, ...a);
+    }, () => relocation.exportNode({ name, out: file2, toHostKey })), /EIO/);
+    assert.ok(exists(file2), 'the bundle is complete');
+    assert.throws(() => relocation.abortExport({ name }), /complete bundle/);
+    assert.throws(() => cfg.loadIdentity({ name }), (e) => e.code === 'EIDENTITYTOMBSTONED', 'moved: the bundle is the agent');
+    const done = relocation.exportNode({ name, out: file2, toHostKey });
+    assert.strictEqual(done.resumed, 'scrub');
+    assert.strictEqual(JSON.parse(read(path.join(cfg.identityDirById(id.nodeId), 'identity.json'))).privateKey, null);
   });
 });
 

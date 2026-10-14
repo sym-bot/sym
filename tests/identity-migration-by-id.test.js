@@ -35,6 +35,7 @@ const modeOf = (p) => fs.statSync(p).mode & 0o777;
 const read = (p) => fs.readFileSync(p, 'utf8');
 const exists = (p) => fs.existsSync(p);
 const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+const indexFile = (name) => path.join(NODES_DIR, 'by-name', `${encodeURIComponent(name)}.json`);
 
 /** A real Ed25519 identity, in the shape lib/config writes. */
 function makeIdentity(name, extra = {}) {
@@ -112,6 +113,12 @@ function patchFs(fn, wrap, body) {
   const original = fs[fn];
   fs[fn] = wrap(original);
   try { return body(); } finally { fs[fn] = original; }
+}
+/** Replace several fs functions at once: `wraps` maps a name to (original) => replacement. */
+function patchMany(wraps, body) {
+  const originals = {};
+  for (const [k, w] of Object.entries(wraps)) { originals[k] = fs[k]; fs[k] = w(originals[k]); }
+  try { return body(); } finally { for (const k of Object.keys(originals)) fs[k] = originals[k]; }
 }
 const exdev = (msg) => Object.assign(new Error(`EXDEV: cross-device link not permitted (${msg})`), { code: 'EXDEV' });
 
@@ -205,10 +212,10 @@ describe('T3-T5: a by-id directory that merely exists is not a second claim on t
     const dest = husk(id.nodeId);
     assert.strictEqual(cfg.migrateNodeDir(name), 'moved');
     assert.strictEqual(JSON.parse(read(path.join(dest, 'identity.json'))).privateKey, id.privateKey, 'the identity is under the nodeId, key unchanged');
-    // 0.14.3 changed this: the husk is REPLACED through the staged commit (one rename), and its stale lock is removed
+    // 0.14.3 changed this: the husk is REPLACED by the commit (one rename), and its stale lock is removed
     // (compare-and-delete, what the next acquire would do anyway) rather than kept; a live one would refuse (EIDENTITYLOCK).
+    // (Design v2: the commit is the identity in place, moved in by one rename; there is no separate commit record.)
     assert.ok(!exists(path.join(dest, 'lock.pid')), 'the stale lock is not carried into the installed directory');
-    assert.ok(exists(path.join(dest, cfg.COMMIT_MARK)), 'the directory carries the commit record');
     assert.ok(exists(path.join(dest, 'cmbs', 'x.json')), 'the store came with it');
     assert.strictEqual(cfg.nodeIdForName(name), id.nodeId);
     assert.ok(isLink(path.join(NODES_DIR, name)), 'nodes/<name> is the compat link');
@@ -286,7 +293,8 @@ describe('T6/T7: a real duplicate is refused, and refusing is a halt, never a mi
     assert.strictEqual(cfg.migrateNodeDir(name), 'skipped-duplicate');
     assert.strictEqual(read(path.join(NODES_DIR, name, 'identity.json')), legacyBefore, 'the 0.13 identity is byte-unchanged');
     assert.strictEqual(read(path.join(dest, 'identity.json')), destBefore, 'the one already filed is byte-unchanged');
-    assert.strictEqual(cfg.nodeIdForName(name), null, 'nothing was indexed');
+    // (v2: nodeIdForName re-derives from what is committed, so "indexed" is the index file itself.)
+    assert.ok(!exists(indexFile(name)), 'nothing was indexed');
     assert.ok(!exists(path.join(dest, 'cmbs')), 'and nothing was merged in beside it');
     assert.ok(mine.privateKey);
   });
@@ -301,18 +309,24 @@ describe('T6/T7: a real duplicate is refused, and refusing is a halt, never a mi
     assert.strictEqual(read(path.join(NODES_DIR, name, 'identity.json')), legacyBefore);
     assert.strictEqual(read(path.join(dest, 'identity.json')), destBefore);
     assert.strictEqual(fs.readdirSync(path.join(NODES_DIR, 'by-id')).length, dirsBefore, 'no new node directory was made');
-    assert.strictEqual(cfg.nodeIdForName(name), null);
+    assert.ok(!exists(indexFile(name)), 'nothing was indexed'); // (v2: nodeIdForName re-derives; the index file is what "indexed" means)
   });
 
-  it('a differing store file in an existing by-id dir is a conflict too: nothing moves', () => {
+  it('a husk holding a store file that differs (changed in v2): set aside whole, the node moved in, the differing file kept aside and reported', () => {
+    // Design v2: halting here left an agent that 0.14.2 had run beside a live 0.13 process unable to start (re-review
+    // e25). The husk is set aside whole; files that differ from the node's are kept there and reported; the node starts.
     const name = uniq('conflict');
     const id = legacyNode(name);
     const dest = husk(id.nodeId, { lock: false });
     put(path.join(dest, 'cmbs', 'x.json'), '{"x":2}');
-    assert.strictEqual(cfg.migrateNodeDir(name), 'skipped-duplicate');
-    assert.ok(exists(path.join(NODES_DIR, name, 'identity.json')), 'the 0.13 node is where it was');
-    assert.strictEqual(read(path.join(dest, 'cmbs', 'x.json')), '{"x":2}');
-    assert.throws(() => cfg.loadIdentity({ name }), IdentityHaltError);
+    put(path.join(dest, 'cmbs', 'same.json'), 'same'); put(path.join(NODES_DIR, name, 'cmbs', 'same.json'), 'same');
+    assert.strictEqual(cfg.migrateNodeDir(name), 'moved');
+    assert.strictEqual(read(path.join(dest, 'cmbs', 'x.json')), '{"x":1}', 'the node is the 0.13 directory');
+    const aside = fs.readdirSync(path.join(NODES_DIR, 'by-id')).filter((n) => n.startsWith(`.${id.nodeId}.husk-`));
+    assert.strictEqual(aside.length, 1, 'the husk is set aside beside it');
+    assert.strictEqual(read(path.join(NODES_DIR, 'by-id', aside[0], 'cmbs', 'x.json')), '{"x":2}', 'the differing file is kept there');
+    assert.ok(!exists(path.join(NODES_DIR, 'by-id', aside[0], 'cmbs', 'same.json')), 'a file the node has too is not kept twice');
+    assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey);
   });
 
   it('a name the index already gives to ANOTHER node is not re-pointed by a stray 0.13 directory', () => {
@@ -398,9 +412,9 @@ describe('the safety net: the mint path never buries a 0.13 identity', () => {
     });
   });
 
-  it('F7 (changed in 0.14.3, R1): a symlink at nodes/<name> that is not a compat link is a 0.13 directory kept elsewhere: it is followed and copied, its target untouched', () => {
+  it('F7 (changed in v2): a symlink at nodes/<name> that is not a compat link is a 0.13 directory kept elsewhere: by-id/<id> links to it, nothing is copied, its target untouched', () => {
     // 632b95d halted here, and minted when the link was a 0.13 node's directory on a durable volume. A link that is
-    // not `by-id/<id>` is the agent's own directory: copy what it leads to, set the link aside, never touch the target.
+    // not `by-id/<id>` is the agent's own directory. Design v2: the store stays where its operator put it.
     const name = uniq('f7');
     const elsewhere = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sym-stray-')), 'agent');
     const id = legacyNode(name, { where: elsewhere });
@@ -411,9 +425,10 @@ describe('the safety net: the mint path never buries a 0.13 identity', () => {
     assert.strictEqual(cfg.nodeIdForName(name), id.nodeId);
     assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey);
     const dest = cfg.nodeDirById(id.nodeId);
-    assert.ok(!isLink(path.join(dest, 'cmbs')) && exists(path.join(dest, 'cmbs', 'x.json')), 'the store was copied, not linked');
+    assert.ok(isLink(dest) && fs.readlinkSync(dest) === fs.realpathSync(elsewhere), 'by-id/<id> is an absolute link to the directory, not a copy');
+    assert.ok(exists(path.join(dest, 'cmbs', 'x.json')), 'the store is reached through it');
     assert.deepStrictEqual(treeOf(elsewhere), before, 'what the link led to is byte-unchanged');
-    assert.strictEqual(fs.readlinkSync(path.join(NODES_DIR, cfg.LEGACY_ASIDE, name)), elsewhere, 'the link itself was set aside');
+    assert.ok(isLink(path.join(NODES_DIR, name)) && cfg.loadIdentity({ name, create: false }).nodeId === id.nodeId, 'nodes/<name> is the compat link now');
     assert.strictEqual(cfg.migrateNodeDir(name), 'already');
   });
 
@@ -493,9 +508,10 @@ function volumeOf(p, idRoot) {
 }
 
 describe('F9: a copy across filesystems: copies, verifies, commits; the source is kept', () => {
-  it('EXDEV between the trees: the identity arrives intact at 0600, and the source is set aside, not deleted', () => {
-    // 0.14.3: no rename ever crosses from a 0.13 directory into by-id (the staging is made beside its destination),
-    // so every rename across the trees below fails with EXDEV here, and the migration still completes.
+  it('EXDEV between the trees (changed in v2): the store is linked, not copied; the key files are copied, committed, the source set aside', () => {
+    // Design v2: a rename that would cross volumes is refused by the file system (EXDEV, simulated here); the store is
+    // never copied (by-id/<id> becomes a link to it), and only the small identity files cross: staged beside their
+    // destination, synced, verified, committed by one rename; the 0.13 source is set aside (narrowed), never deleted.
     withIdentityDir((idRoot) => {
       const name = uniq('f9');
       const id = makeIdentity(name);
@@ -507,35 +523,49 @@ describe('F9: a copy across filesystems: copies, verifies, commits; the source i
         if (volumeOf(a, idRoot) !== volumeOf(b, idRoot)) { crossed++; throw exdev('simulated'); }
         return orig.call(fs, a, b);
       }, () => cfg.migrateNodeDir(name));
-      assert.strictEqual(crossed, 0, 'no rename tried to cross a volume');
+      assert.ok(crossed >= 2, 'the file system refused the renames across');
       assert.strictEqual(result, 'moved');
       const dest = path.join(idRoot, 'by-id', id.nodeId);
       assert.strictEqual(JSON.parse(read(path.join(dest, 'identity.json'))).privateKey, id.privateKey);
-      assert.strictEqual(read(path.join(dest, 'sub', 'a.txt')), 'a');
+      assert.ok(!exists(path.join(dest, 'sub')), 'only the identity files were copied');
       if (posix) assert.strictEqual(modeOf(path.join(dest, 'identity.json')), 0o600);
       assert.ok(isLink(path.join(idRoot, name)), 'SYM_IDENTITY_DIR/<name> is the compat link');
       assert.strictEqual(JSON.parse(read(path.join(idRoot, cfg.LEGACY_ASIDE, name, 'identity.json'))).privateKey, id.privateKey, 'the 0.13 source is kept, set aside');
+      assert.strictEqual(read(path.join(idRoot, cfg.LEGACY_ASIDE, name, 'sub', 'a.txt')), 'a');
       if (posix) assert.strictEqual(modeOf(path.join(idRoot, cfg.LEGACY_ASIDE, name, 'identity.json')), 0o600, 'and narrowed to its owner');
+      const nodeDir = cfg.nodeDirById(id.nodeId);
+      assert.ok(isLink(nodeDir) && fs.realpathSync(nodeDir) === fs.realpathSync(path.join(NODES_DIR, name)), 'the store is linked to where it is');
       assert.strictEqual(cfg.loadIdentity({ name, create: false }).privateKey, id.privateKey);
     });
   });
 
   it('a copy that fails leaves the source untouched and no half-copy at the destination', () => {
+    // (v2: the store moves first and the identity is the commit, so a failed identity copy leaves the store in by-id and
+    // the key where it was; the next start finishes.)
     withIdentityDir((idRoot) => {
       const name = uniq('f9b');
       const id = makeIdentity(name);
       put(path.join(idRoot, name, 'identity.json'), JSON.stringify(id, null, 2), 0o600);
       put(path.join(NODES_DIR, name, 'cmbs', 'x.json'), '{}');
       const src = read(path.join(idRoot, name, 'identity.json'));
-      assert.throws(() => patchFs('copyFileSync', () => function () { throw Object.assign(new Error('EIO: injected'), { code: 'EIO' }); },
-        () => cfg.migrateNodeDir(name)), /EIO/);
+      const crossing = (orig) => function (a, b) {
+        if (volumeOf(a, idRoot) === idRoot && volumeOf(b, idRoot) === path.join(idRoot, 'by-id')) throw exdev('simulated');
+        return orig.call(fs, a, b);
+      };
+      const staged = new Set();
+      assert.throws(() => patchMany({
+        renameSync: crossing,
+        openSync: (o) => function (p, ...a) { const fd = o.call(fs, p, ...a); if (String(p).includes('.stage-')) staged.add(fd); return fd; },
+        writeSync: (o) => function (fd, ...a) { if (staged.has(fd)) throw Object.assign(new Error('EIO: injected'), { code: 'EIO' }); return o.call(fs, fd, ...a); },
+      }, () => cfg.migrateNodeDir(name)), /EIO/);
       assert.strictEqual(read(path.join(idRoot, name, 'identity.json')), src, 'the identity is where it was');
       assert.ok(!exists(path.join(idRoot, 'by-id', id.nodeId)), 'no half-copy');
-      assert.ok(!exists(cfg.nodeDirById(id.nodeId)), 'and no node directory installed either');
-      assert.deepStrictEqual(fs.readdirSync(path.join(NODES_DIR, 'by-id')).filter((n) => n.includes(id.nodeId)), [], 'no staging left behind');
+      assert.deepStrictEqual(fs.readdirSync(path.join(idRoot, 'by-id')).filter((n) => n.includes(id.nodeId)), [], 'no staging left behind');
+      assert.ok(!cfg.isCommitted(id.nodeId), 'nothing committed');
       // the fault clears: the next run completes the move
       assert.strictEqual(cfg.loadIdentity({ name }).privateKey, id.privateKey);
       assert.ok(exists(path.join(idRoot, 'by-id', id.nodeId, 'identity.json')));
+      assert.ok(exists(path.join(cfg.nodeDirById(id.nodeId), 'cmbs', 'x.json')), 'with its store');
     });
   });
 });
@@ -567,7 +597,7 @@ describe('F9 on a real second filesystem (Linux: nodes/by-id lives on /dev/shm, 
         const dest = c.nodeDirById(id.nodeId);
         console.log(JSON.stringify({
           sawExdev, same: loaded.nodeId === id.nodeId && loaded.privateKey === id.privateKey,
-          sourceKept: fs.lstatSync(dir).isSymbolicLink() && fs.readFileSync(path.join(c.NODES_DIR, c.LEGACY_ASIDE, name, 'cmbs', 'x.json'), 'utf8') === '{"x":1}',
+          sourceKept: !fs.lstatSync(dir).isSymbolicLink() && fs.readFileSync(path.join(dir, 'cmbs', 'x.json'), 'utf8') === '{"x":1}' && fs.lstatSync(c.nodeDirById(id.nodeId)).isSymbolicLink(),
           store: fs.readFileSync(path.join(dest, 'cmbs', 'x.json'), 'utf8'),
           idMode: fs.statSync(path.join(dest, 'identity.json')).mode & 0o777, e2eMode: fs.statSync(path.join(dest, 'e2e-keypair.json')).mode & 0o777,
           dirMode: fs.statSync(dest).mode & 0o777, onOtherFs: fs.realpathSync(dest).startsWith(fs.realpathSync(${JSON.stringify(far)})),
@@ -582,10 +612,12 @@ describe('F9 on a real second filesystem (Linux: nodes/by-id lives on /dev/shm, 
         child.on('exit', (code) => (code === 0 ? resolve(so) : reject(new Error(`child exited ${code}: ${se}`))));
       });
       const r = JSON.parse(out);
-      assert.strictEqual(r.onOtherFs, true, 'setup: the node lives on the other filesystem');
-      assert.strictEqual(r.sawExdev, false, 'no rename crossed the volumes: each copy is staged beside its destination');
+      // (v2: the store is never copied across volumes: by-id/<id>, on the other filesystem, is a link to the 0.13
+      // directory, which stays where its operator put it.)
+      assert.strictEqual(r.onOtherFs, false, 'the store stays on its own filesystem');
+      assert.strictEqual(r.sawExdev, false, 'no rename crossed the volumes: the devices are compared first');
       assert.strictEqual(r.same, true);
-      assert.strictEqual(r.sourceKept, true, 'the 0.13 directory is set aside, whole');
+      assert.strictEqual(r.sourceKept, true, 'the 0.13 directory is where it was, whole, and by-id/<id> leads to it');
       assert.strictEqual(r.store, '{"x":1}');
       assert.strictEqual(r.idMode, 0o600);
       assert.strictEqual(r.e2eMode, 0o600);
@@ -640,7 +672,8 @@ describe('F11: the window between the move and the index is not a mint race', ()
     assert.ok(!exists(dead), 'the dead process\'s staging is gone');
     for (const f of ['aaa.json', 'zzz.json', path.join('cmbs', 'x.json')]) assert.ok(exists(path.join(cfg.nodeDirById(id.nodeId), f)), `the whole store: ${f}`);
     assert.ok(isLink(path.join(NODES_DIR, name)), 'finished: nodes/<name> is the compat link');
-    assert.deepStrictEqual(treeOf(path.join(NODES_DIR, cfg.LEGACY_ASIDE, name)).filter((l) => !l.includes(' lock.pid')), before.filter((l) => !l.includes(' lock.pid')), 'and the 0.13 directory is kept, set aside, as it was');
+    // (v2: the 0.13 directory itself is moved in by one rename, not copied and set aside.)
+    assert.deepStrictEqual(treeOf(cfg.nodeDirById(id.nodeId)).filter((l) => !l.includes(' lock.pid')), before.filter((l) => !l.includes(' lock.pid')), 'and it is the 0.13 directory, as it was');
     assert.strictEqual(identitiesNamed(name).length, 1);
   });
 });
@@ -714,13 +747,15 @@ describe('F11 (0.14.3): no migration lock; concurrent starts are made safe by th
     const legacy = path.join(NODES_DIR, name);
     const dest = husk(id.nodeId); // forces an entry-by-entry merge
     let helped = false; let listings = 0;
-    // Something not holding the lock finishes the move while this merge holds a list of what to move (it cannot
-    // happen among cooperating processes; the check is a last guard on a key file).
+    // Something not holding the lock finishes the move while this start holds a list of the 0.13 directory (it cannot
+    // happen among cooperating processes; the check is a last guard on a key file). (v2: nothing is merged; the one
+    // listing is the check for links that would lead elsewhere once moved, before the one rename.)
     patchFs('readdirSync', (orig) => function (p, ...rest) {
       const names = orig.call(fs, p, ...rest);
-      if (!helped && p === legacy && ++listings === 2) { // the 2nd listing is the merge's own, after the conflict check's
+      if (!helped && p === legacy && ++listings === 1) {
         helped = true;
-        for (const n of names) fs.renameSync(path.join(legacy, n), path.join(dest, n));
+        fs.mkdirSync(dest, { recursive: true });
+        for (const n of names) fs.renameSync(path.join(legacy, typeof n === 'string' ? n : n.name), path.join(dest, typeof n === 'string' ? n : n.name));
         fs.rmdirSync(legacy);
         fs.symlinkSync(path.join('by-id', id.nodeId), legacy, 'dir');
       }
@@ -935,7 +970,8 @@ describe('a start pinned to a nodeId migrates too (mesh-channel starts every nod
     const owner = cfg.loadIdentity({ name: uniq('pin-link-owner') }); // some other agent, filed by id
     fs.symlinkSync(path.join('by-id', owner.nodeId), path.join(NODES_DIR, name), 'dir'); // a link under this name, name unindexed
     assert.throws(() => cfg.loadIdentity({ name, nodeId: cfg.uuidv7(), create: false }), (e) => e.code === 'EIDENTITYABSENT');
-    assert.strictEqual(cfg.nodeIdForName(name), null, 'the pinned start wrote no index entry for the name');
+    // (v2: nodeIdForName re-derives the name from the link, a cache of it; what the pinned start must not do is write the entry.)
+    assert.ok(!exists(indexFile(name)), 'the pinned start wrote no index entry for the name');
   });
 
   it('the name is indexed to another agent and the pin\'s 0.13 directory sits under it: the start halts saying the pin IS here (changed in 0.14.3), and does not answer with the indexed agent', () => {

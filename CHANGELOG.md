@@ -6,7 +6,7 @@
 "do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
 or expose a key and the small ones beside them, by reading the state of an identity only from records committed in one
 atomic step (see "Identity and on-disk state"). The wire is unchanged; the public surface gains `relocation.abortExport`
-and `IdentityExportPendingError`.
+(and `sym node abort-export`) and `IdentityExportPendingError`.
 
 ### What was wrong
 
@@ -52,102 +52,134 @@ and `IdentityExportPendingError`.
 
 ### Identity and on-disk state
 
-The first fix for the findings above was itself reviewed (R1, on the candidate 632b95d) and failed the same way twice
-over: it read the state of an identity from whatever was at a path (a by-id directory that was only partly there, an
-index entry that could not be read, a node directory without `identity.json`, the content of a stale lock), and each
-patch for one of those cases made another. R1 proved eleven by running them. 0.14.3 changes the assumption instead:
-**the state of an identity is a record committed in one atomic step**, and the code that inferred it is deleted
-(`moveTree`, `mergeMove`, `sameTree`, `legacyDirsRemain`, and the migration lock `nodes/.migrating`).
+Two designs for the fixes above failed review before this one. 0.14.2 inferred the state of an identity from whatever
+was at a path. The first 0.14.3 candidate (9f6847c) copied a 0.13 agent into a staging directory, verified the copy and
+committed it by one rename; an independent re-review reproduced what the copy cost: a store that did not fit twice on a
+file system that cannot clone (ext4, HFS+) gave ENOSPC on every start; a 5,000-file first start took 21 s instead of
+61 ms, and 12 agents in one XMesh process blocked its constructor for 15.5 s; private-key copies were left at 0644 in
+husks, killed starters' staging and set-aside directories, outside the export's scrub; a store on a mount point was
+copied onto the state volume; a relative link was set aside dangling; and the export wrote its bundle before its
+tombstone, so an interrupted export retried to another destination left two importable bundles (two live copies of one
+key). 0.14.3 ships the design that replaces both:
 
-- **The 0.13 → by-id migration copies; it never moves.** The 0.13 directory (`nodes/<name>/`, and
-  `SYM_IDENTITY_DIR/<name>/`) is copied into a staging directory beside its destination
-  (`nodes/by-id/.<nodeId>.partial-<pid>-<rand>`, on the destination's volume), links followed (a node directory kept
-  on another volume behind a link, an `identity.json` that is a relative link to a key file), `identity.json` last, every
-  file synced, the copy verified byte for byte against the source, a commit record (`.sym-commit`) written, and the
-  whole installed by ONE rename. Of several starts doing this at once, one rename wins; the others find the same
-  identity installed and discard their staging. Then the 0.13 directory is renamed aside to
-  `nodes/.legacy-0.13/<name>` (key files narrowed to 0600) and the compat link `nodes/<name>` takes its place. **Nothing
-  is ever deleted from the source.** A staging directory left by a killed process is cleared by the next attempt.
-  With no migration lock there is no wait: a multi-node process no longer blocks for up to 30 s behind another
-  process's migration. A move across volumes is no longer a special case: no rename crosses one.
-- **A by-id directory without the commit record is a husk, never "the identity is in place".** An empty one, or one
-  holding only a stale lock (what 0.14.0 - 0.14.2 left), is removed with `rmdir` (which cannot remove a directory with
-  anything in it) and the commit made; one holding files (a node of an earlier release that ran there without its
-  identity) has them merged into the staged copy, and is itself kept aside at `nodes/by-id/.<nodeId>.husk`. A file
-  that differs, or a different `identity.json`, is a second claim on the nodeId: the start halts and nothing changes.
-  A husk whose lock a live process holds refuses (`EIDENTITYLOCK`).
-- **A name is claimed by an exclusive create of its index entry, after the identity is installed** (written and synced
-  under a temp name, then hard-linked into place; an O_EXCL create where hard links are not supported). Two first starts
-  of a new name both make an identity; exactly one claims the name, and the other discards its identity and loads the
-  winner. R1 measured 2 - 3 agents for one new name in 6 of 6 rounds with three starters; now one, every round.
-- **An index entry reads as "absent" only when there is none (ENOENT).** An entry that is empty, not JSON, names another
-  name or cannot be read (EACCES, EMFILE) halts, says where the identity it named is, and says not to delete it. Index
-  writes are synced (file and directory).
-- **A new identity is made only when nothing on this host is a trace of the name**: no index entry, no `nodes/<name>`
-  (a link, or a directory with anything but a stale lock in it), no `SYM_IDENTITY_DIR/<name>`, no 0.13 directory set
-  aside, no installed identity of that name that no name indexes. A trace that provably is the name's identity (a compat
-  link to it; the one unindexed identity of that name: a start killed between installing it and claiming the name, or a
-  lost entry) is adopted: the name is claimed for it. Any other trace halts and says what it is. **Behaviour change:** a
-  `nodes/<name>/` holding files and no identity used to become a new agent's directory; it now halts (with
-  `SYM_IDENTITY_DIR`'s volume not mounted that directory is the agent's store, and the new identity took it).
-- **One path for pinned and unpinned starts.** `loadIdentity({ name, nodeId, create: false })` (mesh-channel) migrates
-  through the same staged commit and loads the pinned agent. A pin whose identity is in the 0.13 directory and could not
-  be migrated halts saying so (it used to say "No identity on this host").
-- **A start pinned to a nodeId never takes a name from another identity** (R4-9, from the mesh-channel review). It used
-  to re-point the name's index entry to the pin: a folder whose `.sym/node.json` pins X under "reviewer" took the name
-  from another folder's agent Y, whose next start by name then ran as X, and a cloned repository could choose which
-  identity on the host a session signs as. A pinned start may claim a name nobody has, and that is all; a name another
-  identity holds halts (`IdentityHaltError`) with the entry left as it is (with `create: false` and the pin not on this
-  host, `IdentityAbsentError` saying so), and a pinned start is never answered with the name's agent. **Behaviour change:**
-  to give a name to the pinned identity, rename the other agent first.
-- **A live 0.13 process in the agent's 0.13 directory refuses the start** (`EIDENTITYLOCK`, naming its pid). 632b95d
-  loaded the identity in place and a 0.14 node ran beside the 0.13 one, on an empty store. The migration holds that
-  directory's own lock while it copies, so a 0.13 process cannot start in it meanwhile; another 0.14.3 start that finds
-  the lock marked as a migration's goes on beside it.
-- **A stale lock is removed only if it is still the lock judged stale.** Removing one lock is a right of its own: a claim
-  file named after that lock's file identity and content (`lock.pid.break-<hash>`), itself a lock. Holding it, the lock
-  is read again and removed only if it is the same file (dev, ino) with the same content. R1 measured two or more
-  simultaneous holders in 4 of 8 rounds with six starters at a SIGKILLed holder's lock. A lock file is now created whole
-  (linked into place), so it is never seen without its owner.
-- **Export: bundle durable first, then the tombstone beside the key, then the scrub** (`lib/relocation.js`). An intent
-  (`EXPORTING.json`) is written beside the key first; while it is there the source refuses to start the identity
-  (`IdentityExportPendingError`, `EIDENTITYEXPORTING`). An export interrupted before its tombstone is resumable (run it
-  again) or abortable (`relocation.abortExport`, which removes the bundle it wrote); one interrupted after it is finished
-  by running it again (the scrub). The tombstone is in the identity directory, so with `SYM_IDENTITY_DIR` a rebuilt node
-  directory no longer brings a second live copy back. The scrub also removes the private key from a 0.13 copy set aside.
-- **Import** is installed through the same staged commit: directories 0700, key files 0600, and with `SYM_IDENTITY_DIR`
-  the private key only in the identity directory (it was in the node directory too).
-- `validateName` refuses names Windows cannot hold (the rule mesh-channel's `nodeNameProblem` applies: `: * ? " < > |`,
-  CON, PRN, AUX, NUL, COM0-9, LPT0-9 with any extension, a trailing dot or space). **Behaviour change** for an existing
-  agent with such a name: it must be renamed (`renameIdentity` accepts the old name). A compat link is compared with
-  its target as the path it resolves to, so a Windows junction is no longer re-made on every check.
-- Error texts: a halt says where the key is when it is on this host (for example `nodes/by-id/<id>/identity.json` after
-  `SYM_IDENTITY_DIR` was switched on), and tells the operator to remove the index entry only when no copy of the key is
-  anywhere on this host. `IdentityAbsentError` says what is on the host instead, and is never thrown when the identity is.
-- Also in 0.14.3, from the first fix: key files 0600 and their directories 0700 (narrowed on load), atomic rewrites of
-  `identity.json`, a public key without a private key halts, `SYM_IDENTITY_DIR` switched on for a 0.13 node whose
-  identity is in its node directory halts and says how to copy it.
+- **One source of truth.** An agent exists exactly when its identity is committed: `nodes/by-id/<nodeId>/identity.json`
+  (with `SYM_IDENTITY_DIR`, `SYM_IDENTITY_DIR/by-id/<nodeId>/identity.json`). The name index (`nodes/by-name/`) and the
+  0.13-compatible links (`nodes/<name>`) are caches of which agent a name is, written after the commit. An entry that
+  is missing or cannot be read is re-derived from the committed identities (their `name`), with the compat link as a
+  second witness: an entry whose content is not an entry is written again; one that could not be read for an I/O error
+  (EACCES, EMFILE) is left as it is. Neither is ever read as "no such agent". An entry that names an identity which is
+  not committed here halts (a `SYM_IDENTITY_DIR` volume not mounted). Two committed identities that are one name halt,
+  naming both; each still loads by its nodeId. An entry 0.14.0 - 0.14.2 wrote for a rename or a pinned start (it names
+  an identity under another name) keeps leading where it led, and when it is that identity's only name the identity
+  takes it, so it can be derived from then on. `renameIdentity` writes the identity's own `name` (the commit of a
+  rename), after claiming the new entry.
+- **Names are compared without regard to case on every platform** (Unicode NFC, lower case): the entry is
+  `nodes/by-name/<folded name>.json` and holds the exact name. 0.14.0 - 0.14.2's entry under the exact name is read when
+  the folded one is missing, and written beside it for a rollback. Two 0.13 agents whose names fold together (a
+  case-sensitive file system let both exist): the second halts and is left as it is.
+- **A new identity is minted only when nothing on the host holds the name**: no committed identity of that name (or
+  that its entry or link leads to), no 0.13 directory holding an identity, no identity set aside or in another start's
+  staging, and no other trace (a `nodes/<name>` holding files, an entry that cannot be read, a link to an identity not
+  in place). A mint holds the name's short mint lock (`nodes/by-id/.mint-<name>.lock`, with the atomic stale-lock
+  reclaim) from its staging to its claim: identity.json is written and synced in a staging directory, committed by one
+  rename, the compat link put in place, and the name claimed by an exclusive create (`link()`) of its entry. A start
+  killed between the commit and the claim leaves an identity the next start adopts.
+- **A 0.13 agent is MOVED, never copied.** On one volume, ONE rename of the whole directory onto
+  `nodes/by-id/<nodeId>` (with `SYM_IDENTITY_DIR`, the node directory first and the identity directory last: the
+  identity in place is the commit). Atomic, O(1), no disk: the 5,000-file first start takes 61 ms, and 12 agents in one
+  process start in 0.6 s. The compat link is made before the commit and renamed onto the 0.13 path right after it,
+  before any sync, so a 0.14.2 or 0.13 build finds neither for one system call; no 0.13 directory is moved out from under
+  a path no link can then take. A 0.13 directory that is a link, a mount point, on another volume than `nodes/by-id`,
+  or holding a relative link that leads out of it is not moved and not copied: `by-id/<nodeId>` becomes an absolute
+  link to the directory it is, and the store stays where its operator put it (a link is replaced by the compat link; a
+  mount point stays the real directory). Across volumes only an identity directory's key files (`identity.json`, the
+  0.13 `e2e-keypair.json`) are copied: staged beside their destination, synced, read back and compared, committed by
+  one rename, after a free-space check that halts with the bytes needed (the source untouched); the source is then set
+  aside.
+- **A husk** (a `by-id/<nodeId>` directory an earlier release made without the identity: a lock, a node that ran there
+  beside a live 0.13 process) is set aside whole to `by-id/.<nodeId>.husk-<time>-<rand>` under the nodeId's short
+  migration lock, and the node moved in. Files in it that are the same as the node's are removed from the aside; the
+  ones that differ are kept there and reported (a process warning, `SYM_HUSK_SET_ASIDE`). An empty husk, or one holding
+  only a stale lock or the claim of a killed lock remover, is replaced. A live process in a husk refuses
+  (`EIDENTITYLOCK`). The same identity committed and in use beside a second 0.13 copy: the copy is set aside to
+  `nodes/.legacy-0.13/<name>` and the link takes its place.
+- **Concurrency without a long lock.** Starters racing the same rename: one wins, the others find the identity in
+  place. The stale-lock reclaim of the first candidate is kept (a claim file named after the judged lock's dev, ino
+  and content; lock files created whole by `link()`).
+- **No private key is left loose.** Committed identity and node directories are 0700 and key files 0600, narrowed on
+  every load (directories 0.14.0 - 0.14.2 migrated were left 0755); what is set aside is narrowed at once and again on
+  every load. Every load clears what dead processes left: staging directories (one may hold a never-used key), temp
+  links, temp index entries, temp lock files in the node directory. With `SYM_IDENTITY_DIR`, a copy of the key left in
+  the node directory (0.13 operators copied it there; 0.14.0 - 0.14.2 moved it along with the store) that is the very
+  identity committed is removed: the key is where it is kept.
+- **One path for pinned and unpinned starts.** A pinned start (`{ name, nodeId, create: false }`) goes through the same
+  migration. It never takes a name another agent holds: a committed identity, an index entry, or a 0.13 agent not yet
+  migrated (it halts, and leaves that 0.13 directory where it is: its own start migrates it). It may claim a name
+  nobody holds. The refusals kept from the first candidate: names Windows cannot hold, a live 0.13 process in the
+  agent's 0.13 directory (`EIDENTITYLOCK`), halts instead of mints, and error texts that never tell an operator to
+  remove something that holds a key.
+- **Export stops the source before any bundle can exist** (`lib/relocation.js`): an intent beside the key
+  (`EXPORTING.json`: out, recipient), then the tombstone beside the key and a copy in the node directory (where 0.14.2
+  reads it), then the bundle's sha256 written into the intent, the bundle (fsynced, renamed into place), `complete`
+  written into the intent, then the scrub: every copy of the key on the host (a stray one, one set aside, a husk aside,
+  the 0.13 E2E keypair) loses its private key, and the compat links go. A start after a crash before a complete
+  bundle is refused (`EIDENTITYEXPORTING`, saying how to finish or abandon it); after a complete bundle, refused as
+  moved (`EIDENTITYTOMBSTONED`). The same export run again (the same out, the same recipient) finishes it; another out
+  is refused while a complete bundle may exist at the intent's out, and once the bundle is complete a run again only
+  finishes the scrub. `abortExport` reverts the tombstone only while no complete bundle was produced (the recorded hash
+  tells), and is on the CLI: `sym node abort-export <name>` (or `--node-id <id>`).
+- **Import** installs the identity first (it is the commit), then the node directory, each staged (directories 0700,
+  key files 0600, the private key only in the identity directory) and carrying the import's record of which bundle it
+  came from. An import killed between its installs is finished by running it again: "already here" is decided from the
+  committed identity and that record, never from a directory that merely exists.
+- A node started and stopped in one process (`SymNode`) checks again, once it holds the identity lock (the lock an
+  export takes), that the identity was not exported or is not being exported meanwhile.
+- **Rollback to 0.14.2** after a 0.14.3 start reads every agent: the compat link, the `by-name` file format and the
+  `by-id` directory (a `by-id/<nodeId>` that is a link included). What 0.14.2 cannot read: an agent linked to (a mount
+  point, another volume) whose name is in mixed case, on a case-sensitive file system, with both its exact-name entry
+  and its compat link gone. 0.14.2 ignores `EXPORTING.json`; the tombstone copy in the node directory, written before
+  any bundle, is what stops it.
+
+**Upgrade notes.**
+
+- **Upgrade every embedder on a host (sym CLI and daemon, mesh-channel, XMesh) before the first start.** A 0.14.2
+  process that starts a 0.13 agent while another process migrates it can make a second identity: 0.14.2's own race,
+  which 0.14.2 starters alone hit in 9 of 20 rounds of six, and mixed with 0.14.3 starters in 12 of 20 (0.14.3 alone: 0
+  of 20). The original key is kept, and the next 0.14.3 start halts naming both identities. A 0.14.2 build started on a
+  host that still holds a 0.14.0 - 0.14.2 husk still destroys that agent's key (its own bug, fixed by this release):
+  start the agent with 0.14.3 first.
+- **Behaviour changes:** names are one name whatever their case (on Linux "Kappa" and "kappa" were two agents in
+  0.14.2); an index entry that cannot be read loads the agent its committed identity names instead of halting; a husk
+  whose files differ from the node's no longer halts (it is set aside and reported); a 0.13 directory behind a link, on
+  a mount point or on another volume stays where it is and `by-id/<nodeId>` links to it (no copy); with
+  `SYM_IDENTITY_DIR` a copy of the key in the node directory is removed; `renameIdentity` rewrites the identity's `name`;
+  a pinned start under a name an unmigrated 0.13 agent holds halts; an export cannot be abandoned once its bundle is
+  complete; `migrateIdentities()` also counts `errors`; a state root needs a file system that holds symbolic links (a
+  0.13 directory is not migrated where no link can take its path).
 
 ### Known, not fixed here
 
-- `migrateIdentities()` still counts and discards any error from a single node; the node's own start raises them.
+- `migrateIdentities()` counts an error of a single node (`errors`) and goes on; that node's own start raises it.
 - `loadIdentity({ nodeId, name, create: true })` with a nodeId this host does not hold and no trace of the name still
   makes a new identity under a new nodeId. mesh-channel passes `create: false`.
-- `SYM_IDENTITY_DIR` switched on for an existing node does not copy its key for you (it halts and says how).
-- The 0.13 directory set aside (`nodes/.legacy-0.13/<name>`) and a husk kept aside are never removed by sym: they hold a
-  second copy of the store (and of the key, 0600, until an export scrubs it). Remove them once the agent runs on 0.14.3.
-  On APFS and reflink file systems the copy is a clone; elsewhere it takes the store's size again on disk.
-- A process killed in the two renames between setting the 0.13 directory aside and putting the compat link in its
-  place leaves `nodes/<name>` absent; the next 0.14.3 start puts the link back, but a 0.13 build started first in that
-  state would make a new identity. A crash anywhere else leaves the 0.13 directory, or the link to the installed copy,
-  where a 0.13 build reads it.
-- A husk with files that was claimed by one start can, in a race with another start that never saw it, end up kept at
-  `.<nodeId>.husk` without being merged (nothing is lost; the node runs without those files). It needs a 0.14.0 - 0.14.2
-  node that ran in that directory beside a live 0.13 process, and two concurrent first starts.
-- A claim file left by a process killed while removing a stale lock is itself removed the same way, up to three levels;
-  below that the start refuses (`EIDENTITYLOCK`) rather than guess. A 0.13 process still reclaims a stale lock the old,
-  non-atomic way: a 0.13 and a 0.14 process racing at one dead holder's lock are not covered.
-- `relocation.abortExport` is not on the `sym` CLI yet; `sym node export` run again resumes an interrupted export.
+- `SYM_IDENTITY_DIR` switched on for an existing 0.13 node whose identity is in its node directory halts and says how
+  to copy it; it does not copy the key for you.
+- What is set aside is never removed by sym: a husk's files that differ from the agent's, a second 0.13 copy of an
+  agent already installed, the 0.13 source of an identity copied across volumes. They are narrowed to their owner and
+  scrubbed by an export; remove them once the agent runs on 0.14.3.
+- One system call is left between the commit (the rename that installs the agent) and the compat link that takes its
+  0.13 path. A process killed exactly there and followed by a 0.14.2 or a 0.13 start (a rollback) instead of a 0.14.3
+  one: that build makes a second identity under the name. The original key is untouched, and the next 0.14.3 start
+  halts naming both. The kill -9 fuzz below hits this one point and no other.
+- 0.14.2 processes on the same host (mixed versions, see the upgrade notes) can still make a second identity in their
+  own race, and 0.14.2's stale-lock reclaim is not atomic: a 0.14.2 and a 0.14.3 process racing at one dead holder's
+  lock can both hold it (1 of 6 rounds with three of each). A 0.13 process racing a 0.14 one at a dead holder's lock is
+  not covered either.
+- An export killed between renaming its bundle into place and recording `complete`, whose bundle was then moved away
+  from its out before the export was run again: the intent's hash can no longer tell that a complete bundle was
+  produced, and running the export again writes a second one.
+- A claim file left by a process killed while removing a stale lock is itself removed the same way, up to three
+  levels; below that the start refuses (`EIDENTITYLOCK`) rather than guess.
 
 ### Security
 
@@ -221,37 +253,49 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
 
 ### Tests
 
-- `tests/identity-commit.test.js` (new): 33 tests, one or more per R1 finding (R1-1 to R1-11), R4-9, the error texts
-  and the guards of the staged commit; 32 fail on 632b95d (the one that passes there checks that a pinned start still
-  claims a name nobody has). R1-1 crashes the migration at every one of its 70 steps (78 over a lock-only husk), one
-  start per step, and checks the 0.13 directory is byte-identical, a 0.13 reader still finds the key, and the next start
-  loads the same agent with its whole store. The race the multi-process fuzz found (below) is a deterministic test.
-- `tests/identity-migration-by-id.test.js`: 53 tests (was 51), 14 of them fail on 632b95d. Updated, each with the reason in
-  the test: a husk's stale lock is no longer kept; a halt writes no index back; a non-compat link at `nodes/<name>` is
-  followed and copied; a node directory with files and no identity halts; the atomic rewrite is tested on an installed
-  identity; across volumes nothing is renamed and the source is kept aside; an interrupted migration leaves the 0.13
-  directory as it was; the migration-lock tests are replaced by no-wait tests; a live 0.13 holder refuses; a pin whose
-  identity is in the 0.13 directory halts instead of "absent".
-- Mutation check: 27 mutants of `lib/config.js` and `lib/relocation.js`, one per guard of the new design (the verify
-  before the commit, the exclusive claim, ENOENT-only, the mint gate, the adoption guard, the live 0.13 holder, the
-  claim and the compare in the lock reclaim, the export order, the tombstone place, the import key place, junction
-  compare, the Windows names, the set-aside, the link-before-aside, a pinned start taking a name, the husk re-look, and
-  others): every one is caught.
-- Multi-process fuzz (real processes, every file call stalled 0 - 4 ms at random): four starters at a 0.13 agent,
-  plain / over a lock-only husk / pinned / pinned over a husk / with SYM_IDENTITY_DIR / with both: 40 rounds each, 0
-  failed (960 starters, all loaded the original; one identity, the key installed, the whole store, the 0.13 data kept,
-  every round); six starters, 30 rounds each plain and over a husk, 0 failed. This fuzz found one race in the first
-  version of this design (a committed directory set aside as a husk, 9 of 40 rounds over a husk; same identity, nothing
-  lost), fixed before release. Six starters at a SIGKILLed holder's stale lock: 0 of 20 rounds with two holders, with
-  and without stalls (632b95d: 3 of 8). Three first starts of one new name: 0 of 10 rounds with two agents, 0 of 6 with
-  SymNode (632b95d: 6 of 6). Across a real second volume (an HFS+ disk image, EXDEV) with a stale migration lock:
-  4 and 6 starters, 50 rounds, every starter the original.
-- kill -9 crash fuzz: the first start is killed at a random moment, a second start follows. Same volume (over a husk,
-  plain, with SYM_IDENTITY_DIR; pinned and not): 360 rounds, 180 of them killed within 60 ms (all mid-run), every one
-  the original agent with its whole store and the key on disk. Across volumes (disk image): 120 rounds, 60 killed
-  mid-run, every one the same (632b95d on the same image: 4 of 10 rounds started with store files missing).
-- Full suite (`--test-concurrency=2`, macOS): 1568 tests, 1564 pass, 0 fail, 4 skipped; `npm run gate:stock-nodes` passed;
-  `npm audit`: 0 vulnerabilities. CI (Linux, Node 20 and 22) green, the real second-filesystem test included.
+- `tests/identity-v2.test.js` (new): 36 tests, each a scenario of the re-review of the copy design (rr-e1 - rr-e25) or
+  of R1 that fails on 9f6847c or on 0.14.2, and one per guard of design v2. On this Mac 29 fail on 9f6847c and 32 on
+  0.14.2; the two that pass on both here test a case-sensitive file system (Linux: they fail there on both).
+- `tests/identity-commit.test.js` (34) and `tests/identity-migration-by-id.test.js` (53): the expectations the copy
+  design wrote are changed to design v2, each with its reason in the test (moved, not copied; linked to, not copied;
+  the index a cache, re-derived; the tombstone before the bundle; a husk set aside, not a halt). The 17 changed tests
+  fail on 9f6847c; every other test passes on both.
+- Mutation check: 42 mutants of `lib/config.js`, `lib/relocation.js` and `lib/node.js`, one per guard (the fold, an
+  entry of another name, an entry naming an absent identity, the two-agents halt, the re-derivation and what blocks it,
+  the traces that block a mint, the mint lock, the live 0.13 holder, a pin and another agent's 0.13 directory, the
+  tombstone, the index held by another, the case collision, another identity under the nodeId, a live husk, a committed
+  directory never set aside, mount point and volume, the relative link outward, the free-space check, the read-back,
+  no move without a link, the link before the syncs, export pending and moved, the bundle hash, the tombstone before
+  the bundle, the out and the recipient of a resume, the abort refusal, the scrub of every copy, the SymNode re-check,
+  the import resume and order, the stray key, the lock temps, the staging, the asides, the directory modes, the alias
+  name, a dead remover's claim): every one is caught.
+- kill -9 at every step (`scripts/identity-fuzz/kill.js`: SIGKILL before and after each mutating file call of one
+  operation, then the next start, a pinned start, a 0.14.2 and a 0.13 rollback, and this release then 0.14.2): 492
+  crash points (489 reached) over a plain 0.13 agent, pinned, a husk with a stale lock, a husk with files, SYM_IDENTITY_DIR, nodes/by-id
+  and SYM_IDENTITY_DIR/by-id on another volume (an HFS+ disk image), and a mint with and without SYM_IDENTITY_DIR. The
+  next 0.14.3 start loaded the same agent with its whole store and every key file 0600 at every one. A 0.14.2 or 0.13
+  rollback made a second identity only at the one point between the commit and the compat link (see "Known, not fixed
+  here"), and where 0.14.2's own bugs act on a state 0.14.3 has not changed yet (a husk; a move across volumes, EXDEV).
+  Export (130 points with SYM_IDENTITY_DIR, 102 without) and import (132 and 104): never a startable source beside a
+  complete bundle; abort where allowed, otherwise the same export finished, the key gone from the source and the agent
+  imported on another host; an interrupted import finished by running it again. In one early run 2 of 130 export points
+  reported one file still holding the key after the resume; not reproduced in four further runs (516 points) nor in 96
+  repeats at those steps.
+- Real processes starting one agent at once (`scripts/identity-fuzz/race.js` and the re-review's scripts): six
+  starters over a 0.13 agent (plain, pinned and not, over a husk, a husk with files, with SYM_IDENTITY_DIR) and over a
+  new name, 5 rounds of each kind from each script; five starters with 60 % of them SIGKILLed at a random moment, 20 + 5
+  rounds: every round one agent, the original, with its whole store. Six starters at a SIGKILLed holder's lock: one
+  holder in 6 of 6 rounds. Mixed with 0.14.2 starters: see the upgrade notes.
+- Rollback: a host 0.14.2 ran (agents it migrated, made, renamed, re-pointed for a pin, a mixed-case name,
+  SYM_IDENTITY_DIR agents) started twice by 0.14.3 and rolled back to 0.14.2: every agent loaded by name and pinned as
+  what 0.14.2 ran, in every phase. Rehearsal: an APFS clone of a sandboxed 15-agent 0.13 + 0.14.2 host (stores written by
+  the releases' own code, two agents behind links, a husk, a rename, a pinned start under a second name), upgraded:
+  every agent unchanged (by name, pinned, as a SymNode) through two 0.14.3 starts and a rollback to 0.14.2.
+- First start, measured: a 5,000-file 0.13 agent 21.4 s on 9f6847c, 61 ms here; 12 0.13 agents (300 files each) in one
+  process 15.5 s, 0.6 s. A 26 MB store on a 48 MB HFS+ image: 9f6847c ENOSPC on every start, here 8 KB used. A store
+  behind a link on another volume: 9f6847c copied 5 MB onto the state volume, here 4 KB.
+- Full suite (`--test-concurrency=2`, macOS): 1688 tests, 1684 pass, 0 fail, 4 skipped; integration 6 of 6;
+  `node scripts/gate-two-stock-nodes.mjs` passed; `npm audit`: 0 vulnerabilities.
 
 ### Transport and node lifecycle
 
