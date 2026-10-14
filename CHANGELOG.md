@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.14.2 — 2026-10-14
+
+**The daemon's start lock, hardened after review.** 0.14.1 replaced an unsound inode-number guard with a start lock
+beside the socket. A review of it (an XMesh review mission, run on the 0.12 candidate) found holes in the lock itself
+and in one place the lock did not reach. 0.14.2 closes them. The wire and the public surface are unchanged.
+
+### Fixed
+
+- **A lock that could not be broken made the daemon spin.** When a stale lock could not be moved away (a sticky
+  directory such as `/tmp` where the lock belonged to another user, or a read-only file system), the wait loop
+  skipped both its deadline and its sleep and looped on system calls forever, stopping everything else on the
+  event loop. A failed break now waits and gives up at the deadline like any other wait.
+- **The lock is a symbolic link carrying its owner (`<pid>:<random token>`).** 0.14.1 made a directory and then
+  wrote the owner's pid into it: in between the lock had no owner, and a reader could see half a pid and
+  take a live lock for a dead one's. A link is made, with its content, in one step. The directory lock 0.14.1
+  left behind is still recognised and is broken once it is old.
+- **A holder no longer acts on a lock that was taken from it, and no longer removes another start's lock.** Before
+  it removes the socket file it checks it still holds the lock, and it probes the socket once more; on release it
+  removes the lock only if the owner in it is its own. A break reads back what it moved and puts it back if it was
+  not the lock it judged stale. The stale age is 30 s (was 10 s), well above the time a start holds the lock.
+- **A daemon that predates the lock** (0.14.0 and earlier take none) can no longer have a live socket removed in the
+  moment between the probe and the removal: the second probe sees it.
+- **The daemon still compared inode numbers when it shut down.** `sym-daemon` closes its server on SIGTERM, which
+  removes the socket path, so it first checks the file at the path is still its own, and that check was the inode
+  number 0.14.1 called no proof. It now compares the inode, the device and the creation time
+  (`socketIdentity` / `socketIsStill` in `lib/platform`, internal).
+- Where a symbolic link cannot be made at all (a file system without them) a start goes on without the lock, as it
+  did before 0.14.1, and says so once.
+
+### Tests
+
+- `tests/ipc-listen-exclusive.test.js` is rewritten around these: eight starters at one stale file; a live
+  holder's lock respected; a dead owner's, an old one's and 0.14.1's directory lock broken with no grave left; a break
+  that always fails does not spin; a start whose lock was taken from it removes nothing; a start that takes no lock
+  and binds in the window is not overrun (the test 0.14.1 deleted, back); the lock is seen held during every
+  probe; and the socket identity tells a file made in place of a removed one apart on Linux. Each is shown to fail with the
+  behaviour it covers taken out. The dead-owner test now says so if its pid was reused. The lock assertions no longer
+  use `existsSync`, which reports a link to nowhere as absent.
+
 ## 0.14.1 — 2026-10-13
 
 **A public surface.** 0.14.1 declares what an embedding host may import and rely on, so that a host (XMesh is
