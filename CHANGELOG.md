@@ -52,11 +52,12 @@ or expose a key and the small ones beside them. The wire and the public surface 
   by the identity's absence instead of being mistaken for "no such agent".
 - **One process migrates at a time.** Moving a directory is many steps, and two processes interleaving them could each
   delete what the other had just filed. Found by running four real processes at it with a stall injected into every
-  file call (about one round in a hundred lost the identity file), after plain concurrent runs had passed. The migrator
+  file call (about one round in 150 lost the identity file), after plain concurrent runs had passed. The migrator
   now holds a lock (`nodes/.migrating/lock.pid`, the identity lock: reclaimed when its holder is gone) while it moves
   something; the others wait (up to 30 s, then fail loudly), read the state again and find it done. It is taken only
-  when a 0.13 directory is there to move. Under that lock: 1,200 starters in 300 rounds, then 1,600 in 400 rounds
-  without a husk, every one loaded the original agent, no errors, the key in place every round. A path that has
+  when a 0.13 directory is there to move. Under that lock, in the same stall fuzzer: 1,200 starters in 300 rounds, 1,600
+  in 400 rounds without a by-id directory in place, and 3,600 in 600 rounds with six starters at once: every one loaded
+  the original agent, no errors, the key in place every round. A path that has
   become an alias of its destination is never deleted as a "duplicate" of it. The same four-process run on 0.14.2
   made a new identity in 14 of 100 starters, and destroyed the key in every round that had a by-id directory.
 - **A start never makes an identity where one exists.** Before it makes one it checks that no 0.13 `identity.json`
