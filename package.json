@@ -1,8 +1,15 @@
 {
   "name": "@sym-bot/sym",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "Infrastructure and protocol for multi-agent collective intelligence",
   "main": "lib/node.js",
+  "exports": {
+    ".": "./lib/node.js",
+    "./core": "./lib/public/core.js",
+    "./decision-log": "./lib/decision-log.js",
+    "./store": "./lib/public/store.js",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "sym": "./bin/sym.js",
     "sym-daemon": "./bin/sym-daemon.js"
@@ -45,6 +52,7 @@
     "lib/",
     ".agents/",
     ".claude/",
+    "docs/reference.md",
     "docs/AUTHORITY-OPERATOR.md",
     "docs/WIRE-0.14.0.md",
     "CHANGELOG.md",

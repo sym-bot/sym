@@ -21,8 +21,10 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'sym-stock-home-'));
 process.env.HOME = sandbox;
 
 const { SymNode } = require('@sym-bot/sym');
-const { NullDiscovery } = require('@sym-bot/sym/lib/discovery.js');
 const symPkg = require('@sym-bot/sym/package.json');
+// NullDiscovery (no LAN) is not part of the package's public surface (its "exports" map), so a package path would be
+// refused. This driver is the gate, not a consumer: it reaches the installed file by its place on disk.
+const { NullDiscovery } = require(path.join(path.dirname(require.resolve('@sym-bot/sym/package.json')), 'lib', 'discovery.js'));
 
 /** In-process duplex pair. The transport is mocked; everything above it is the real path. */
 function bidirectionalPair() {
@@ -152,6 +154,17 @@ const FOCUS = 'two stock sym nodes prove the open runtime is self-sufficient';
     'RESTART: the survivor must still carry the signed attestation of its admission — a record that ' +
     'survives without its verdict cannot be audited later');
   console.log(`  after restart B recalled it, lineage intact`);
+
+  // PUBLIC SURFACE — the install resolves exactly the documented subpaths, and refuses a private one.
+  const core = require('@sym-bot/sym/core');
+  assert.deepStrictEqual(Object.keys(core).sort(), ['CAT7_CATEGORIES', 'FIELD_WEIGHT_PROFILES', 'categoryKeyV1', 'createCMB', 'encode',
+    'encodeCategory', 'encodeForSVAF', 'kernelId', 'renderContent', 'verifyCMB'],
+  'SURFACE: @sym-bot/sym/core must export the ten documented names and no more');
+  assert.strictEqual(typeof require('@sym-bot/sym/decision-log').DecisionLog, 'function', 'SURFACE: @sym-bot/sym/decision-log');
+  assert.strictEqual(typeof require('@sym-bot/sym/store').openStore, 'function', 'SURFACE: @sym-bot/sym/store');
+  assert.throws(() => require('@sym-bot/sym/lib/node.js'), (e) => e.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    'SURFACE: a path into lib/ must be refused with ERR_PACKAGE_PATH_NOT_EXPORTED');
+  console.log('  the documented subpaths resolve; lib/ is refused');
 
   await nodeA.stop();
   await nodeB2.stop();

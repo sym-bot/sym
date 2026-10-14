@@ -193,6 +193,104 @@ relay operator; and a peer's own machine is trusted with everything that peer ad
 - Transport support varies by peer and deployment.
 - Human approval remains human for consequential actions.
 
+## Public API
+
+If you embed sym (a host process, an agent runtime), these entry points are the supported surface. Since
+0.14.1 `package.json` has an `exports` map, and nothing else is importable by package path: a path into
+`lib/` (`@sym-bot/sym/lib/node.js`) throws `ERR_PACKAGE_PATH_NOT_EXPORTED`. Deep imports were never
+supported, a file under `lib/` may move or change in any release, and 0.14.1 makes that a refusal rather
+than a surprise. A name listed here follows semver for sym's version line: a change that breaks it is made
+only in a new minor version while sym is 0.x (a new major after), never in a patch release, and the
+CHANGELOG says so. Anything not listed here, an undocumented option or member or anything with an
+underscore, is not promised even where it is reachable through a value you were given. Recipes, and what
+replaces each deep import a host used, are in [docs/reference.md](docs/reference.md#embedding-sym-the-public-api).
+
+| Import | What you get |
+|---|---|
+| `require('@sym-bot/sym')` | the main entry, unchanged in 0.14.1: `SymNode`, `migrateStores`, `version`, `rooms`, `emit`, `MeshAgent`, `llm` (also `claude`), `identity`, `relocation`, `invite`, `platform` |
+| `@sym-bot/sym/core` | the CMB library: ten names (below) |
+| `@sym-bot/sym/decision-log` | `DecisionLog` |
+| `@sym-bot/sym/store` | `openStore`, for the store of an identity that is stopped |
+| `@sym-bot/sym/package.json` | the package manifest |
+
+All are CommonJS and also import from ESM (`import { createCMB } from '@sym-bot/sym/core'`, or the default
+import, which is `module.exports`). The package ships no type declarations; a TypeScript host declares the
+subpaths it uses.
+
+**`@sym-bot/sym/core`** exports exactly `createCMB`, `renderContent`, `CAT7_CATEGORIES`,
+`FIELD_WEIGHT_PROFILES`, `encode`, `encodeCategory`, `encodeForSVAF`, `categoryKeyV1`, `kernelId` and
+`verifyCMB`.
+
+- `createCMB({ categories, createdBy, lineage, room, to })` mints an unsigned, content-addressed
+  two-section record `{ categories, metadata }` (MMP §8.8). `categories` maps the seven CAT7 names to a
+  string or `{ text }` (`mood` may also carry `valence` and `arousal`, numbers in [-1, 1]); a missing category
+  is `neutral`. `createdBy` is required. `lineage` is `{ parents: [cognition keys] }`. The record's address is
+  `metadata.key`. A record from this function is not signed, and a node does not send it: `node.remember()` mints
+  and signs the records a node sends. Its other options (`emitV2`, `createdByNodeId`, `application`,
+  `categoryParents`, `received`) are the node's own and are not promised.
+- `renderContent(record)` is the record's non-`neutral` categories as `category: text; ...`, or `''` for
+  something it cannot read.
+- `CAT7_CATEGORIES` is the frozen array of the seven category names in their fixed order. `FIELD_WEIGHT_PROFILES`
+  is the frozen map from a profile name to `{ category: weight }`; `uniform` always exists and every profile
+  weights all seven categories. The other profile names and the weights in them are tuning and may change in a
+  minor version. Both are frozen copies: writing to them cannot change a node.
+- `encode(text)` is the deterministic n-gram encoder, synchronous: `{ h1, h2 }`, 32 numbers each, the same for the
+  same text on every machine. `encodeCategory(text)` is its `h1` half.
+- `encodeForSVAF(text)` is the same shape, asynchronous, in the kernel SVAF is using: the semantic one once its
+  model has loaded, the n-gram one before that and always when the encoder is off (below). `kernelId()` names
+  the kernel (`ngram-h32` or `minilm-l6-v2-h192`, in the form `<encoder>-h<dimension>`); two vectors or verdicts
+  are comparable only under one kernel id, so a cache keys on `kernelId()` and checks it again after the await.
+- `categoryKeyV1(category, text)` is the 64 hex characters of one category's content address (MMP §7.4); the
+  category name is part of what is hashed and the text is NFC-normalised first.
+- `verifyCMB(record, publicKey)` returns `{ signed, valid, error? }`: whether the record's Ed25519 signature
+  (the one strict rule of MMP §18.3.2) verifies against `publicKey` (raw, base64url) and the signed address is
+  the address of the categories it carries. It does not decide whose key that is, and it is not the whole of
+  MMP §8.8.5: a node's session also checks the schema, the bounds, the audience and the author's key before it
+  delivers a record. Resolve the key from a binding you trust for the record's `createdByNodeId`, never from
+  the record. `cannot-verify...` errors (no readable container, a container still encrypted) mean "could not
+  check", which is not "forged".
+
+**`@sym-bot/sym/decision-log`** exports `DecisionLog`: `new DecisionLog(dir, { cap = 2000, enabled = true })`
+keeps an append-only, capped log of SVAF decisions in `<dir>/log.jsonl`; `record(entry)` appends one plain
+object (it never throws); `list({ limit = 200, since = 0, decision, source })` returns entries newest first,
+filtered on an entry's `ts` (ms), `decision` and `source`; `count()` is the number held. The cap is at least 50.
+Only those three entry fields are read by the log; the rest of an entry is the writer's. With `enabled: false`
+it neither reads nor writes. A node keeps its own log (`node.decisions()` lists it).
+
+**`@sym-bot/sym/store`** exports `openStore(cmbsDir, name)` for the store of an identity whose process has
+stopped (a crew that dissolved) when a person's verdict still has to land in it. `cmbsDir` is the `cmbs`
+directory of the node directory, which the main entry finds:
+`path.join(identity.nodeDirById(identity.nodeIdForName(name)), 'cmbs')`. It never creates the directory (a
+missing one throws `ENOSTORE`) and returns a frozen handle of three methods and nothing else:
+`get(key)` (a copy of the stored entry, or `null`; of the entry, `key`, `cmb`, `lifecycle` (`'observed'`,
+`'validated'`, `'canonical'` or `'dismissed'`) and `anchorWeight` are promised, its other members are not);
+`validateCMB(key, { lifecycle })` and `dismissCMB(key, { lifecycle })`, each returning `{ ok, reason? }` with
+`reason` one of `'insufficient-authority'` or `'unknown-cmb'`. Validated sets `anchorWeight` 2.0, dismissed 0.5
+(MMP §6.4). `lifecycle` is the authority the caller exercises, `'validated'` or `'canonical'`; the handle
+refuses a caller that states none, but it cannot check the claim: a store is files, and whoever can open the
+directory can write it. Open a store only while no node holds it, because a running node keeps its own copy in
+memory; for a running node call `node.validateCMB(key)` and `node.dismissCMB(key)`, which resolve the node's
+own authority (MMP §6.5, validator or above, from its grants or, with no anchor pinned, its configured
+`lifecycleRole`) and return the same `{ ok, reason? }`.
+
+**Constructor options a host may rely on.** `new SymNode({ ... })` also takes:
+
+| Option | What it does |
+|---|---|
+| `svafEvaluator` | the admission seam: `{ evaluate(candidate, anchors, ageSeconds) }` is called once for each record that reaches the gate, before the open baseline. Return or resolve `null` and the baseline decides (a stock node's evaluator always does); return `{ decision, total_drift, category_drifts, gate_values }` and that decides, the record refused when `decision` is `'rejected'` and admitted otherwise. If it throws or rejects the failure is logged and the baseline decides. The record's admission waits for `evaluate`, which is how a host queues its own cognition ahead of the gate. |
+| `cliHostMode: true` | forward only: a verified record is announced as `cmb-accepted` and nothing more (no SVAF, no attestation, nothing stored or remixed). For a host that is only the local door for other processes; the `sym` daemon is one. |
+| `semanticEncoder` | `'eager'` (the default) or `'off'`. Whether the semantic encoder, a model loaded through the optional `@huggingface/transformers`, may load. See below. |
+
+**The semantic encoder switch.** By default a node starts loading the semantic model when it is built (requiring
+sym loads nothing, since 0.14.1), and SVAF and §15.8 use it once it is ready. That is a heavy load in the host's
+own process. `semanticEncoder: 'off'`, or `SYM_SEMANTIC_ENCODER=off` in the environment, means nothing loads the
+model: SVAF and the §15.8 lineage tether measure in the n-gram kernel, `kernelId()` is `ngram-h32`, and `remix()`
+mints with its lineage and unverified, as it does when the calibrated kernel is unavailable, saying so once.
+The encoder is one per process, so it is a setting of the process: any node built with `'off'`, or the
+environment variable, turns it off for every node in the process, and it stays off. Set it before the first node
+is built; a model that was already loaded is no longer used. Any other `semanticEncoder` value throws a
+`TypeError` with code `EBADENCODER`; any other environment value is said and ignored.
+
 ## Go deeper
 
 - [Full technical reference](docs/reference.md)

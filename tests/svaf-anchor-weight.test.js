@@ -60,7 +60,7 @@ describe('SVAF anchors carry the store\'s age and weight', () => {
     await awaitSemantic();
     const fresh = storeWith();
     const aged = storeWith((store, key) => { store.get(key).storedAt = Date.now() - 3 * TAU * 1000; });
-    const dismissed = storeWith((store, key) => { store.dismissCMB(key); });
+    const dismissed = storeWith((store, key) => { store.dismissCMB(key, { lifecycle: 'validated' }); });
 
     const dFresh = await totalDriftAgainst(fresh.store);
     const dAged = await totalDriftAgainst(aged.store);

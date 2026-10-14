@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.14.1 — 2026-10-13
+
+**A public surface.** 0.14.1 declares what an embedding host may import and rely on, so that a host (XMesh is
+the first) can stop reaching into `lib/`. It is additive for everything that was supported; the one thing it takes
+away was never supported (below). The wire is unchanged: a 0.14.1 node meshes with a 0.14.0 node as before.
+
+### Added
+
+- **An `exports` map in package.json.** The supported entry points, each documented in README "Public API" and
+  docs/reference.md with what it promises and what it does not:
+  - `@sym-bot/sym`, the main entry, unchanged;
+  - `@sym-bot/sym/core`, the CMB library, exactly ten names: `createCMB`, `renderContent`, `CAT7_CATEGORIES`,
+    `FIELD_WEIGHT_PROFILES`, `encode`, `encodeCategory`, `encodeForSVAF`, `categoryKeyV1`, `kernelId`, `verifyCMB`.
+    The two constants are frozen copies. They import by name from ES modules;
+  - `@sym-bot/sym/decision-log`, exactly `DecisionLog`;
+  - `@sym-bot/sym/store`, exactly `openStore(cmbsDir, name)`, which opens the store of an identity whose process
+    has stopped (never creating the directory: `ENOSTORE`) and returns a frozen handle of `get`, `validateCMB`
+    and `dismissCMB`;
+  - `@sym-bot/sym/package.json`.
+  The bins (`sym`, `sym-daemon`) are unchanged.
+- **`node.dismissCMB(key)`** (MMP §6.4): the human's "not actionable", the other half of `validateCMB`. It
+  takes the same earned authority (§6.5: validator or above, from the node's in-force grants, or from its
+  configured `lifecycleRole` where no anchor is pinned) and returns `{ ok, reason? }`. 0.14.0 could validate on
+  a node but not dismiss.
+- **`semanticEncoder: 'eager' | 'off'`** on `SymNode`, and `SYM_SEMANTIC_ENCODER=off`: whether the semantic encoder
+  (MiniLM, through the optional `@huggingface/transformers`) may load. With it off nothing loads the model, SVAF
+  and §15.8 measure in the n-gram kernel, and `remix()` mints with its lineage, unverified, as it already did
+  when the calibrated kernel is unavailable (and does not wait for a model that will never load). The default is
+  unchanged. It is a setting of the process, not of a node, because the encoder is one per process (README
+  "Public API"). Any other option value throws `TypeError` `EBADENCODER`.
+- **`svafEvaluator` and `cliHostMode` are documented** (README, docs/reference.md and the constructor's JSDoc)
+  and tested (tests/host-options.test.js). Both existed and behave as they did.
+
+### Changed
+
+- **Requiring sym no longer starts the semantic model load.** It was a side effect of `require`, which left a
+  host no moment to say no. The load now starts when a node is built (as before in effect: every host builds a
+  node) or when the kernel is first used (`encodeForSVAF`, `kernelId`, `semanticSettled`). A process that only
+  requires sym, such as `sym --version`, loads nothing.
+- **`MemoryStore.dismissCMB(key, { lifecycle })` takes the caller's authority and returns `{ ok, reason? }`**, as
+  `validateCMB` does (§6.5: dismissal takes the authority validation does). It was ungated and returned nothing.
+  Nothing in sym called it.
+- **The semantic encoder's `isSemanticReady()` and `semanticSettled()`** answer false at once when the encoder is off.
+- The stock-nodes gate driver (scripts/two-stock-nodes-driver.cjs) reaches `NullDiscovery` by its place on disk,
+  not by a package path, and the gate now also asserts the public surface on the installed tarball.
+
+### Fixed
+
+- **The daemon could remove a live daemon's socket on Linux.** `sym-daemon` guards a stale socket file against two
+  daemons starting together. 0.14.0 removed the file only if its inode number was still the one it had probed, but
+  Linux gives a removed file's inode number to the next file at once, so the guard passed for a socket another
+  daemon had just bound (a Mac's APFS does not, which is why only Linux CI showed it, as a red
+  `ipc-listen-exclusive` test on `main` from 7 October). The removal and the bind that follows it now hold a start
+  lock beside the socket (`<socket>.lock`, a directory naming its owner's pid; a lock left by a dead owner, or
+  older than 10 s, is broken), so of several starters one at a time decides, and the next finds a socket that
+  answers and serves it. A starter that cannot get the lock does not remove anything. The lock binds sym
+  daemons; a process that removes the socket without it is not held to it. The test now runs eight starters at
+  one stale file.
+
+### Removed
+
+- **Deep imports.** With an `exports` map, a package path into anything else (`@sym-bot/sym/lib/node.js`,
+  `@sym-bot/sym/lib/core/index.js`, `@sym-bot/sym/lib/memory-store`, `@sym-bot/sym/bin/...`) throws
+  `ERR_PACKAGE_PATH_NOT_EXPORTED`, from `require`, `require.resolve` and `import`. They were never supported, and
+  until now they worked only until a file moved. docs/reference.md lists what replaces each one a host used. A
+  host that must read a private file in a test of its own can find it through the exported `package.json`.
+
 ## 0.14.0 — 2026-10-13
 
 **Core Secure.** 0.14.0 makes every sym node an MMP v2.0 Core Secure participant (design
