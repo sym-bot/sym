@@ -187,25 +187,36 @@ describe('R2-3: one admitted peer cannot buy CPU, memory or disk without bound',
 
   it('R2-3: the record and verification budgets are charged by size: two of the largest records pass, a third waits', () => {
     const fh = new FrameHandler({ _log: () => {} }, {});
+    const now = Date.now();
+    // A record is admitted only when both lanes hold it (flow control, 0.14.3: otherwise it waits).
+    const admit = (session, chars) => {
+      if (fh._admitWait(session, chars, now) > 0) return false;
+      fh._spendVerify(session, chars, now);
+      fh._spendRecord(session, chars, now);
+      return true;
+    };
     const session = {};
     const largest = 720 * 1024;
-    const r = [0, 1, 2].map(() => fh._recordBudget(session, largest));
+    const r = [0, 1, 2].map(() => admit(session, largest));
     assert.deepStrictEqual(r, [true, true, false], 'the record lane spends the size');
     const small = {};
-    for (let i = 0; i < 32; i++) assert.strictEqual(fh._recordBudget(small, 2048), true, 'small records are counted by number as before');
+    for (let i = 0; i < 32; i++) assert.strictEqual(admit(small, 2048), true, 'small records are counted by number as before');
+    assert.strictEqual(admit(small, 2048), false, 'and the 33rd waits');
+    // The verification lane (4 MiB burst) spends the size too, whatever the record lane holds.
     const v = {};
-    let passed = 0;
-    for (let i = 0; i < 12; i++) if (fh._verifyBudget(v, 400 * 1024)) passed++;
-    assert.ok(passed >= 8 && passed <= 11, `the verification lane spends the size too (${passed} of 12 passed)`);
+    for (let i = 0; i < 9; i++) fh._spendVerify(v, 400 * 1024, now);
+    assert.strictEqual(fh._admitWait(v, 1024, now), 0, '3.6 MiB checked: the lane still holds a small record');
+    for (let i = 0; i < 2; i++) fh._spendVerify(v, 400 * 1024, now);
+    assert.ok(fh._admitWait(v, 1024, now) > 0, '4.4 MiB checked: past the burst, even a small record waits for the lane to refill');
   });
 
-  it('R2-3: a burst of large records from one peer: only what its size budget holds reaches SVAF', async () => {
+  it('R2-3: a burst of large records from one peer: only what its size budget holds reaches SVAF; the rest waits', async () => {
     try {
       const node = mk('r23-flood');
       if (typeof node._store.load === 'function') await node._store.load();
       const mallory = identity('mallory');
       const s = admitAs(node, mallory);
-      const over = []; node.on('metric', (m) => { if (m.type === 'cmb-over-budget' || m.type === 'cmb-over-verify-budget') over.push(m.type); });
+      const over = []; node.on('metric', (m) => { if (m.type === 'cmb-queued') over.push(m.type); });
       let evaluated = 0;
       const admit = node._frameHandler._admit;
       node._frameHandler._admit = (...a) => { evaluated++; return admit(...a); };
@@ -215,7 +226,7 @@ describe('R2-3: one admitted peer cannot buy CPU, memory or disk without bound',
       }
       await settle(300);
       assert.ok(evaluated <= 4, `at most what 1.5 MiB holds was evaluated (${evaluated})`);
-      assert.ok(over.length >= 8, 'the rest was dropped and counted');
+      assert.ok(over.length >= 8, 'the rest waits in the session\'s queue (flow control, 0.14.3: it was dropped), counted');
     } finally { await stopAll(); }
   });
 

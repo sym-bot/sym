@@ -12,8 +12,8 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
  * connection stays up — is held for that peer's key and offered again, sealed afresh, to the next
  * session proving that key; until a socket has written it, it is listed in pendingDeliveries().
  *
- * These tests stay under the receiver's own record budget (8 a second, burst 32): past it the
- * receiver drops records unevaluated, which is a separate loss (reported, not changed here).
+ * These tests stay under the receiver's own record budget (8 a second, burst 32). Past it the
+ * receiver queues records and the sender paces to it (flow control, 0.14.3): tests/flow-control.test.js.
  */
 
 const { describe, it } = require('node:test');
@@ -176,7 +176,7 @@ describe('records the relay pacer never wrote are held and offered again (R3-4)'
     } finally { n._running = false; n._dropRedelivery('test'); await n.stop(); fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); }
   });
 
-  it('the held list is bounded: past the bound the oldest is dropped and said undelivered', () => {
+  it('the held list is bounded: past the bound a record is not held and is said undelivered; nothing held is pushed out', () => {
     const n = new SymNode({ name: uniq('rd-bound'), silent: true, discovery: new NullDiscovery() });
     const said = [];
     n.on('metric', (m) => { if (m.type === 'cmb-undelivered') said.push(m); });
@@ -189,8 +189,9 @@ describe('records the relay pacer never wrote are held and offered again (R3-4)'
       n._running = false;
       const held = n.pendingDeliveries();
       assert.strictEqual(held.length, 2048, 'at most 2048 a peer');
-      assert.strictEqual(held[0].key, 'cmb-2', 'the oldest went first');
-      assert.deepStrictEqual(said.map((m) => [m.key, m.reason]), [['cmb-0', 'redelivery-overflow'], ['cmb-1', 'redelivery-overflow']]);
+      assert.strictEqual(held[0].key, 'cmb-0', 'what was held stays held (flow control, 0.14.3: a held record is never pushed out)');
+      assert.deepStrictEqual(said.map((m) => [m.key, m.reason]), [['cmb-2048', 'held-full'], ['cmb-2049', 'held-full']]);
+      assert.deepStrictEqual(n.undelivered().map((u) => u.key), ['cmb-2048', 'cmb-2049'], 'and listed as undelivered');
     } finally { n.stop(); fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); }
   });
 });
