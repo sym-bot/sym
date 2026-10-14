@@ -215,10 +215,14 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   is never dropped for budget and never spends more than the lane holds. Resolving, which is linear
   in the held set and not charged to any lane, is paced instead: a node resolves when it settles, at
   most once per twice the time its last resolution took, and a pull's end is decided at the next
-  settle, never by a resolution forced for it. A ceiling of 4,000
-  verified statements a second in all (burst 20,000) is spent only after the check; checkpoints at most
-  4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
-  per position.
+  settle, never by a resolution forced for it. One global budget of 4,000 checks a second in all
+  (burst 20,000) is spent before the check too, each peer through its fair share of it (4,000 / n a
+  second, n the peers that sent gossip in the last 10 s), so the checks made are bounded whatever the
+  number of sessions and no peer spends another's share (0.14.3); checkpoints at most 4 a second per
+  attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses per position. An
+  attester this node holds equivocation evidence against is never evicted (when every place holds
+  one, a new attester is refused), and what this node witnessed is never forgotten (past 65,536
+  attesters, a new one is not witnessed).
 - **Records** (MMP §8.8.6, MMP 2.0 update 1): a category's text at most 256 KiB after NFC, the seven
   at most 512 KiB, the two-section record's RFC 8785 length at most 720 KiB, so every record fits
   one sealed frame. This node mints nothing larger, and refuses a received record over any limit

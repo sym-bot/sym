@@ -95,7 +95,8 @@ describe('AttestationStore — index by CMB + by attester chain', () => {
     assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 2, prev: 'x', sig: 'i2' }, { ingested: true, now }).stored, true);
     assert.deepStrictEqual(st.record({ of: 'c', by: 'A', seq: 3, prev: 'y', sig: 'i3' }, { ingested: true, now }), { stored: false, reason: 'rate-limited' });
     // a different (of,by) is independent
-    assert.strictEqual(st.record({ of: 'c2', by: 'A', seq: 1, prev: 'genesis', sig: 'i4' }, { ingested: true, now }).stored, true);
+    // (its own seq: two attestations at one seq of one chain are a fork, never stored side by side: R2-16)
+    assert.strictEqual(st.record({ of: 'c2', by: 'A', seq: 10, prev: 'v', sig: 'i4' }, { ingested: true, now }).stored, true);
     // own (non-ingested) output is never rate-limited
     assert.strictEqual(st.record({ of: 'c', by: 'A', seq: 9, prev: 'z', sig: 'own1' }, { ingested: false, now }).stored, true);
     // window slides: after it elapses, ingest is allowed again
@@ -457,11 +458,14 @@ describe('AttestationStore — the cap is shared out by attester', () => {
     assert.strictEqual(st.size(), 4);
   });
 
-  it('two attestations at one position: dropping the older leaves the newer in the chain', () => {
+  it('two attestations at one position: the first stays, the other is evidence of a fork, never a replacement (R2-16)', () => {
     const st = new AttestationStore({ max: 2 });
     st.record({ of: 'c1', by: 'A', seq: 1, prev: 'genesis', sig: 'old' });
-    st.record({ of: 'c2', by: 'A', seq: 1, prev: 'genesis', sig: 'restarted' });
-    st.record({ of: 'c3', by: 'A', seq: 2, prev: chainHash('restarted'), sig: 's2' });   // drops 'old'
-    assert.deepStrictEqual(st.chainOf('A').map((a) => a.sig), ['restarted', 's2']);
+    assert.deepStrictEqual(st.record({ of: 'c2', by: 'A', seq: 1, prev: 'genesis', sig: 'restarted' }).reason, 'conflict');
+    st.record({ of: 'c3', by: 'A', seq: 2, prev: chainHash('old'), sig: 's2' });
+    assert.deepStrictEqual(st.chainOf('A').map((a) => a.sig), ['old', 's2']);
+    assert.strictEqual(st.attestationConflictOf('A').other.sig, 'restarted');
+    assert.strictEqual(st.attesterEquivocated('A'), true);
+    assert.strictEqual(st.has('restarted'), true, 'a repeat of the evidence is a duplicate');
   });
 });

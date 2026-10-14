@@ -162,17 +162,20 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
     });
   });
 
-  it('forgeries spend only their own peer\'s lane, never the shared ceiling, and a forgery in a session\'s own name ends it (security review D, p7-ceiling; re-review N1)', () => {
-    withNode({}, ({ node, metrics }) => {
+  it('forgeries spend their own peer\'s lane and fair share of the global budget, which bounds the checks whatever the number of peers, and a forgery in a session\'s own name ends it (R2-4; security review D, p7-ceiling; re-review N1)', () => {
+    withNode({}, ({ node, metrics, clock }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
       let badSig = 0;
-      const ingest = (peer) => { if (node._ingestAttestation(forged(A), peer, peer).reason === 'bad-signature') badSig++; };
-      // 300 peers, 101 forgeries each: each peer's own 100, and the ceiling untouched.
+      const perPeer = new Map();
+      const ingest = (peer) => { if (node._ingestAttestation(forged(A), peer, peer).reason === 'bad-signature') { badSig++; perPeer.set(peer, (perPeer.get(peer) || 0) + 1); } };
+      // 300 peers, 101 forgeries each: until 0.14.3 each peer's own 100 (30,000 checks, growing with the
+      // peers, R2-4); now the global budget, spent before the check, bounds them all.
       for (let i = 0; i < 300; i++) for (let j = 0; j < 101; j++) ingest(`id-${i}`);
-      assert.strictEqual(badSig, 300 * 100, 'each peer checks its own 100');
-      assert.strictEqual(node._gossipGlobal.tokens, node._gossipGlobalBurst, 'no forgery spent the shared ceiling');
-      assert.strictEqual(metrics.filter((m) => m.type === 'gossip-over-ceiling').length, 0);
+      assert.strictEqual(badSig, node._gossipGlobalBurst, 'at most the global burst is checked, however many peers there are');
+      assert.ok([...perPeer.values()].every((c) => c <= 100), 'and no peer more than its lane');
+      assert.ok(metrics.some((m) => m.type === 'gossip-over-ceiling'), 'the rest is dropped unverified, and said');
+      clock.t += 60_000; // the budget refills
       // A relayed statement that fails here is dropped, never charged to the relayer (0.14.0 re-review
       // N1): its binding for the signer may differ from this node's.
       const s = admitAs(node, { nodeId: 'relayer-1' });
@@ -190,14 +193,14 @@ describe('the budget is kept per PROVEN peer (F2; Core Secure design D1)', () =>
     });
   });
 
-  it('the ceiling bounds VERIFIED statements, spent after the signature checks out', () => {
+  it('the global budget bounds the statements checked, spent before the signature is (R2-4)', () => {
     withNode({ gossipBudget: { globalBurst: 5, globalPerSecond: 1 } }, ({ node, metrics }) => {
       const A = kp('att-A');
       node._roster.bind(A.id, A.pub, 'proven');
       const real = (i) => signed({ of: `cmb-${crypto.randomBytes(32).toString('hex')}`, by: A.id, at: 1, roster: ROOM, verdict: 'aligned', categories: {}, seq: 1000 + i, prev: 'p' }, A.priv, signAttestation);
       const reasons = {};
       for (let i = 0; i < 8; i++) { const r = node._ingestAttestation(real(i), `peer-${i}`, `peer-${i}`); reasons[r.reason || 'stored'] = (reasons[r.reason || 'stored'] || 0) + 1; }
-      assert.strictEqual(reasons['over-ceiling'], 3, 'past the ceiling, verified statements are dropped unstored');
+      assert.strictEqual(reasons['over-ceiling'], 3, 'past the global budget, statements are dropped unverified and unstored');
       assert.ok(metrics.some((m) => m.type === 'gossip-over-ceiling'));
     });
   });
