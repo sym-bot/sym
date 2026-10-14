@@ -156,6 +156,26 @@ describe('records the relay pacer never wrote are held and offered again (R3-4)'
     } finally { await cleanup(relay, a, b); }
   });
 
+  it('a re-offer waits for room in the pacer and comes back by itself when there is some', async () => {
+    const n = new SymNode({ name: uniq('rd-room'), silent: true, discovery: new NullDiscovery() });
+    const to = '01900000-0000-7000-8000-00000000000b';
+    try {
+      n._running = true;
+      let room = false;
+      const sent = [];
+      const fake = { closed: false, confirmed: true, kind: 'relay', identityKey: 'k', sessionId: 's2', name: 'fake', pendingBytes: () => 0,
+        transport: { hasRoom: () => room }, trySend: (frame, meta) => { sent.push(meta.recordKey); return { ok: true }; } };
+      n._peers.set(to, { peerId: to, name: 'fake', transport: fake, transports: new Map([['relay', fake]]) });
+      const items = [0, 1, 2].map((i) => ({ to, bytes: 100, meta: { redeliver: true, to, key: 'k', sessionId: 's1', frame: { type: 'cmb' }, recordKey: `cmb-${i}`, since: i, attempts: 1, held: false, offered: false, bytes: 0 } }));
+      n._holdUnflushed(items);
+      await new Promise((r) => setImmediate(r));
+      assert.deepStrictEqual(sent, [], 'no room: nothing is offered (a refused sealed frame would end the session)');
+      room = true;
+      await until(() => sent.length === 3, 2000);
+      assert.deepStrictEqual(sent, ['cmb-0', 'cmb-1', 'cmb-2'], 'offered once there was room, with nothing else to re-arm it');
+    } finally { n._running = false; n._dropRedelivery('test'); await n.stop(); fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); }
+  });
+
   it('the held list is bounded: past the bound the oldest is dropped and said undelivered', () => {
     const n = new SymNode({ name: uniq('rd-bound'), silent: true, discovery: new NullDiscovery() });
     const said = [];

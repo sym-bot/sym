@@ -22,7 +22,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const { WebSocketServer } = require('ws');
-const { RelayConnection } = require('../lib/relay');
+const { RelayConnection, IDENTITY_CLOSES } = require('../lib/relay');
 const { SymNode } = require('../lib/node');
 const { NullDiscovery } = require('../lib/discovery');
 const { nodeDirById } = require('../lib/config');
@@ -152,6 +152,12 @@ test('R3-3: two processes replacing each other are detected as a ping-pong, told
     const dials = relay.dials.length;
     await wait(500);
     assert.equal(relay.dials.length, dials, 'and not dialled again meanwhile');
+    // At the longest backoff a real ping-pong's closes are an hour apart, past the window that found
+    // it: it holds anyway, until a connection outlasts the clear time.
+    c.rc._identityCloses = [];
+    c.rc._identityClosed(4004, IDENTITY_CLOSES[4004], 'Replaced by new connection');
+    assert.equal(c.rc.state().stopped.pingPong, true, 'still a ping-pong an hour later');
+    assert.ok(c.rc.state().nextRetryAt - Date.now() > 29 * 60_000);
   } finally { c.stop(); await relay.close(); }
 });
 
@@ -184,6 +190,32 @@ test('R3-15: the liveness timeout terminates the connection (a dead one never an
     assert.deepEqual(calls, ['terminate']);
     assert.ok(await until(() => c.rc.state().phase === 'reconnecting', 3000), 'and the close follows at once');
   } finally { c.stop(); await relay.close(); }
+});
+
+test('R3-13: records still queued for a relay peer at stop go before the 1010, so the notice is no sequence gap', async () => {
+  const relay = meshRelay();
+  const mk = (name) => new SymNode({ name: `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, silent: true, relayOnly: true, discovery: new NullDiscovery(), relay: relay.url, relayToken: 'x'.repeat(40), room: 'r13q' });
+  const a = mk('stopq-a'); const b = mk('stopq-b');
+  const blog = [];
+  b._log = (m) => blog.push(m);
+  const got = [];
+  b.on('cmb-accepted', (e) => got.push(e));
+  try {
+    await a.start(); await b.start();
+    assert.ok(await until(() => a._peers.has(b.nodeId) && b._peers.has(a.nodeId), 20000));
+    await wait(1500); // the pacer's bucket refills
+    const cats = (focus) => ({ focus, issue: 'i', intent: 'inform', motivation: 'm', commitment: 'c', perspective: 'p', mood: { text: 'calm' } });
+    for (let i = 0; i < 5; i++) a.remember(cats(`queued at stop ${i}`), { to: b.nodeId });
+    await a.stop(); // in the same turn: the five are still in a's pacer
+    assert.ok(await until(() => blog.some((l) => /^Peer disconnected: /.test(l)), 5000));
+    const line = blog.find((l) => /^Peer disconnected: /.test(l));
+    assert.match(line, /last: peer-closed\)$/, `b closed on a's notice, not on a gap (${line})`);
+    assert.ok(await until(() => got.length === 5, 3000), `and b received the five sent before it (${got.length})`);
+  } finally {
+    for (const n of [a, b]) { try { await n.stop(); } catch { /* */ } }
+    await relay.close();
+    for (const n of [a, b]) { try { fs.rmSync(nodeDirById(n.nodeId), { recursive: true, force: true }); } catch { /* */ } }
+  }
 });
 
 test('R3-13: a stopped node tells each relay peer its session closed (sealed 1010) before the relay goes', async () => {
