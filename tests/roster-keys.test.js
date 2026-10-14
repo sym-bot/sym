@@ -69,18 +69,44 @@ describe('the conflict matrix, row by row', () => {
     assert.strictEqual(r.conflicts().length, 0);
   });
 
-  for (const second of ['proven', 'pinned']) {
-    it(`only a grant view binds the nodeId, a DIFFERENT key from ${second} → bound at ${second}, the grant's disagreement recorded (R2-1)`, () => {
-      const k1 = key(); const k2 = key();
-      const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' ? k1 : undefined) });
-      assert.strictEqual(r.bind('N', k1, 'grant').source, 'grant');
-      const res = r.bind('N', k2, second);
-      assert.strictEqual(res.bound, true, 'a grant binds only a nodeId nothing else binds');
-      assert.strictEqual(res.conflict, 'grant');
-      assert.strictEqual(r.get('N'), k2);
-      assert.deepStrictEqual(r.conflicts().map((c) => [c.nodeId, c.had, c.got, c.hadSource, c.gotSource]), [['N', k1, k2, 'grant', second]]);
-    });
-  }
+  // Changed in 0.14.3 (the certification design): an anchor certification outranks a session, so a
+  // proven source naming another key is refused; a pin outranks the certification, so it binds.
+  it('a certification binds the nodeId, a DIFFERENT key from proven → refused and recorded: the certification decides', () => {
+    const k1 = key(); const k2 = key();
+    const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' ? k1 : undefined) });
+    assert.strictEqual(r.bind('N', k1, 'grant').source, 'grant');
+    const res = r.bind('N', k2, 'proven');
+    assert.deepStrictEqual([res.bound, res.reason, res.had], [false, 'conflict', k1]);
+    assert.strictEqual(r.get('N'), k1);
+    assert.strictEqual(r.size(), 0, 'nothing stored');
+    assert.deepStrictEqual(r.conflicts().map((c) => [c.nodeId, c.had, c.got, c.hadSource, c.gotSource]), [['N', k1, k2, 'grant', 'proven']]);
+  });
+
+  it('a certification binds the nodeId, a DIFFERENT key from pinned → bound pinned: the pin holds, the disagreement recorded', () => {
+    const k1 = key(); const k2 = key();
+    const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' ? k1 : undefined) });
+    const res = r.bind('N', k2, 'pinned');
+    assert.deepStrictEqual([res.bound, res.conflict, res.had], [true, 'grant', k1]);
+    assert.strictEqual(r.get('N'), k2);
+    assert.deepStrictEqual(r.conflicts().map((c) => [c.nodeId, c.had, c.got, c.hadSource, c.gotSource, c.kind]), [['N', k2, k1, 'pinned', 'grant', 'pin-over-certification']]);
+  });
+
+  it('nodeId bound (proven), a certification of a DIFFERENT key → the binding is superseded: kept, marked, recorded, verifying nothing', () => {
+    const k1 = key(); const k2 = key(); let inEffect = false;
+    const r = new RosterKeyRegistry({ grantView: (id) => (id === 'N' && inEffect ? k2 : undefined) });
+    r.bind('N', k1, 'proven');
+    inEffect = true;
+    assert.strictEqual(r.get('N'), k2, 'the certification decides as soon as it is in force, before it is offered');
+    r.noteVerified('N', k2);
+    assert.strictEqual(r.entries()[0].verified, null, 'and what verifies under it credits nothing to the binding of another key');
+    assert.strictEqual(r.bind('N', k2, 'grant').bound, true);
+    assert.strictEqual(r.get('N'), k2, 'the certification decides');
+    assert.deepStrictEqual(r.superseded('N'), { key: k1, by: k2 });
+    assert.deepStrictEqual(r.conflicts().map((c) => [c.nodeId, c.had, c.got, c.hadSource, c.gotSource, c.kind]), [['N', k2, k1, 'grant', 'proven', 'superseded']]);
+    inEffect = false;
+    assert.strictEqual(r.get('N'), undefined, 'revoked: still conflicted (fail closed)');
+    assert.strictEqual(r.source('N'), 'conflicted');
+  });
 
   it('only a grant view binds the nodeId, a session proves the SAME key → nothing stored: the binding ends with the grant (R2-1)', () => {
     const k = key(); let inEffect = true;
@@ -92,7 +118,8 @@ describe('the conflict matrix, row by row', () => {
     assert.strictEqual(r.bind('N', key(), 'proven').created, true, 'after the revoke the nodeId is unbound');
   });
 
-  for (const [first, second] of [['proven', 'grant'], ['pinned', 'proven'], ['proven', 'pinned'], ['proven', 'proven']]) {
+  // ['proven', 'grant'] left this list in 0.14.3: a certification supersedes a stored proven binding (above).
+  for (const [first, second] of [['pinned', 'proven'], ['proven', 'pinned'], ['proven', 'proven']]) {
     it(`nodeId bound (${first}), DIFFERENT key from ${second} → conflict: refused and recorded`, () => {
       const k1 = key(); const k2 = key();
       // A grant binding is a view over grants in effect (security review C): the first is one.
@@ -167,7 +194,7 @@ describe('persistence and the 0.13 file', () => {
       // The floor arms for a routed nodeId on a proof, as its own persisted fact (security review).
       const r1 = new RosterKeyRegistry({ dir, isRouted: (id) => id === 'N' || id === 'M' });
       r1.bind('N', k, 'proven');
-      r1.bind('N', k2, 'grant');
+      r1.bind('N', k2, 'proven'); // a conflict (0.14.3: a grant not in force records nothing, so a session makes it)
       r1.bind('M', key(), 'proven');
       r1.resetFloor('M');
       assert.deepStrictEqual(lines(dir)[0], { ...FORMAT_MARKER });

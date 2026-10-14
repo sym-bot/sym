@@ -153,7 +153,8 @@ function cmdKeys() {
   const conflicts = reg.conflicts();
   if (jsonFlag) { console.log(JSON.stringify({ bindings: reg.entries(), conflicts }, null, 2)); return; }
   if (sub !== 'conflicts') {
-    for (const e of reg.entries()) console.log(`${e.nodeId}  ${e.source.padEnd(12)}  ${keyFingerprint(e.key).slice(0, 23)}…`);
+    // A binding an anchor certification superseded is kept and verifies nothing: listed as such.
+    for (const e of reg.entries()) console.log(`${e.nodeId}  ${(e.superseded ? `${e.source}, superseded` : e.source).padEnd(12)}  ${keyFingerprint(e.key).slice(0, 23)}…`);
   }
   if (conflicts.length === 0) console.log('no key conflicts');
   for (const c of conflicts) {
