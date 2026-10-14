@@ -153,6 +153,9 @@ patch for one of those cases made another. R1 proved eleven by running them. 0.1
 
 An independent security review (R2) of the 0.14 core reproduced each finding below; each fix has a test in
 `tests/security-0.14.3*.test.js` that fails on 0.14.3's base (632b95d) and passes here.
+A review of the candidate (9f6847c) found that four of those fixes did not hold as designed (R2-3's recall, R2-6,
+R2-8, R2-13); they are corrected below, each with tests in `tests/security-0.14.3-records.test.js` and, against a
+real 0.14.2 node, `tests/integration/mixed-0142-records.js`, that fail on 9f6847c and pass here.
 
 - **A grant binds a key only when it is mesh-wide and rooted in the anchor through admins (R2-1, high).** Any holder
   of a delegating grant, even one scoped to one world, could bind any unbound nodeId to its own key at every node
@@ -173,23 +176,53 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   verification and record budgets are also charged by size (1 MiB/s burst 4 MiB before verification, 128 KiB/s
   burst 1.5 MiB before SVAF); the SVAF kernel reads at most 16 KiB of a text; the local-state context reads at most
   2 KiB of an entry and 16 KiB in all, and is re-encoded at most once a second; the store's entry cache is an LRU
-  (2,048 entries, 32 M characters); the inbox holds at most 32 M characters (read items make room, oldest first; an
-  unread one never goes, and a delivery that does not fit is refused and counted, `inbox-full-refused`). The review's
-  24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now. The store itself is still unbounded on disk by default
-  (retention is unlimited unless configured); the size budget bounds how fast one session can grow it.
+  (2,048 entries, 32 M characters), filled at load with the newest entries; the inbox holds at most 32 M characters
+  (read items make room, oldest first; an unread one never goes, and a delivery that does not fit is refused and
+  counted, `inbox-full-refused`). The review's 24 records of 2 × 200 KB: 15 s CPU before, 0.4 s now. The store
+  itself is still unbounded on disk by default (retention is unlimited unless configured); the size budget bounds
+  how fast one session can grow it.
+- **Recall stays in memory with the cache bounded (R2-3, review M1).** The bounded cache first made `recall()` read a
+  file, synchronously, for every entry the cache did not hold, on every call. It now matches on a search index kept
+  apart from the cache: each entry's rendered text, lowercased, at most 4,096 characters of it (an entry longer than
+  that is read only when its indexed text does not match) and 32 M characters in all (past that the oldest entries'
+  text is let go, and only those are read). A query reads only the entries it returns: `recall(query, { limit,
+  where })` returns at most `limit` of them, only those `where` accepts, and the array's `total` counts every match.
+  A scan reads through the cache, never into it. A query matches within one field (the content, a tag, a category's
+  text, the key), no longer across two. The timestamp ratchet and the lifecycle (compaction, purge) are read from the
+  index too, never a file. The startup primer, the daemon, the interior and the mesh agent pass a limit. A query
+  that is not text is refused (`TypeError`), never read as "no query". Measured on macOS (one call, short entries,
+  9f6847c → 0.14.3, with 0.14.2's everything-in-memory in brackets): 6,000 entries, a miss 74-103 ms → 1-2 ms
+  (2-4 ms), 1,111 matches 74-86 → 28-38 ms (3-5 ms), the same with `limit: 10` 2 ms; 50,000 entries, a miss
+  5.0-5.7 s → 9-13 ms (20-26 ms), 11,111 matches 5.0 s → 0.3-0.7 s, with `limit: 10` 15 ms. Heap after load:
+  6,000 entries 8.4 → 10.4 MB, 50,000 entries 28.9 → 50.7 MB (18 and 147 MB); the index holds 2.4 M and 20.1 M
+  characters. A query matching most of a large store, with no limit, still reads what it returns: `recall('')`
+  over 50,000 entries 5.1 s → 2.9 s (21 ms). Pass a limit.
 - Gossip signature checks are bounded whatever the number of sessions: every new attestation, checkpoint, witness or
   authority statement takes one global token before verification, through the sending peer's fair share. The ceiling
   after verification is gone (R2-4).
 - LAN client-hellos are rate-limited before any crypto: a token bucket per remote host (8/s, burst 32) and one over
   all hosts (64/s, burst 256). A hello past either is closed unanswered (R2-5).
-- Actionable delivery is de-duplicated by assertion identity (§8.8.2, R2-6): two room records with the same
-  categories and different signed application sections are both delivered, and one memory de-duplicates is still
-  delivered (`remixed: false`); a replay of either is not. An actionable room record signed more than 30 days ago is
+- An actionable record (one with a signed application section) is a message as well as a memory (§8.8.2, R2-6,
+  review S3): memory keeps one record per cognition key, and the action is identified by its assertion identity
+  wherever it is sent, de-duplicated and delivered. Whether memory already holds its categories never decides whether
+  it is sent or delivered. A receiver delivers an actionable room record SVAF does not reject for drift even when
+  memory holds its cognition key (`remixed: false`): another author's record under the same categories, or another
+  action of the same author. The first fix covered SVAF's redundant verdict only; a record SVAF admitted under a key
+  the store held reached nobody. `remember()` sends an action whose categories memory holds (its HEAD's, an earlier
+  action's, a peer's) to the room or its addressee, stores nothing again and does not move HEAD; it returns the record
+  with `cognitionHeld: true` and its `delivery` (it used to return `{ collapsed, duplicate }` and send nothing). An
+  action whose store write failed is still sent. A replay of the same assertion is delivered once, and the same
+  assertion given to `remember()` twice is a duplicate. An actionable room record signed more than 30 days ago is
   refused as stale (its delivery mark is kept that long).
 - Equivocation evidence and this node's own-witness memory are never evicted. When full, new attesters are refused
   or not witnessed, and that is counted (R2-7).
-- `aggregateAttestations` weighs only attestations naming the held record's `assertionId`, or `opts.assertionId`. The
-  result carries `assertionId` (R2-8).
+- `aggregateAttestations` summarises one named assertion (R2-8, review B2), never an attestation about another as a
+  vote on it: `opts.assertionId`, else the held record's, else, on a node that does not hold the record (XMesh's
+  observers, a `cliHostMode` node), the one every attestation under the key names. When they name several there is no
+  single verdict (`assertionId` and `overall.dominant` null, `categories` empty; `total`, `weight` and `byRole` count
+  every verified attestation). The result keeps its fields and adds `basis` (`given`, `held`, `sole`, `several`,
+  `none`), `assertions` and `byAssertion` (one summary per assertion). The first fix returned total 0 on a node
+  without the record.
 - Earned key bindings age out (R2-9): a new one (everything it verified fell within a day) after 30 days unseen, and
   new bindings hold at most a quarter of the registry; an established one after 180 days unseen. One directed record
   from a fresh identity used to earn a binding that never expired.
@@ -200,8 +233,14 @@ An independent security review (R2) of the 0.14 core reproduced each finding bel
   says `coreSecure`, and a valid v2.0 record comes with its frozen signed projection (`record`). A 0.13-suite record
   whose sections carry an application, a node id or anything else 0.13 never minted is invalid. A genuine 0.13 record
   stays valid unless the caller passes `{ coreSecure: true }` (R2-12). See docs/reference.md.
-- One signature verifies one string: a signed string with a lone surrogate is refused, and createCMB mints such text
-  as U+FFFD (R2-13).
+- One signature, one string (R2-13, review M2). The signed object is UTF-8 bytes, where a lone surrogate can only be
+  U+FFFD, so every string a record signs is brought to its well-formed spelling wherever a record crosses a boundary:
+  minting (createCMB, a caller's own record given to `remember()`), the canonical projection of a received or stored
+  record, the Legacy Import route, the public verifier, the store's read. The record verifies unchanged, and two
+  different strings are never held under one signature. The first fix refused a lone surrogate instead, and dropped a
+  0.14.2 author's record whose text was cut inside a surrogate pair. sym's own cuts (a message's preview, wire names,
+  the SVAF text, the local-state context, error texts, decision labels) fall on code point boundaries. The signing step
+  still refuses a string no boundary normalised.
 - Keys and signatures are accepted only in canonical unpadded base64url, one spelling each, in the strict verifier,
   the record projection, the key registry, room-join grants, handshake proofs and attestations (R2-14).
 - A checkpoint that does not link to the chain held, next to a held checkpoint, is refused as `malformed-link` and is
