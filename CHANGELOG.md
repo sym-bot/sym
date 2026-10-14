@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.14.3 — 2026-10-14
+
+**An agent no longer loses its key to the 0.13 → by-id upgrade.** An XMesh review of `lib/config.js` 0.14.2 returned
+"do not ship" with 13 findings. Each was checked by running it in a sandbox state dir; 0.14.3 fixes the ones that lose
+or expose a key and the small ones beside them. The wire and the public surface are unchanged.
+
+### What was wrong
+
+- **A new identity could overwrite the old key.** Moving a 0.13 node (`nodes/<name>/`) to `nodes/by-id/<nodeId>/` was
+  refused when that directory already existed, even if it was empty or held only a `lock.pid` (something else made it:
+  a lock, an interrupted run). The refusal left the node unindexed, and the next start by name did not stop there:
+  it took "refused" for "no such agent", made a NEW identity, moved the old directory onto the new node's path and
+  wrote the new `identity.json` over the old one. The agent came back under the same name with a different nodeId and
+  key, and its peers read what it signed as forged. A start pinned by `nodeId` was stuck instead, refusing to start
+  every time.
+- **A 0.13 key file stayed world-readable.** 0.13 wrote `identity.json` and `e2e-keypair.json` without a mode (0644
+  under the usual umask). The migration only renames, so they kept it, in a directory at 0755. A new identity in 0.14 is
+  written 0600; a migrated one never was.
+- **A name whose identity file was missing made a replacement agent.** If the name index named a node and its
+  `identity.json` was not there (the `SYM_IDENTITY_DIR` volume not mounted at boot, the variable set by one embedder and
+  not another), a start by name made a new nodeId and key and re-pointed the name to it.
+- Smaller, same family: a stray symlink at `nodes/<name>` was reported as already indexed when nothing was indexed;
+  switching `SYM_IDENTITY_DIR` on for a 0.13 node whose identity was in its node directory reported "not a node" and
+  went on to make a new identity (the old key survived, orphaned in the new node's directory); an identity with a public key
+  and no private key loaded, and failed later at its first signature; a cosmetic rewrite of `identity.json` (a bare
+  Windows hostname) truncated the live key file in place; a start in the moment between the directory move and the
+  index write found no agent and made one; the live-lock fallback skipped the tombstone check; and nothing moved
+  across file systems (`EXDEV`), so a node whose directories sit on different volumes could not be migrated.
+
+### Who is exposed
+
+- Anyone who upgraded a node from 0.13 to 0.14.0, 0.14.1 or 0.14.2 and whose state root had a `nodes/by-id/<nodeId>/`
+  directory for that node without an `identity.json` in it at the time the node was first started by name. Their key
+  was destroyed on that start; the symptom is a changed nodeId under the same name and peers rejecting its blocks.
+  0.14.3 cannot bring a destroyed key back. If you have the old `identity.json` (a backup, a durable
+  `SYM_IDENTITY_DIR` volume, a copy of `~/.sym`), put it back at `nodes/by-id/<old nodeId>/identity.json` and set the
+  nodeId in the name's file `nodes/by-name/<name>.json` to the old one.
+- Anyone who switched `SYM_IDENTITY_DIR` on for an existing 0.13 node: the old key is probably still on disk, in
+  `nodes/by-id/<new nodeId>/identity.json` (the node that was made in its place).
+- Every node migrated from 0.13 holds a private key readable by other local users until it is next loaded with 0.14.3.
+
+### Changed
+
+- **The duplicate check looks at the identity, not the directory.** A second claim on a nodeId is a DIFFERENT
+  `identity.json` (or other content that cannot be merged) already filed under it. A directory that is empty, or holds a
+  stale lock, claims nothing: the node is MERGED into it. The same identity on both sides is an interrupted move, and
+  the next start finishes it. A real duplicate is still refused: nothing is moved and nothing is overwritten.
+- **The name is indexed before anything moves, and the identity moves last.** A second starter that arrives in the
+  middle finds the agent; an interrupted move is re-entered on the next start by the identity's absence. A step that
+  fails because another process just did it is re-run (up to three times) against what that process left, and a path
+  that has become an alias of its destination through the other process's compat link is never "merged" onto itself.
+  Measured with real processes: four starters at once, 320 starters in all (with and without a by-id directory already
+  in place), every one loaded the original agent and the original key was intact every time. The same run on 0.14.2
+  made a new identity in 14 of 100 starters, and destroyed the key in every round that had a by-id directory.
+- **A start never makes an identity where one exists.** Before it makes one it checks that no 0.13 `identity.json`
+  sits under the name (in `nodes/<name>/` or `SYM_IDENTITY_DIR/<name>/`); if one does and could not be migrated it
+  halts (`IdentityHaltError`) and says why. A name that indexes a node whose identity is missing halts too.
+  `create: false` still throws `IdentityAbsentError`. Behaviour change: a node whose `identity.json` was deleted by hand
+  to "start over" now halts instead of silently becoming a new agent; to start the name again as a different agent,
+  remove the file the message names (`nodes/by-name/<name>.json`).
+- **Key files are private.** After a migration `identity.json` and `e2e-keypair.json` are 0600 and the directories that
+  hold them 0700; loading an identity narrows an existing key file (and the E2E keypair beside it), so nodes already
+  migrated by 0.14.0 to 0.14.2 are healed on their next start. A new identity's directory is 0700. Best effort on a
+  file this process does not own, and a no-op on Windows.
+- **A rewrite of `identity.json` is atomic** (a private temp file, synced, renamed over it).
+- **A move across file systems copies, verifies byte for byte, then removes the source.** A failed copy is removed and
+  the source left as it was.
+- An identity with a public key and no private key halts. A live 0.13 directory's identity is checked against the
+  tombstone. A symlink at `nodes/<name>` that is not a by-id link is reported `not-a-node`.
+- `SYM_IDENTITY_DIR` switched on for a 0.13 node whose identity is still in `nodes/<name>/` halts and tells the
+  operator to copy it to `SYM_IDENTITY_DIR/<name>/identity.json`. It does not move it for them (see below).
+
+### Known, not fixed here
+
+- `migrateIdentities()` still counts and discards any error from a single node (including the halts above); only the
+  counters it returns. The node's own start (`loadIdentity`) raises them, so a start is loud. Whether the bulk call
+  should report them is open.
+- `loadIdentity({ nodeId, name })` still re-points a name that already indexes a different node.
+- `SYM_IDENTITY_DIR` switched on for an existing node does not move its key for you (it halts and says how).
+- `loadIdentity({ nodeId, name, create: true })` with a `nodeId` the name index does not hold and no identity file still
+  makes a new identity under a new nodeId (it does not use the one given).
+
+### Tests
+
+- `tests/identity-migration-by-id.test.js`: 36 tests (35 run on macOS; one real cross-filesystem test runs on Linux).
+  30 of them fail on 0.14.2; five pin behaviour that did not change, and one runs only on Linux. The code is mutation-tested: seventeen
+  mutants of `lib/config.js` (each guard and each ordering removed in turn), each caught by at least one test.
+
 ## 0.14.2 — 2026-10-14
 
 **The daemon's start lock, hardened after review.** 0.14.1 replaced an unsound inode-number guard with a start lock
