@@ -254,9 +254,15 @@ is unchanged except where a line says so.
 
 #### Tests
 
-- `tests/node-lifecycle.test.js` (8), `tests/relay-redelivery.test.js` (4), `tests/relay-resilience.test.js` (9),
+- `tests/node-lifecycle.test.js` (8), `tests/relay-redelivery.test.js` (5), `tests/relay-resilience.test.js` (10),
   `tests/ipc-utf8.test.js` (3), `tests/daemon-long-socket-path.test.js` (1), `tests/frame-parser-linear.test.js` (2),
-  `tests/socket-identity.test.js` (2). TESTS_BEFORE_LINE
+  `tests/socket-identity.test.js` (2): 31 tests, of which 30 fail on 0.14.2 (run on a `git archive` of 632b95d) and
+  one pins parsing that did not change. A few of the 30 fail there only because what they check is new (the
+  held-record list, `identityRetry: false`, `stampSocket`, the line reader); the rest fail on the behaviour R3
+  reported. They pass on macOS (Node 22) and on Linux in `node:22-slim` and `node:20-slim`. The relay runs R3 made
+  were repeated against sym-relay 0.5.2 and the current `origin/main` (0.7.0) on localhost: the oversized-envelope
+  and padded-roster attacks no longer close the victim's connection on 0.5.2 (the current relay already bounds
+  both), and a member evicted by a spoofed 4004 is back on either relay after its retry.
 - `tests/relay-state.test.js`: the 4004 and 4006 cases now pin the long-backoff retry.
 
 ## 0.14.2 — 2026-10-14
