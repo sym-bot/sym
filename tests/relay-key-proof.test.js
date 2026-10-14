@@ -358,3 +358,59 @@ test('a SymNode proves its key, reports it in status(), and its identity-collisi
     assert.match(n.status().relayStatus, /another process proved this identity's key on this relay; this one stopped/);
   } finally { await n.stop(); await r.close(); }
 });
+
+test('fromKey (receiver): a frame stamped with a key other than the one bound to its nodeId is dropped before any session, and the bound peer is unaffected', async () => {
+  const bound = identity('fk-bound');
+  let sock = null;
+  const r = relay({ after: (ws) => { sock = ws; } });
+  await r.ready;
+  const id = identity('fk-recv');
+  const node = new SymNode({ name: `fk-${process.pid}`, silent: true, discovery: new NullDiscovery(), relay: r.url(), relayToken: TOKEN });
+  const metrics = [];
+  node.on('metric', (m) => { if (m.type === 'relay-frame-wrong-key') metrics.push(m); });
+  try {
+    await node.start();
+    await until(() => node.status().relayState.phase === 'connected', 5000);
+    // Bind bound.publicKey for a peer nodeId, as a confirmed session would.
+    const peer = '01900000-0000-7000-8000-0000000000f7';
+    node._roster.bind(peer, bound.publicKey, 'pinned');
+    const impostor = identity('fk-imp');
+    // The impostor's slot (its own key) sends a client-hello "from" the bound peer.
+    sock.send(JSON.stringify({ from: peer, fromName: 'imp', fromKey: impostor.publicKey, payload: { type: 'client-hello', junk: 1 } }));
+    await wait(300);
+    assert.equal(metrics.length, 1, 'the wrong-key frame was dropped and counted');
+    // A frame genuinely from the bound key is not dropped (it reaches a session, which refuses the junk — but not as wrong-key).
+    const before = metrics.length;
+    sock.send(JSON.stringify({ from: peer, fromName: 'peer', fromKey: bound.publicKey, payload: { type: 'client-hello', junk: 1 } }));
+    await wait(200);
+    assert.equal(metrics.length, before, 'a frame with the bound key is not dropped as wrong-key');
+  } finally { await node.stop(); await r.close(); }
+});
+
+test('ambiguity (receiver): a nodeId present under two proven keys, none bound, is reported and no session is started for it', async () => {
+  const P = '01900000-0000-7000-8000-0000000000f8';
+  const k1 = identity('amb1').publicKey, k2 = identity('amb2').publicKey;
+  let sock = null;
+  const r = relay({ after: (ws) => { sock = ws; } });
+  await r.ready;
+  const node = new SymNode({ name: `amb-${process.pid}`, silent: true, discovery: new NullDiscovery(), relay: r.url(), relayToken: TOKEN });
+  const amb = [], resolved = [];
+  node.on('identity-ambiguity', (e) => amb.push(e));
+  node.on('identity-ambiguity-resolved', (e) => resolved.push(e));
+  try {
+    await node.start();
+    await until(() => node.status().relayState.phase === 'connected', 5000);
+    const a = (name, key) => sock.send(JSON.stringify({ type: 'relay-peer-joined', nodeId: P, name, key, proven: true }));
+    a('one', k1);
+    await wait(100);
+    a('two', k2);
+    assert.ok(await until(() => amb.length === 1, 2000), 'the ambiguity is reported');
+    assert.deepEqual(amb[0].keys.slice().sort(), [k1, k2].sort());
+    assert.equal(node.status().coreSecure.identityAmbiguities.length, 1, 'and shown in status');
+    assert.equal(node.status().relayState.identityAmbiguous, 1);
+    // One rival leaves: the ambiguity resolves to the remaining proven key, first proven use as usual.
+    sock.send(JSON.stringify({ type: 'relay-peer-left', nodeId: P, name: 'two', key: k2, proven: true }));
+    assert.ok(await until(() => resolved.length === 1, 2000), 'resolved when one key remains');
+    assert.equal(node.status().coreSecure.identityAmbiguities.length, 0);
+  } finally { await node.stop(); await r.close(); }
+});
