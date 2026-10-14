@@ -45,12 +45,17 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   binding is earned — an admitted verified record, a verified record its author signed to this
   node and this node accepted for delivery (directed exchange is a relationship, so a squatter
   cannot take over a conversation once its peer's sessions end), an out-of-band pin (invite, Legacy
-  Import route), or an in-force grant (MMP §6.6.9: a view over the in-force set, never stored, binding
-  only an unbound nodeId, and ending with the grant) — and never replaces it: a different key, from any source or
-  while a session holds the nodeId, is a recorded conflict an operator resolves (a session
-  proving it is closed with error 1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one,
-  earns nothing; nothing is evicted before it expires; a `proven` binding that verified nothing
-  expires after 30 days unseen. This node's own nodeId is always its own key. Keys pinned before
+  Import route), or an in-force grant (MMP §6.6.9 as narrowed in 0.14.3: only an unscoped grant whose
+  chain is the anchor and `admin` grants; a view over the in-force set, never stored, binding only a
+  nodeId nothing else binds, and ending with the grant: a session proving the key it names stores
+  nothing, and a session proving another key is admitted on its own proof with the conflict recorded,
+  never refused) — and never replaces it: a different key, from any source or while a session holds
+  the nodeId, is a recorded conflict an operator resolves (a session proving it is closed with error
+  1009 `IDENTITY_CONFLICT`, sealed). A handshake, or a second one, earns nothing; nothing is evicted
+  before it expires; a `proven` binding that is new (it verified nothing, or only within one day)
+  expires after 30 days unseen, and new bindings hold at most a quarter of the registry; one that
+  verified records on occasions a day or more apart expires after 180 days unseen. A scoped grant
+  binds no key: it confers its role inside its scope only. This node's own nodeId is always its own key. Keys pinned before
   0.14 — from unproven hellos, or from 0.13 grants never checked against their grantors — become
   `legacy-claim`: expected, never trusted to verify, so a squatter racing the upgrade cannot take
   an honest node's id.
@@ -118,9 +123,16 @@ Report a vulnerability privately to info@sym.bot (the address in package.json). 
   must be of prime order too. Tested with the published vectors (ed25519-strict-v2.json) and, at each
   of those sites, with two signatures Node's `crypto.verify` accepts and the rule rejects (the
   identity key's universal forgery, and R = identity with S = k·a).
-- **A forgery in a session's own name ends the session.** A statement that names the session's own
-  peer as its signer and does not verify under the key that session proved closes it, and its
-  nodeId is not admitted again for 60 s. A statement the session relays for another signer is
+- **A forgery in a session's own name ends the session — when the whole statement travelled sealed.**
+  An attestation, checkpoint or witness (sealed whole in `control-encrypted`) that names the session's
+  own peer as its signer and does not verify under the key that session proved closes it, and its
+  nodeId is not admitted again for 60 s. A RECORD is never charged this way (0.14.3): in `cmb-encrypted`
+  its signature, `createdBy`, `createdTimestamp`, lineage and application descriptor travel in clear,
+  outside the AEAD, so a relay or an on-path writer could break them on an honest record. The
+  receiver checks the AAD-bound assertionId first (§8.8.5) and drops and counts a record whose
+  assertionId or signature fails (`cmb-clear-metadata-altered`, `cmb-signature-unattributable`). A
+  verification lane also spends a record's size (1 MiB/s, burst 4 MiB), and the SVAF lane its size too
+  (128 KiB/s, burst 1.5 MiB). A statement the session relays for another signer is
   verified under this node's binding for that signer, which may differ from the relayer's (a local
   view); one that fails is dropped and counted (`relayed-signature-unverified`), and the relayer is
   not charged. Not charging it does not make forgeries free: each session's records spend a
@@ -215,10 +227,14 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
   is never dropped for budget and never spends more than the lane holds. Resolving, which is linear
   in the held set and not charged to any lane, is paced instead: a node resolves when it settles, at
   most once per twice the time its last resolution took, and a pull's end is decided at the next
-  settle, never by a resolution forced for it. A ceiling of 4,000
-  verified statements a second in all (burst 20,000) is spent only after the check; checkpoints at most
-  4 a second per attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses
-  per position.
+  settle, never by a resolution forced for it. One global budget of 4,000 checks a second in all
+  (burst 20,000) is spent before the check too, each peer through its fair share of it (4,000 / n a
+  second, n the peers that sent gossip in the last 10 s), so the checks made are bounded whatever the
+  number of sessions and no peer spends another's share (0.14.3); checkpoints at most 4 a second per
+  attester (burst 128); at most 1,024 attesters, 32 checkpoints each, 256 witnesses per position. An
+  attester this node holds equivocation evidence against is never evicted (when every place holds
+  one, a new attester is refused), and what this node witnessed is never forgotten (past 65,536
+  attesters, a new one is not witnessed).
 - **Records** (MMP §8.8.6, MMP 2.0 update 1): a category's text at most 256 KiB after NFC, the seven
   at most 512 KiB, the two-section record's RFC 8785 length at most 720 KiB, so every record fits
   one sealed frame. This node mints nothing larger, and refuses a received record over any limit
@@ -308,9 +324,16 @@ Every store a peer can feed has a fixed bound. Reaching one never stops the node
 - **Relay eviction.** `relay-auth` identity is not proven (MMP §4.4.1), and the relay replaces a
   connection that re-authenticates under the same nodeId (close 4004, §4.4.7). A token holder
   can therefore interrupt another node's relay path. It cannot impersonate it: it gets no
-  session without the key. The client stops for good on 4004 and 4006 (the existing holder is the
-  legitimate one), and says so in status, so an eviction is visible rather than a reconnect loop.
-  Every other close is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
+  session without the key. Until 0.14.3 the client stopped for good on 4004 and 4006, so one
+  claim switched a member off until it restarted. Since 0.14.3 it retries on a long backoff (1 min,
+  doubling to 30 min), says each close loudly in its log and status, and detects a ping-pong (three
+  identity closes in 30 min: two live processes replacing each other), which it reports as that and
+  retries only every 30 min. A token holder that keeps claiming the nodeId still keeps the member
+  off the relay for most of the time, and a host that exits on `identity-collision` still exits on
+  the first claim: exit on `info.pingPong` instead. Only a relay-side key proof ends this; it needs
+  a spec ruling (MMP §4.4.7 says a client MUST NOT reconnect after 4004, which this departs from)
+  and is not implemented. `relayIdentityRetry: false` keeps §4.4.7 as written. Every other close
+  is reconnected with backoff, 4007 included: relay-auth key proof (MMP spec PR
   meshcognition-website#20) is deferred past 0.14.0, and its review found that never reconnecting
   after 4007 makes a lockout.
 - **No key rotation** (MMP §3.4). A compromised key means a new identity.

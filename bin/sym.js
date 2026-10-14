@@ -2,6 +2,7 @@
 'use strict';
 
 const { recordCreatedBy } = require('../lib/record');
+const { logSafe } = require('../lib/wire-identity'); // peer-chosen text on the terminal (R2-18)
 
 /**
  * sym — CLI for the SYM mesh.
@@ -46,7 +47,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync, spawn } = require('child_process');
 
-const { getSocketPath, getLogDir } = require('../lib/platform');
+const { getSocketPath, getLogDir, checkIpcEndpoint } = require('../lib/platform');
 const { isValidRoom } = require('../lib/rooms');
 // The CLI's state lives where its daemon's does (SYM_STATE_DIR, default ~/.sym): rooted in the
 // home, two SYM_STATE_DIR deployments shared one pid file (`sym stop` for one stopped the other),
@@ -885,12 +886,14 @@ function broadcastQuestion(question) {
       try { socket.removeAllListeners('data'); socket.destroy(); } catch {}
       resolve(v);
     };
+    checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
     const socket = net.createConnection(SOCKET_PATH, () => {
       socket.write(JSON.stringify({ type: 'hello' }) + '\n');
     });
+    socket.setEncoding('utf8'); // whole characters across reads (R3-7)
     let buffer = '';
     socket.on('data', (data) => {
-      buffer += data.toString();
+      buffer += data;
       let idx;
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx); buffer = buffer.slice(idx + 1);
@@ -984,12 +987,14 @@ function cmdListen() {
     console.error('sym-daemon is not running. Start it with: sym start');
     process.exit(1);
   }
+  checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
   const socket = net.createConnection(SOCKET_PATH, () => {
     socket.write(JSON.stringify({ type: 'listen' }) + '\n');
   });
+  socket.setEncoding('utf8'); // whole characters across reads (R3-7)
   let buffer = '';
   socket.on('data', (data) => {
-    buffer += data.toString();
+    buffer += data;
     let idx;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx);
@@ -1003,14 +1008,14 @@ function cmdListen() {
         }
         if (msg.event === 'cmb-accepted') {
           const d = msg.data;
-          console.log(`[${d.source}] ${d.focus}`);
+          console.log(`[${logSafe(d.source)}] ${logSafe(d.focus)}`);
         } else if (msg.event === 'message') {
           const d = msg.data;
-          console.log(`[message from ${d.from}] ${d.content}`);
+          console.log(`[message from ${logSafe(d.from)}] ${logSafe(d.content)}`);
         } else if (msg.event === 'peer-joined') {
-          console.log(`[+] ${msg.data.name} joined`);
+          console.log(`[+] ${logSafe(msg.data.name)} joined`);
         } else if (msg.event === 'peer-left') {
-          console.log(`[-] ${msg.data.name} left`);
+          console.log(`[-] ${logSafe(msg.data.name)} left`);
         } else if (jsonFlag) {
           console.log(JSON.stringify(msg));
         }
@@ -1109,8 +1114,8 @@ function formatPeers(msg) {
   console.log(`${peers.length} peer(s):\n`);
   for (const p of peers) {
     const via = p.via || (p.relay ? 'relay' : 'lan');
-    console.log(`  ${bold(p.name || p.nodeId)} ${dim('via ' + via)}`);
-    if (p.mood) console.log(`    mood: ${p.mood}`);
+    console.log(`  ${bold(logSafe(p.name || p.nodeId))} ${dim('via ' + logSafe(via))}`);
+    if (p.mood) console.log(`    mood: ${logSafe(p.mood)}`);
   }
 }
 
@@ -1160,6 +1165,7 @@ function cmdIPC(msg, formatter) {
     process.exit(1);
   }
 
+  checkIpcEndpoint(SOCKET_PATH); // a mapped endpoint only in this user's private directory (R3-6)
   const socket = net.createConnection(SOCKET_PATH, () => {
     // For status, no registration needed — send raw
     if (msg.type === 'status') {
@@ -1171,6 +1177,7 @@ function cmdIPC(msg, formatter) {
     // virtual node — design D8).
     socket.write(JSON.stringify({ type: 'hello' }) + '\n');
   });
+  socket.setEncoding('utf8'); // whole characters across reads (R3-7)
 
   let buffer = '';
   let registered = false;
@@ -1181,7 +1188,7 @@ function cmdIPC(msg, formatter) {
   }
 
   socket.on('data', (data) => {
-    buffer += data.toString();
+    buffer += data;
     let idx;
     while ((idx = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, idx);

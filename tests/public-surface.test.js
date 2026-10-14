@@ -145,7 +145,7 @@ describe('the public surface of the installed package', () => {
     assert.deepEqual(b.uniform, { focus: 1, issue: 1, intent: 1, motivation: 1, commitment: 1, perspective: 1, mood: 1 });
     assert.deepEqual(b.encode, [32, 32, 32]);
     assert.match(b.categoryKey, /^[0-9a-f]{64}$/);
-    assert.deepEqual(b.verifyUnsigned, { signed: false, valid: false });
+    assert.deepEqual(b.verifyUnsigned, { signed: false, valid: false, suite: 'mmp-sig-v2', coreSecure: false });
     assert.equal(b.kernel, 'ngram-h32', 'with SYM_SEMANTIC_ENCODER=off the kernel is the n-gram one');
     assert.deepEqual(b.semantic, ['h1', 'h2']);
     assert.equal(b.cannotWrite, 'refused', 'the frozen constants cannot be written');
