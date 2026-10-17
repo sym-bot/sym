@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * §15.8 on the remix path (founder ruling, 0.14.0): remix() is asynchronous and evaluates what it
+ * §15.8 on the remix path (0.14.0): remix() is asynchronous and evaluates what it
  * produces against its nearest verified lineage root before it is minted. A faithful remix keeps its
  * lineage, a remix drifted past the reject floor is minted as a fresh root, and one with no verified
  * root in reach keeps its lineage, unverified; each verdict is signed as an mmp-tether-v1 attestation.

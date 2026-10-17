@@ -2,8 +2,8 @@
 
 /**
  * Room join authorization — the grant (core/room-grant.js) and the receiver's
- * ownership registry (room-ownership.js). Founder ruling 2026-08-26, option B as
- * folded by the mesh review; every ruled property is pinned here.
+ * ownership registry (room-ownership.js). Decision 2026-08-26, option B as
+ * folded by the mesh review; every decided property is pinned here.
  */
 
 const { describe, it } = require('node:test');

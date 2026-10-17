@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * sym-attest-v1 as MMP 2.0 update 1 registers it (#27), and the founder's rulings for it: what this
+ * sym-attest-v1 as MMP 2.0 update 1 registers it (#27), and the decisions for it: what this
  * node never attests or relays (S3), the wire grammar (closed attestation, lowercase UUID signers, a
  * role of up to 64 characters, a method of up to 32), equivocation relayed once as evidence, the
  * scope of an attester's role judged on the record its assertion names, and no checkpoint root over

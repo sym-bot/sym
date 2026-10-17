@@ -10,9 +10,8 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  *
  * Measured live 2026-08-09 — sym-daemon-mac: seq=96, cursor=0. Ninety-six
  * messages, never drained once, span 08-06 → 08-09 and still accumulating.
- * Five of them were CMBs addressed directly to the dev seat, two carrying
- * founder words. Every seat node beside it drained normally, so the condition
- * was specific and detectable — nobody could detect it.
+ * Five of them were CMBs addressed directly to the dev seat. Every seat node beside it
+ * drained normally, so the condition was specific and detectable — nobody could detect it.
  *
  * Worse, the ring silently shredded its own backlog. _inbox.shift() evicted
  * oldest-first without asking whether the message had ever been read, so a

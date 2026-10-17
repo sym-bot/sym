@@ -4,7 +4,7 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
  * The session frames as MMP 2.0 update 1 (meshcognition-website main at c07ff20) defines them: the
- * mood frame by the founder's ruling, cmb-fetch and cmb-fetch-result as their schemas close them,
+ * mood frame, cmb-fetch and cmb-fetch-result as their schemas close them,
  * fetched records verified by the whole of §8.8.5 (D4), cmb-anchors as §9.4 sends it, a clear 1011
  * acted on only when it names this node's session or answers its probe, sealed ping and pong, and the
  * control envelope's bounds. Each test fails on 958592a.
@@ -40,7 +40,7 @@ function capture(session) {
 }
 const HEX = () => crypto.randomBytes(32).toString('hex');
 
-describe('the mood frame: {type, mood, context, timestamp} (founder ruling, #26)', () => {
+describe('the mood frame: {type, mood, context, timestamp} (#26)', () => {
   it('is sent with no sender fields, and the text and context are bounded', async () => {
     try {
       const A = node('m-a'); const B = node('m-b');

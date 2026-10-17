@@ -11,8 +11,8 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  * every answer it did not recognise as "no such agent" and MINTED: it renamed the 0.13 directory (the old
  * identity.json still in it) onto the new node's path and wrote the new identity over the old key.
  *
- * The tests below hold the line the founder drew ("the system must refuse to start rather than silently
- * create a replacement identity"): a name that has an identity on this host never gets a new one.
+ * The tests below hold one line: the system refuses to start rather than silently create a replacement
+ * identity, so a name that has an identity on this host never gets a new one.
  * Every test uses its own agent name; the state root is shared by the file, as in config.test.js.
  */
 

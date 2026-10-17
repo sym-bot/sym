@@ -4,7 +4,7 @@ require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
  * sym 0.14.0 aligned with the MMP 2.0 update 1 drafts it implements (the session and sealed-control
- * set: #26, #30, #31, #37, #23), the founder's rulings for that update, and the reviews of each draft
+ * set: #26, #30, #31, #37, #23), the decisions for that update, and the reviews of each draft
  * against sym 390b4af. Each test here fails on 390b4af.
  */
 

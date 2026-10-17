@@ -1,7 +1,7 @@
 'use strict';
 
-// The product name is never "xMesh" (user, 2026-10-02: "don't use any xMesh, use xmesh in code, and XMesh in
-// sentence and XMESH for brand or product name"). This walks every README, doc, comment and log string in the
+// The product name is never "xMesh": it is XMesh in a sentence, XMESH for the brand or product name, and xmesh in
+// code. This walks every README, doc, comment and log string in the
 // repo and fails on the camel-case spelling. Identifiers are untouched by it: the XMesh class, the
 // _handleXMeshInsight handler and XMESH_* names do not match, and nothing in the code is named xMesh.
 // Lowercase xmesh is the spelling for code (package, paths, CLI, wire ids) and is not checked here: telling a

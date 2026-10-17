@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Durable delivery inbox (founder ruling 2026-08-04): communication is
+ * Durable delivery inbox (decision 2026-08-04): communication is
  * addressed to the NODE, and a new session RELINKS to it — including what
  * was delivered while no session was attached. Before this, the inbox was
  * process memory only: a restart wiped the delivery feed while every sender

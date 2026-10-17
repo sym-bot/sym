@@ -16,8 +16,8 @@
 > key, a gated room admits only its owner. Nothing in the estate gates a room today — no owner pins
 > on any node — so this closed a hole rather than breaking a user.
 
-**Date:** 2026-08-26 · **Author:** dev1 (sym runtime lane) · **Status:** v2 — mesh review SHIP-WITH-FIXES folded (x-review cmb-3e58586f…, 12 findings, all applied); FOUNDER RULED 2026-08-26: (1) grammar fix NOW, ahead of the gate; (2) ADOPT B AS FOLDED (owner-only, 24h lifetime, join-time expiry, handshake enforcement, default+sym public). Implementation = ordinary mesh-reviewed sym-lane work
-**Prior:** the C+D standing-rooms ruling (xmesh docs/DESIGN-tenancy-standing-rooms.md, founder
+**Date:** 2026-08-26 · **Author:** dev1 (sym runtime lane) · **Status:** v2 — mesh review SHIP-WITH-FIXES folded (x-review cmb-3e58586f…, 12 findings, all applied); DECIDED 2026-08-26: (1) grammar fix NOW, ahead of the gate; (2) ADOPT B AS FOLDED (owner-only, 24h lifetime, join-time expiry, handshake enforcement, default+sym public). Implementation = ordinary mesh-reviewed sym-lane work
+**Prior:** the C+D standing-rooms ruling (xmesh docs/DESIGN-tenancy-standing-rooms.md,
 2026-08-26) names this as its residual: "sym resolves rooms by string … full closure needs
 sym-side join authorization." This is that design.
 

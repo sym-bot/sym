@@ -5,9 +5,9 @@ require('./_isolate-home'); // sandbox HOME/USERPROFILE before anything reads os
 /**
  * B-3 / AC-3.2 — the system refuses to start rather than replace an identity.
  *
- * Founder ruling D-04: "An agent may lose its machine and recover its data, but if it loses its
- * private key, it cannot prove that it is the same agent. Therefore the key must be preserved,
- * and the system must refuse to start rather than silently create a replacement identity."
+ * Decision D-04: the private key is what makes an agent the same agent. An agent can lose its
+ * machine and still recover its data, but without its key it can no longer prove it is itself, so
+ * the system refuses to start rather than silently create a replacement identity.
  *
  * What this replaces was quiet and destructive: an unreadable identity.json logged a warning,
  * generated a fresh keypair, and OVERWROTE the file. The agent kept its name and lost the only
@@ -65,8 +65,8 @@ test('unparseable identity HALTS and does not touch the file', () => {
     assert.throws(() => cfg.loadOrCreateIdentity('agent-b@mesh'), (e) => {
       assert.equal(e.name, 'IdentityHaltError');
       assert.match(e.message, /REFUSING TO START/);
-      // The ruling itself is in the operator-facing text, not just in a doc.
-      assert.match(e.message, /refuse to start rather than silently create a replacement identity/);
+      // The rule itself is in the operator-facing text, not just in a doc.
+      assert.match(e.message, /refuses to start rather than silently create a replacement identity/);
       return true;
     });
 
@@ -163,7 +163,7 @@ test('AC-3.2: no `-2` identity can be created by any path', () => {
 
 test('the lease refuses a second holder and never suggests renaming', (t) => {
   // The old error advised "set a different SYM_NODE_NAME", which under agent-id-is-identity
-  // is advice to become a different agent — the exact move the ruling forbids.
+  // is advice to become a different agent — the exact move the rule forbids.
   //
   // The foreign holder is a real, live child process recorded with its real start time — the
   // current lock format exactly as a running holder writes it. This used to be PID 1 with a

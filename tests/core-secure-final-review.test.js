@@ -3,10 +3,9 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * The final re-review of f0d936a (BLOCK): the founder's three rulings and the findings beside them,
- * each as a regression test that fails on f0d936a. The reviewer's repros are in
- * /private/tmp/claude-501/-Users-hongwei-sym-agent-a/sym-014-final-review/ (grant-probes.js P1-P4,
- * node-probes.js Q1, digest-churn.js, fork-a, fork-b).
+ * The final re-review of f0d936a (BLOCK): the three design changes (rulings A, B and C) and the findings
+ * beside them, each as a regression test that fails on f0d936a. The reviewer's repros (grant-probes.js
+ * P1-P4, node-probes.js Q1, digest-churn.js, fork-a, fork-b) were written outside this repository.
  *
  *   A, B  retired with the time-replay grant rule (MMP §6.6; see below)
  *   C  the interior read side is scoped to the mind's mission (Finding 6)
