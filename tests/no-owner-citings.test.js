@@ -51,7 +51,7 @@ const NAMES = [['hong', 'wei'].join(''), ['hong', ' wei'].join(''), ['mx', 'mich
 const RULES = [
   { name: 'personal name or address', re: new RegExp(NAMES.join('|'), 'i') },
   { name: 'the user as the source of a decision', re: /\bthe user (?:said|asked|ruled|wants|approved|decided|told)\b|\buser ruling\b|\buser(?:'|’)s (?:ruling|word|rule)\b/i },
-  { name: 'an executive or the owner as the source of a ruling', re: /\b(?:ceo|cto|coo|boss)(?:'s|’s)? (?:ruling|rulings|ruled|decision|decided|said|canon|approval)\b|\b(?:owner|user)(?:'s|’s)? (?:ruling|rulings|ruled|canon)\b/i },
+  { name: 'an executive or the owner as the source of a ruling', re: /\b(?:ceo|cto|coo|boss)(?:'s|’s)? (?:ruling|rulings|ruled|decision|decided|said|canon|approval|gate|measured)\b|\b(?:owner|user)(?:'s|’s)? (?:ruling|rulings|ruled|canon)\b/i },
   { name: 'a request or approval attributed to someone', re: /\b(?:as|per) (?:requested|asked|ruled|decided|instructed) by\b|\bper the (?:user|owner|ceo|cto|boss)\b/i },
   { name: 'a dated attribution, "(user, 2026-10-02: ...)"', re: /\((?:user|owner|boss|ceo|cto|coo),? *\d{4}-\d{2}-\d{2}/i },
 ];
@@ -161,6 +161,7 @@ describe('the scanner itself (a planted tree, no .git: the directory-walk path)'
     'a ruling credited to the user': `// per the ${T.u} ruling, no suffixes`,
     'a dated user attribution':      '// the name is never spelled so (user, 2026-10-02: "use it in code")',
     'an executive ruling':           '// (CTO ruling, 2026-08-07)',
+    'an executive gate':             '// stays reserved until an ack earns it (CTO gate on a371021)',
     'a requested-by line':           '// added as requested by the boss',
     'the owner\'s name':             `// agreed with ${T.name} on the call`,
     'the owner\'s address':          `contact: ${T.mail}`,
