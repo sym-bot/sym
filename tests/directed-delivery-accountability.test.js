@@ -19,7 +19,7 @@ require('./_isolate-home'); // redirect $HOME to a temp sandbox before lib/confi
  *   the seat) therefore reported success for sends that reached no one.
  *
  *   Live consequence: five directed CMBs addressed to the dev seat — including
- *   a founder authorization and a founder question — sat undelivered for three
+ *   an authorization and a question — sat undelivered for three
  *   days while every sender believed it had delivered. Two seats independently
  *   built prose workarounds ("RELAY FOR DEV") around a channel that was
  *   reporting success.

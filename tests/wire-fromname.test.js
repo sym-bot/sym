@@ -25,7 +25,7 @@ const { admitAs, deliver, identity } = require('./_core-secure');
 
 describe('a frame\'s fromName is taken as text (R5)', () => {
   // 0.14: frames arrive on a confirmed session (design D1); the session's proven name is the fallback.
-  // MMP 2.0 update 1 (founder ruling): the mood frame names no sender. A mood frame carrying any
+  // MMP 2.0 update 1: the mood frame names no sender. A mood frame carrying any
   // fromName is not that frame and is refused; the event is labelled with the session's proven name.
   it('mood: a frame naming a sender is refused, whatever its fromName; the session\'s name labels the rest', () => {
     const name = uniq('fromname-mood');

@@ -83,7 +83,7 @@ test('P-6: a pre-boundary block is REFUSED — grandfathering is retired', async
   // That policy required reading the audience under its retired name, because the companion case
   // below — a pre-boundary block from the WRONG audience — still had to be refused. Surfacing and
   // audience-checking together are only possible while the old name is still read, and the old
-  // name is gone (founder ruling 2026-08-09: remove all fallback and dead v1 code).
+  // name is gone (decision 2026-08-09: remove all fallback and dead v1 code).
   //
   // So the audience of such a record can no longer be established, and core refuses it as
   // `unreadable-audience` rather than treating an absent room as a broadcast. Refusing is the

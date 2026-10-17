@@ -124,8 +124,8 @@ describe('remember({to}) — MMP §4.4.4 targeted CMB send', () => {
       // test asserted the local write and stopped, so a GREEN here certified a
       // send that reached nobody and reported success. The store surviving a
       // partition is necessary and was never the question — the question is
-      // whether the CALLER can tell. Five directed CMBs, two of them founder
-      // words, were lost for three days under this green.
+      // whether the CALLER can tell. Five directed CMBs were lost for three days
+      // under this green.
       assert.strictEqual(entry.delivery.undelivered, true,
         'a directed send that reached no peer must be reported as undelivered');
       assert.strictEqual(entry.delivery.dispatched, 0, 'no frame was even handed to a transport');

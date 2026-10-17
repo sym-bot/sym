@@ -632,7 +632,7 @@ carried (cutoffs, ratification, budgets per delegation subtree, `role-chain-fetc
 
 ### MMP 2.0 update 1: the drafts this release implements, as the spec now states them
 
-The founder ruled that the drafts sym 0.14.0 implements land in the published spec before it ships.
+The drafts sym 0.14.0 implements land in the published spec before it ships.
 They are folded into one update, MMP 2.0 update 1 (sym-bot/meshcognition-website PR #43, merged to main at
 c07ff20: #24, #25, #17, #22, #26, #30, #23, #31, #37, #34, #35, #27 and #28 on the §6.6 errata), and sym is aligned with its text, its reference
 construction (scripts/mmp/lib.mjs) and its schemas and vectors, vendored in tests/fixtures with their
@@ -653,7 +653,7 @@ sym-attest-v1 pass case by case, and every frame sym builds validates against th
   `detail` names this node's session or a probe ping is outstanding, while no newer session is
   waiting to supersede, and no faster than the retry backoff (fifty forged 1011s with no detail
   bought three re-handshakes in five seconds; now none). A sealed ping is answered with a pong.
-- **The mood frame (founder ruling).** `{ type, mood, context, timestamp }`: mood 1 to 1,024
+- **The mood frame.** `{ type, mood, context, timestamp }`: mood 1 to 1,024
   characters, context at most 4,096 or null; no `from` or `fromName` (the receiver labelled the event
   with the payload's name); a frame carrying them is refused. `broadcastMood` throws `EMOODFRAME`
   rather than send one out of bounds.
@@ -720,7 +720,7 @@ sym-attest-v1 pass case by case, and every frame sym builds validates against th
 
 ### Breaking: `remix()` is asynchronous, and §15.8 runs on what it produces
 
-By the founder's ruling, §15.8 is enforced where the spec puts it, on the remixing node, in 0.14.0.
+§15.8 is enforced where the spec puts it, on the remixing node, in 0.14.0.
 `node.remix(categories, opts)` now evaluates the remix against its nearest verified lineage root
 (content-only, one kernel, α-weighted drift against Tguarded) before it is minted: a faithful remix
 keeps its lineage; one drifted past the floor is minted as a fresh root, with no parent from the
@@ -774,8 +774,8 @@ key (below), whose records are quarantined. Upgrade every node of a room togethe
   peer sent it, under the key that session proved (the frame is sealed on the session); it is not a
   signed record. Nothing about it can be verified again later, relayed with its author's signature,
   or attributed to anyone but that peer. A host shows it as the peer's word, not as a verified record.
-  The mood frame is `{ type, mood, context, timestamp }` (MMP 2.0 update 1, by the founder's
-  ruling): it names no sender, and `mood-delivered.from` is the session's proven name.
+  The mood frame is `{ type, mood, context, timestamp }` (MMP 2.0 update 1): it names no
+  sender, and `mood-delivered.from` is the session's proven name.
 
 ### The loaded version, and hot-swap
 
@@ -788,7 +788,7 @@ key (below), whose records are quarantined. Upgrade every node of a room togethe
   own, redelivers nothing the peer re-pushes, keeps every earlier id fetching its record, and logs no
   null dereference (on 0.13 this broke as "Cannot read properties of null (reading 'close')").
 
-### Redelivery and inbox ids (founder's bug report, 2026-10)
+### Redelivery and inbox ids (bug report, 2026-10)
 
 - **A delivery is surfaced once for the life of the store.** After a hot-swap (a new SymNode for the
   same identity, as mesh-channel's `sym_join_room` builds) or a reconnect, records already received
@@ -812,7 +812,7 @@ key (below), whose records are quarantined. Upgrade every node of a room togethe
 
 ### The final re-review of f0d936a (BLOCK) — what changed
 
-The founder ruled three design changes. Rulings A and B (what grants are kept, and what a revoked
+Three design changes were settled (rulings A, B and C). A and B (what grants are kept, and what a revoked
 key may still sign) are met by MMP §6.6 itself (above): authority is a function of the statements
 held, and no statement carries a time that could place it inside a period of trust.
 
@@ -2350,7 +2350,7 @@ disconnected.
 
 ### Changed
 
-- **Room names must be canonical** (founder ruling 2026-08-27): one name per
+- **Room names must be canonical** (decision 2026-08-27): one name per
   room, one room per name. `isValidRoom` now requires the round trip through
   the service type to be identity, so **`sym` is refused**. It satisfies the
   kebab grammar, maps to `_sym._tcp`, and comes back as `default` — a second

@@ -3,7 +3,7 @@
 require('./_isolate-home'); // redirect $HOME before lib/config loads
 
 /**
- * The redelivery and inbox-id bugs (founder, via agent-b, 2026-10; mesh-channel 0.10.1 on sym 0.13.16,
+ * The redelivery and inbox-id bugs (reported via agent-b, 2026-10; mesh-channel 0.10.1 on sym 0.13.16,
  * and reproduced on 0.14.0 at 6510bac):
  *
  *   Bug 1: after a hot-swap (a new SymNode for the same identity) or a reconnect, CMBs already

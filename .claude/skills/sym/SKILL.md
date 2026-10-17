@@ -154,7 +154,7 @@ Every change you make to SYM.BOT code MUST be production quality:
 - **Fix what you find.** If you spot design issues, missing spec comments, or messy logic — fix them in the same change. No "TODO" or "FIXME" left behind.
 - **Spec compliance.** Code must match the MMP spec. Reference section numbers in comments where relevant.
 - **Clean architecture.** Each module has one responsibility. Proper error handling — not swallowed.
-- **No tech debt.** The founder is solo. Sloppy code today is a blocker tomorrow. The protocol is the product — the implementation must be as rigorous as the spec.
+- **No tech debt.** Sloppy code today is a blocker tomorrow, and the project has no spare capacity to pay it back. The protocol is the product — the implementation must be as rigorous as the spec.
 
 ## Behaviour
 
